@@ -1,0 +1,947 @@
+#[cfg(not(feature = "std"))]
+use core::*;
+#[cfg(feature = "std")]
+use std::*;
+
+use ::alloc::{
+    borrow::ToOwned,
+    string::{FromUtf16Error, String, ToString},
+    vec::*,
+};
+
+use bit_struct::*;
+use bitflags::bitflags;
+
+use crate::{error::*, io::prelude::*, path::PathBuf};
+
+pub const SECTOR_SIZE_MIN: usize = 512;
+pub const SECTOR_SIZE_MAX: usize = 4096;
+
+/// Place this in the BPB _jmpboot field to hang if a computer attempts to boot this partition
+/// The first two bytes jump to 0 on all bit modes and the third byte is just a NOP
+const INFINITE_LOOP: [u8; 3] = [0xEB, 0xFE, 0x90];
+
+#[derive(Debug, Clone, Copy)]
+#[repr(packed)]
+pub struct BootRecordFAT {
+    _jmpboot: [u8; 3],
+    _oem_identifier: [u8; 8],
+    bytes_per_sector: u16,
+    sectors_per_cluster: u8,
+    reserved_sector_count: u16,
+    table_count: u8,
+    root_entry_count: u16,
+    // If this is 0, check `total_sectors_32`
+    total_sectors_16: u16,
+    _media_type: u8,
+    table_size_16: u16,
+    _sectors_per_track: u16,
+    _head_side_count: u16,
+    hidden_sector_count: u32,
+    total_sectors_32: u32,
+
+    // Extended boot record
+    ebr: EBR,
+}
+
+const BOOT_SIGNATURE: u8 = 0x29;
+const FAT_SIGNATURE: u16 = 0x55AA;
+
+impl BootRecordFAT {
+    fn verify_signature(&self) -> bool {
+        match self.fat_type() {
+            FATType::FAT12 | FATType::FAT16 => unsafe {
+                self.ebr.fat12_16.boot_signature == BOOT_SIGNATURE
+                    && self.ebr.fat12_16.signature == FAT_SIGNATURE
+            },
+            FATType::FAT32 => unsafe {
+                self.ebr.fat32.boot_signature == BOOT_SIGNATURE
+                    && self.ebr.fat32.signature == FAT_SIGNATURE
+            },
+            FATType::ExFAT => todo!("ExFAT not yet implemented"),
+        }
+    }
+
+    /// Total sectors in volume (including VBR)
+    pub(crate) fn total_sectors(&self) -> u32 {
+        if self.total_sectors_16 == 0 {
+            self.total_sectors_32
+        } else {
+            self.total_sectors_16 as u32
+        }
+    }
+
+    /// FAT size in sectors
+    pub(crate) fn fat_sector_size(&self) -> u32 {
+        if self.table_size_16 == 0 {
+            let ebr = self.ebr;
+            unsafe { ebr.fat32.table_size_32 }
+        } else {
+            self.table_size_16 as u32
+        }
+    }
+
+    /// The size of the root directory (unless we have FAT32, in which case the size will be 0)
+    /// This calculation will round up
+    pub(crate) fn root_dir_sectors(&self) -> u16 {
+        // 32 is the size of a directory entry in bytes
+        ((self.root_entry_count * 32) + (self.bytes_per_sector - 1)) / self.bytes_per_sector
+    }
+
+    /// The first sector in the File Allocation Table
+    pub(crate) fn first_fat_sector(&self) -> u16 {
+        self.reserved_sector_count
+    }
+
+    /// The first sector of the root directory
+    pub(crate) fn first_root_dir_sector(&self) -> u16 {
+        self.first_fat_sector() + self.table_count as u16 * self.fat_sector_size() as u16
+    }
+
+    /// The first data sector (that is, the first sector in which directories and files may be stored)
+    pub(crate) fn first_data_sector(&self) -> u16 {
+        self.first_root_dir_sector() + self.root_dir_sectors()
+    }
+
+    /// The total number of data sectors
+    pub(crate) fn total_data_sectors(&self) -> u32 {
+        self.total_sectors() - (self.table_count as u32 * self.fat_sector_size())
+            + self.root_dir_sectors() as u32
+    }
+
+    /// The total number of clusters
+    pub(crate) fn total_clusters(&self) -> u32 {
+        self.total_data_sectors() / self.sectors_per_cluster as u32
+    }
+
+    /// The FAT type of this file system
+    pub(crate) fn fat_type(&self) -> FATType {
+        if self.bytes_per_sector == 0 {
+            todo!("ExFAT not yet implemented");
+            FATType::ExFAT
+        } else {
+            let total_clusters = self.total_clusters();
+            if total_clusters < 4085 {
+                todo!("FAT12 not yet implemented");
+                FATType::FAT12
+            } else if total_clusters < 65525 {
+                FATType::FAT16
+            } else {
+                FATType::FAT32
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(packed)]
+// Everything here is naturally aligned (thank god), so there's no need to make this a packed struct
+pub struct BootRecordExFAT {
+    _dummy_jmp: [u8; 3],
+    _oem_identifier: [u8; 8],
+    _zeroed: [u8; 53],
+    _partition_offset: u64,
+    volume_len: u64,
+    fat_offset: u32,
+    fat_len: u32,
+    cluster_heap_offset: u32,
+    cluster_count: u32,
+    root_dir_cluster: u32,
+    partition_serial_num: u32,
+    fs_revision: u16,
+    flags: u16,
+    sector_shift: u8,
+    cluster_shift: u8,
+    fat_count: u8,
+    drive_select: u8,
+    used_percentage: u8,
+    _reserved: [u8; 7],
+}
+
+#[derive(Clone, Copy)]
+#[repr(packed)]
+pub union BootRecord {
+    fat: BootRecordFAT,
+    exfat: BootRecordExFAT,
+}
+
+#[derive(Clone, Copy)]
+#[repr(packed)]
+pub union EBR {
+    fat12_16: mem::ManuallyDrop<EBRFAT12_16>,
+    fat32: mem::ManuallyDrop<EBRFAT32>,
+}
+
+impl fmt::Debug for EBR {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: find a good way of printing this
+        write!(f, "FAT12-16/32 Extended boot record...")
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(packed)]
+pub struct EBRFAT12_16 {
+    _drive_num: u8,
+    _windows_nt_flags: u8,
+    boot_signature: u8,
+    volume_serial_num: u32,
+    volume_label: [u8; 11],
+    _system_identifier: [u8; 8],
+    _boot_code: [u8; 448],
+    signature: u16,
+}
+
+// FIXME: these might be the other way around
+#[derive(Debug, Clone, Copy)]
+pub struct FATVersion {
+    minor: u8,
+    major: u8,
+}
+
+#[derive(Clone, Copy)]
+#[repr(packed)]
+struct EBRFAT32 {
+    table_size_32: u32,
+    _extended_flags: u16,
+    fat_version: FATVersion,
+    root_cluster: u32,
+    fat_info: u16,
+    backup_boot_sector: u16,
+    _reserved: [u8; 12],
+    _drive_num: u8,
+    _windows_nt_flags: u8,
+    boot_signature: u8,
+    volume_serial_num: u32,
+    volume_label: [u8; 11],
+    _system_ident: [u8; 8],
+    _boot_code: [u8; 420],
+    signature: u16,
+}
+
+#[derive(Clone, Copy)]
+#[repr(packed)]
+struct FSInfoFAT32 {
+    lead_signature: [u8; 4],
+    _reserved1: [u8; 480],
+    mid_signature: [u8; 4],
+    last_free_cluster: u32,
+    cluster_width: u32,
+    _reserved2: [u8; 12],
+    trail_signature: [u8; 4],
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FATType {
+    FAT12,
+    FAT16,
+    FAT32,
+    ExFAT,
+}
+
+impl FATType {
+    pub fn bits_per_entry(&self) -> u8 {
+        match self {
+            FATType::FAT12 => 12,
+            FATType::FAT16 => 16,
+            FATType::FAT32 => 28,
+            FATType::ExFAT => 32,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum FATEntry {
+    /// This cluster is free
+    Free,
+    /// This cluster is allocated and the next cluster is the contained value
+    Allocated(u32),
+    /// This cluster is reserved
+    Reserved,
+    /// This is a bad (defective) cluster
+    Bad,
+    /// This cluster is allocated and is the final cluster of the file
+    EOF,
+}
+
+#[repr(packed)]
+struct SFN {
+    name: [u8; 8],
+    ext: [u8; 3],
+}
+
+impl fmt::Display for SFN {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // we begin by writing the name (even if it is padded with spaces, they will be trimmed, so we don't care)
+        write!(f, "{}", String::from_utf8_lossy(&self.name).trim())?;
+
+        // then, if the extension isn't empty (padded with zeroes), we write it too
+        let ext = String::from_utf8_lossy(&self.ext).trim().to_owned();
+        if !ext.is_empty() {
+            write!(f, ".{}", ext)?;
+        };
+
+        Ok(())
+    }
+}
+
+bitflags! {
+    #[derive(Debug, PartialEq)]
+    pub struct EntryAttributes: u8 {
+        const READ_ONLY = 0x01;
+        const HIDDEN = 0x02;
+        const SYSTEM = 0x04;
+        const VOLUME_ID = 0x08;
+        const DIRECTORY = 0x10;
+        const ARCHIVE = 0x20;
+
+        const LFN = Self::READ_ONLY.bits() |
+                    Self::HIDDEN.bits() |
+                    Self::SYSTEM.bits() |
+                    Self::VOLUME_ID.bits();
+    }
+}
+
+bit_struct! {
+    struct CreationTime(u16) {
+        hour: u5,
+        minutes: u6,
+        /// Multiply by 2
+        seconds: u5,
+    }
+
+    struct CreationDate(u16) {
+        year: u7,
+        month: u4,
+        day: u5,
+    }
+}
+
+#[derive(Debug, Clone)]
+#[repr(packed)]
+struct EntryCreationTime {
+    hundredths_of_second: u8,
+    time: CreationTime,
+    date: CreationDate,
+}
+
+#[derive(Debug, Clone)]
+#[repr(packed)]
+struct EntryModificationTime {
+    time: CreationTime,
+    date: CreationDate,
+}
+
+#[repr(packed)]
+struct FATDirEntry {
+    short_filename: SFN,
+    attributes: EntryAttributes,
+    _reserved: [u8; 1],
+    created: EntryCreationTime,
+    accessed: CreationDate,
+    cluster_high: u16,
+    modified: EntryModificationTime,
+    cluster_low: u16,
+    file_size: u32,
+}
+
+#[repr(packed)]
+struct LFNEntry {
+    /// masked with 0x40 if this is the last entry
+    order: u8,
+    first_chars: [u8; 10],
+    /// Always equals 0x0F
+    _lfn_attribute: u8,
+    /// Both OSDev and the FAT specification say this is always 0
+    _long_entry_type: u8,
+    /// If this doesn't match with the computed cksum, then the set of LFNs is considered corrupt
+    // TODO: check whether modifying only the short filename corrupts this
+    checksum: u8,
+    mid_chars: [u8; 12],
+    _zeroed: [u8; 2],
+    last_chars: [u8; 4],
+}
+
+impl LFNEntry {
+    fn verify_signature(&self) -> bool {
+        self._long_entry_type == 0 && self._zeroed.iter().all(|v| *v == 0) && self.verify_checksum()
+    }
+
+    fn verify_checksum(&self) -> bool {
+        // TODO: Implement the checksum algorithm
+        true
+    }
+}
+
+/// A resolved file/directory entry
+#[derive(Debug)]
+struct ResolvedEntry {
+    name: String,
+    is_dir: bool,
+    attributes: EntryAttributes,
+    created: EntryCreationTime,
+    modified: EntryModificationTime,
+    file_size: u32,
+    data_cluster: u32,
+}
+
+#[derive(Debug)]
+pub struct DirEntry {
+    path: PathBuf,
+    cluster: u32,
+    file_size: u32,
+    attributes: EntryAttributes,
+}
+
+impl DirEntry {
+    pub fn path(&self) -> PathBuf {
+        self.path.to_owned()
+    }
+}
+
+impl ops::Deref for DirEntry {
+    type Target = PathBuf;
+
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+#[derive(Debug)]
+pub struct File {
+    path: PathBuf,
+    data_cluster: u32,
+    file_size: u32,
+    attributes: EntryAttributes,
+}
+
+impl File {
+    pub fn read_to_end<S>(&self, fs: &mut FileSystem<S>) -> FSResult<Vec<u8>, S::Error>
+    where
+        S: Read + Write + Seek,
+    {
+        let mut current_cluster = self.data_cluster;
+        let mut bytes: Vec<u8> = Vec::new();
+
+        loop {
+            // FAT specification, section 6.7
+            let first_sector_of_cluster = fs.cluster_to_data_sector((current_cluster - 2).into());
+            for sector in
+                first_sector_of_cluster..(first_sector_of_cluster + fs.sectors_per_cluster() as u32)
+            {
+                fs.storage.seek(SeekFrom::Start(
+                    fs.sector_to_partition_offset(sector).into(),
+                ))?;
+                fs.storage.read_exact(&mut fs.sector_buffer)?;
+                bytes.append(&mut fs.sector_buffer);
+
+                if bytes.len() >= self.file_size as usize {
+                    // remove any bytes that don't belong to the file
+                    bytes.truncate(self.file_size as usize);
+                    return Ok(bytes);
+                }
+            }
+
+            match fs.read_nth_FAT_entry(self.data_cluster)? {
+                FATEntry::Allocated(next_cluster) => current_cluster = next_cluster,
+                _ => return Err(FSError::UnexpectedEOF),
+            };
+        }
+    }
+}
+
+/// variation of https://stackoverflow.com/a/42067321/19247098 for processing LFNs
+pub(crate) fn string_from_lfn_nul_utf8(utf16_bytes: &[u8]) -> Result<String, FromUtf16Error> {
+    let utf16_src: Vec<u16> = utf16_bytes
+        .chunks(2)
+        .map(|c| u16::from_le_bytes(c.try_into().unwrap()))
+        .collect();
+
+    let nul_range_end = utf16_src
+        .iter()
+        .position(|c| *c == 0x0000)
+        .unwrap_or(utf16_src.len()); // default to length if no `\0` present
+
+    String::from_utf16(&utf16_src[0..nul_range_end])
+}
+
+trait OffsetConversions {
+    fn sector_size(&self) -> u32;
+    fn cluster_size(&self) -> u64;
+    fn first_data_sector(&self) -> u32;
+
+    #[inline]
+    fn cluster_to_sector(&self, cluster: u64) -> u32 {
+        (cluster * self.cluster_size() / self.sector_size() as u64)
+            .try_into()
+            .unwrap()
+    }
+    #[inline]
+    fn sector_to_cluster(&self, sector: u32) -> u64 {
+        (sector as u64 * self.sector_size() as u64 / self.cluster_size()).into()
+    }
+
+    #[inline]
+    fn sectors_per_cluster(&self) -> u64 {
+        self.cluster_size() / self.sector_size() as u64
+    }
+
+    // this function assumes that the first sector is also the first sector of the partition
+    #[inline]
+    fn sector_to_partition_offset(&self, sector: u32) -> u32 {
+        sector * self.sector_size()
+    }
+
+    // these three functions assume that the first sector (or cluster) is the first sector (or cluster) of the data area
+    #[inline]
+    fn cluster_to_data_offset(&self, cluster: u32) -> u32 {
+        self.sector_to_data_offset(self.cluster_to_sector(cluster.into()))
+    }
+    #[inline]
+    fn sector_to_data_offset(&self, sector: u32) -> u32 {
+        self.sector_to_partition_offset(sector + self.first_data_sector())
+    }
+    #[inline]
+    fn cluster_to_data_sector(&self, cluster: u32) -> u32 {
+        self.cluster_to_sector(cluster.into()) + self.first_data_sector()
+    }
+}
+
+/// Some generic properties common across all FAT versions, like a sector's size, are cached here
+#[derive(Debug)]
+struct FSProperties {
+    sector_size: u32,
+    cluster_size: u64,
+    total_clusters: u32,
+    /// sector offset of the FAT
+    fat_offset: u32,
+    reserved_sectors: u32,
+    first_data_sector: u32,
+}
+
+pub struct FileSystem<S>
+where
+    S: Read + Write + Seek,
+{
+    /// Any struct that implements the [`Read`], [`Write`] & [`Seek`] traits
+    storage: S,
+
+    /// The length of this will be the sector size of the FS for all FAT types except FAT12, in that case, it will be double that value
+    sector_buffer: Vec<u8>,
+
+    boot_record: BootRecord,
+    /// since `self.fat_type()` calls like 5 nested functions, we keep this cached and expose it as a public field
+    pub fat_type: FATType,
+    props: FSProperties,
+}
+
+impl<S> OffsetConversions for FileSystem<S>
+where
+    S: Read + Write + Seek,
+{
+    #[inline]
+    fn sector_size(&self) -> u32 {
+        self.props.sector_size
+    }
+
+    #[inline]
+    fn cluster_size(&self) -> u64 {
+        self.props.cluster_size
+    }
+
+    #[inline]
+    fn first_data_sector(&self) -> u32 {
+        self.props.first_data_sector
+    }
+}
+
+impl<S> FileSystem<S>
+where
+    S: Read + Write + Seek,
+{
+    pub fn from_storage(mut storage: S) -> FSResult<Self, S::Error> {
+        // Begin by reading the boot record
+        // We don't know the sector size yet, so we just go with the biggest possible one for now
+        let mut buffer = [0u8; SECTOR_SIZE_MAX];
+
+        let bytes_read = storage.read(&mut buffer)?;
+
+        if bytes_read < mem::size_of::<BootRecord>() {
+            return Err(FSError::StorageTooSmall);
+        }
+
+        let boot_record: BootRecord = unsafe { mem::transmute_copy(&buffer) };
+
+        // verify boot record signature
+        let fat_type = unsafe { boot_record.fat.fat_type() };
+
+        match fat_type {
+            FATType::FAT12 | FATType::FAT16 | FATType::FAT32 => {
+                if unsafe { boot_record.fat.verify_signature() } {
+                    return Err(FSError::InvalidBPBSig);
+                }
+            }
+            FATType::ExFAT => todo!("ExFAT not yet implemented"),
+        };
+
+        let sector_size: u32 = unsafe {
+            match fat_type {
+                FATType::FAT12 | FATType::FAT16 | FATType::FAT32 => {
+                    boot_record.fat.bytes_per_sector.into()
+                }
+                FATType::ExFAT => 1 << boot_record.exfat.sector_shift,
+            }
+        };
+        let cluster_size: u64 = unsafe {
+            match fat_type {
+                FATType::FAT12 | FATType::FAT16 | FATType::FAT32 => {
+                    (boot_record.fat.sectors_per_cluster as u32 * sector_size).into()
+                }
+                FATType::ExFAT => {
+                    1 << (boot_record.exfat.sector_shift + boot_record.exfat.cluster_shift)
+                }
+            }
+        };
+
+        let reserved_sectors: u32 = match fat_type {
+            FATType::FAT12 | FATType::FAT16 | FATType::FAT32 => unsafe {
+                boot_record.fat.reserved_sector_count as u32
+            },
+            FATType::ExFAT => todo!("ExFAT is not yet implemented"),
+        };
+
+        let first_data_sector = unsafe {
+            boot_record.fat.reserved_sector_count as u32
+                + (boot_record.fat.table_count as u32 * boot_record.fat.fat_sector_size())
+                + boot_record.fat.root_dir_sectors() as u32
+        };
+
+        let props = FSProperties {
+            sector_size,
+            cluster_size,
+            fat_offset: unsafe { boot_record.fat.reserved_sector_count as u32 } * sector_size,
+            total_clusters: unsafe { boot_record.fat.total_clusters() },
+            reserved_sectors,
+            first_data_sector,
+        };
+
+        Ok(Self {
+            storage,
+            sector_buffer: vec![0; unsafe { boot_record.fat.bytes_per_sector as usize }],
+            boot_record,
+            fat_type,
+            props,
+        })
+    }
+
+    pub fn read_dir(&mut self, path: PathBuf) -> FSResult<Vec<DirEntry>, S::Error> {
+        if path.is_malformed() {
+            return Err(FSError::MalformedPath);
+        }
+        if !path.is_dir() {
+            return Err(FSError::NotADirectory);
+        }
+
+        let mut entries = self.process_root_dir()?;
+
+        for dir_name in path.clone().into_iter() {
+            let dir_cluster = match entries.iter().find(|entry| {
+                entry.name == dir_name && entry.attributes.contains(EntryAttributes::DIRECTORY)
+            }) {
+                Some(entry) => entry.data_cluster,
+                None => {
+                    return Err(FSError::NotFound);
+                }
+            };
+
+            entries = unsafe { self.process_normal_dir(dir_cluster)? };
+        }
+
+        // if we haven't returned by now, that means that the entries vector
+        // contains what we want, let's map it to DirEntries and return
+        Ok(entries
+            .into_iter()
+            .map(|entry| {
+                let mut entry_path = path.clone();
+                unsafe {
+                    entry_path.push(format!(
+                        "{}{}",
+                        entry.name,
+                        if entry.is_dir { "/" } else { "" }
+                    ))
+                };
+                DirEntry {
+                    path: entry_path,
+                    cluster: entry.data_cluster,
+                    file_size: entry.file_size,
+                    attributes: entry.attributes,
+                }
+            })
+            .collect())
+    }
+
+    pub fn get_file(&mut self, path: PathBuf) -> FSResult<File, S::Error> {
+        if path.is_malformed() {
+            return Err(FSError::MalformedPath);
+        }
+
+        if let Some(file_name) = path.file_name() {
+            let parent_dir = self.read_dir(path.parent())?;
+            parent_dir
+                .into_iter()
+                .find(|entry| {
+                    entry
+                        .file_name()
+                        .is_some_and(|entry_name| entry_name == file_name)
+                })
+                .map(|entry| File {
+                    path: entry.path,
+                    data_cluster: entry.cluster,
+                    file_size: entry.file_size,
+                    attributes: entry.attributes,
+                })
+                .ok_or(FSError::NotFound)
+        } else {
+            Err(FSError::IsADirectory)
+        }
+    }
+
+    /// Unsafe because the sector number must point to an area with directory entries
+    ///
+    /// Also the sector number starts from the beginning of the partition
+    unsafe fn process_entry_sector(
+        &mut self,
+        sector: u32,
+    ) -> FSResult<Vec<ResolvedEntry>, S::Error> {
+        let mut entries = Vec::new();
+        let mut lfn_buf: Vec<String> = Vec::new();
+
+        'outer: loop {
+            self.storage.seek(SeekFrom::Start(
+                self.sector_to_partition_offset(sector) as u64
+            ))?;
+            self.storage.read_exact(&mut self.sector_buffer)?;
+
+            for chunk in self.sector_buffer.chunks(mem::size_of::<FATDirEntry>()) {
+                match chunk[0] {
+                    // nothing else to read
+                    0 => break 'outer,
+                    // unused entry
+                    0xE5 => continue,
+                    _ => (),
+                };
+
+                let entry = mem::transmute::<[u8; mem::size_of::<FATDirEntry>()], FATDirEntry>(
+                    // this is guaranteed NOT TO PANIC
+                    chunk.try_into().unwrap(),
+                );
+
+                if entry.attributes.contains(EntryAttributes::LFN) {
+                    // TODO: perhaps there is a way to utilize the `order` field?
+
+                    let lfn_entry: LFNEntry = mem::transmute(entry);
+
+                    // If the checksum and signatures verification fails, consider this entry corrupted
+                    if !lfn_entry.verify_checksum() || !lfn_entry.verify_signature() {
+                        continue;
+                    }
+
+                    let mut temp_buf: Vec<u8> = Vec::new();
+                    temp_buf.append(&mut lfn_entry.first_chars.to_vec());
+                    temp_buf.append(&mut lfn_entry.mid_chars.to_vec());
+                    temp_buf.append(&mut lfn_entry.last_chars.to_vec());
+
+                    if let Ok(temp_str) = string_from_lfn_nul_utf8(&temp_buf) {
+                        lfn_buf.push(temp_str);
+                    }
+
+                    continue;
+                }
+
+                let filename = if !lfn_buf.is_empty() {
+                    // for efficiency reasons, we store the LFN string sequences as we read them
+                    let parsed_str: String = lfn_buf.iter().cloned().rev().collect();
+                    lfn_buf.clear();
+                    parsed_str
+                } else {
+                    entry.short_filename.to_string()
+                };
+
+                entries.push(ResolvedEntry {
+                    name: filename,
+                    is_dir: entry.attributes.contains(EntryAttributes::DIRECTORY),
+                    attributes: entry.attributes,
+                    created: entry.created,
+                    modified: entry.modified,
+                    file_size: entry.file_size,
+                    data_cluster: ((entry.cluster_high as u32) << 16) + entry.cluster_low as u32,
+                })
+            }
+        }
+
+        Ok(entries)
+    }
+
+    fn process_root_dir(&mut self) -> FSResult<Vec<ResolvedEntry>, S::Error> {
+        match self.fat_type {
+            FATType::FAT12 | FATType::FAT16 => {
+                let mut entries = Vec::new();
+
+                let root_dir_sector = unsafe { self.boot_record.fat.first_root_dir_sector() };
+                let sector_count = unsafe { self.boot_record.fat.root_dir_sectors() };
+
+                for sector in root_dir_sector..(root_dir_sector + sector_count) {
+                    let mut new_entries = unsafe { self.process_entry_sector(sector.into())? };
+                    entries.append(&mut new_entries);
+                }
+
+                Ok(entries)
+            }
+            FATType::FAT32 => unsafe {
+                let cluster = self.boot_record.exfat.root_dir_cluster;
+                self.process_normal_dir(cluster)
+            },
+            FATType::ExFAT => {
+                todo!("ExFAT not implemented yet")
+            }
+        }
+    }
+
+    /// Unsafe for the same reason as [`process_entry_sector`]
+    unsafe fn process_normal_dir(
+        &mut self,
+        mut data_cluster: u32,
+    ) -> FSResult<Vec<ResolvedEntry>, S::Error> {
+        let mut entries = Vec::new();
+
+        loop {
+            // FAT specification, section 6.7
+            let first_sector_of_cluster = self.cluster_to_data_sector((data_cluster - 2).into());
+            for sector in first_sector_of_cluster
+                ..(first_sector_of_cluster + self.sectors_per_cluster() as u32)
+            {
+                let mut new_entries = unsafe { self.process_entry_sector(sector.into())? };
+                entries.append(&mut new_entries);
+            }
+
+            // Read corresponding FAT entry
+            let current_fat_entry = self.read_nth_FAT_entry(data_cluster)?;
+
+            match current_fat_entry {
+                // we are done here, break the loop
+                FATEntry::EOF => break,
+                // this cluster chain goes on, follow it
+                FATEntry::Allocated(next_cluster) => data_cluster = next_cluster,
+                // any other case (whether a bad, reserved or free cluster) is invalid, consider this cluster chain malformed
+                _ => return Err(FSError::MalformedClusterChain),
+            }
+        }
+
+        Ok(entries)
+    }
+
+    #[allow(non_snake_case)]
+    fn read_nth_FAT_entry(&mut self, n: u32) -> FSResult<FATEntry, S::Error> {
+        // TODO: refactor this, many code segments are being reused
+        match self.fat_type {
+            FATType::FAT12 => {
+                todo!("FAT12 not yet implemented")
+                /*let fat_offset = n * 3 / 2;
+                let fat_sector_offset = self.props.fat_offset + fat_offset / self.props.sector_size;
+                let ent_offset: usize = (fat_offset % self.props.sector_size) as usize;
+
+                self.storage
+                    .seek(SeekFrom::Start(fat_sector_offset.into()))?;
+                self.storage.read_exact(&mut self.sector_buffer)?;
+
+                let mut value = u16::from_le_bytes(
+                    self.sector_buffer[ent_offset..ent_offset + 2]
+                        .try_into()
+                        .unwrap(), // this shouldn't panic
+                );
+
+                if (n & 1) != 0 {
+                    value >>= 4;
+                } else {
+                    value &= 0xFFF;
+                }
+
+                Ok(match value {
+                    0x000 => FATEntry::Free,
+                    0xFF7 => FATEntry::Bad,
+                    0xFF8..=0xFFE | 0xFFF => FATEntry::EOF,
+                    _ => {
+                        if (0x002..(self.props.total_clusters + 1)).contains(&value.into()) {
+                            FATEntry::Allocated(value.into())
+                        } else {
+                            FATEntry::Reserved
+                        }
+                    }
+                })*/
+            }
+            FATType::FAT16 => {
+                let fat_offset = n * 2;
+                let fat_sector_offset = self.props.fat_offset + fat_offset / self.props.sector_size;
+                let ent_offset: usize = (fat_offset % self.props.sector_size) as usize;
+
+                self.storage
+                    .seek(SeekFrom::Start(fat_sector_offset.into()))?;
+                self.storage.read_exact(&mut self.sector_buffer)?;
+
+                let value = u16::from_le_bytes(
+                    self.sector_buffer[ent_offset..ent_offset + 2]
+                        .try_into()
+                        .unwrap(), // this shouldn't panic
+                );
+
+                Ok(match value {
+                    0x0000 => FATEntry::Free,
+                    0xFFF7 => FATEntry::Bad,
+                    0xFFF8..=0xFFFE | 0xFFFF => FATEntry::EOF,
+                    _ => {
+                        if (0x0002..(self.props.total_clusters + 1)).contains(&value.into()) {
+                            FATEntry::Allocated(value.into())
+                        } else {
+                            FATEntry::Reserved
+                        }
+                    }
+                })
+            }
+            FATType::FAT32 | FATType::ExFAT => {
+                let fat_offset = n * 4;
+                let fat_sector_offset = self.props.fat_offset + fat_offset / self.props.sector_size;
+                let ent_offset: usize = (fat_offset % self.props.sector_size) as usize;
+
+                self.storage
+                    .seek(SeekFrom::Start(fat_sector_offset.into()))?;
+                self.storage.read_exact(&mut self.sector_buffer)?;
+
+                let mut value = u32::from_le_bytes(
+                    self.sector_buffer[ent_offset..ent_offset + 2]
+                        .try_into()
+                        .unwrap(), // this shouldn't panic
+                );
+
+                // remember to ignore the high 4 bits if this is FAT32
+                if self.fat_type == FATType::FAT32 {
+                    value &= 0x0FFFFFFF
+                }
+
+                Ok(match value {
+                    0x0000000 => FATEntry::Free,
+                    0xFFFFFF7 => FATEntry::Bad,
+                    // TODO: handle ExFAT for this inclusive range
+                    0xFFFFFF8..=0xFFFFFFE | 0xFFFFFFFF => FATEntry::EOF,
+                    _ => {
+                        if (0x0000002..(self.props.total_clusters + 1)).contains(&value.into()) {
+                            FATEntry::Allocated(value.into())
+                        } else {
+                            FATEntry::Reserved
+                        }
+                    }
+                })
+            }
+        }
+    }
+}
+
