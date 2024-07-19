@@ -180,3 +180,70 @@ impl iter::Iterator for PathBuf {
     }
 }
 
+#[test]
+fn empty_pathbuf_tostring() {
+    let pathbuf = PathBuf::new();
+
+    assert_eq!(pathbuf.to_string(), "/");
+    assert!(!pathbuf.is_malformed());
+}
+
+#[test]
+fn catch_malformed_pathbuf_slashes() {
+    let mut pathbuf = PathBuf::new();
+    unsafe { pathbuf.push("\\//\\/") };
+
+    assert!(pathbuf.is_malformed())
+}
+
+#[test]
+fn catch_non_control_forbidden_chars() {
+    #[cfg(not(feature = "std"))]
+    use ::alloc::format;
+
+    let mut pathbuf = PathBuf::new();
+
+    for c in FORBIDDEN_CHARS {
+        unsafe { pathbuf.push(format!("/{c}")) };
+        assert!(
+            pathbuf.is_malformed(),
+            "unable to detect character {} (hex: {:#02x}) as forbidden {:?}",
+            c,
+            (*c as usize),
+            pathbuf
+        );
+        pathbuf.clear();
+    }
+}
+
+#[test]
+fn ignore_multiple_separators() {
+    let mut pathbuf = PathBuf::new();
+    unsafe {
+        pathbuf.push("first/");
+        pathbuf.push("second\\");
+        pathbuf.push("/third\\");
+        pathbuf.push("\\last/");
+    }
+
+    assert_eq!(pathbuf.to_string(), "/first/second/third/last/")
+}
+
+#[test]
+fn push_to_pathbuf() {
+    let mut pathbuf = PathBuf::new();
+    unsafe {
+        pathbuf.push("foo");
+        pathbuf.push("bar/test");
+        pathbuf.push("bar2\\test2");
+        pathbuf.push("ignored\\../.");
+        pathbuf.push("\\fintest1");
+        pathbuf.push("fintest2/");
+        pathbuf.push("last");
+    }
+
+    assert_eq!(
+        pathbuf.to_string(),
+        "/foo/bar/test/bar2/test2/fintest1/fintest2/last"
+    )
+}

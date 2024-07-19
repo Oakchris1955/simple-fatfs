@@ -945,3 +945,101 @@ where
     }
 }
 
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use io::Read;
+
+    use super::*;
+
+    static MINFS: &[u8] = include_bytes!("../imgs/minfs.img");
+    static FAT12: &[u8] = include_bytes!("../imgs/fat12.img");
+    static FAT16: &[u8] = include_bytes!("../imgs/fat16.img");
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn check_FAT_offset() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT16.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        // we manually read the first and second entry of the FAT table
+        fs.storage
+            .seek(SeekFrom::Start(fs.props.fat_offset.into()))
+            .unwrap();
+        fs.storage.read_exact(&mut fs.sector_buffer).unwrap();
+
+        let first_entry = u16::from_le_bytes(fs.sector_buffer[0..2].try_into().unwrap());
+        let media_type = unsafe { fs.boot_record.fat._media_type };
+        assert_eq!(u16::MAX << 8 | media_type as u16, first_entry);
+
+        let second_entry = u16::from_le_bytes(fs.sector_buffer[2..4].try_into().unwrap());
+        assert_eq!(u16::MAX, second_entry);
+    }
+
+    #[test]
+    fn read_file_in_root_dir() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT16.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        let file = fs.get_file(PathBuf::from("/root.txt")).unwrap();
+        let file_bytes = file.read_to_end(&mut fs).unwrap();
+
+        let file_string = String::from_utf8_lossy(&file_bytes).to_string();
+        const EXPECTED_STR: &str = "I am in the filesystem's root!!!\n\n";
+        assert_eq!(file_string, EXPECTED_STR);
+    }
+
+    #[test]
+    fn read_file_in_subdir() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT16.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        let file = fs.get_file(PathBuf::from("/rootdir/example.txt")).unwrap();
+        let file_bytes = file.read_to_end(&mut fs).unwrap();
+
+        let file_string = String::from_utf8_lossy(&file_bytes).to_string();
+        const EXPECTED_STR: &str = "I am not in the root directory :(\n\n";
+        assert_eq!(file_string, EXPECTED_STR);
+    }
+
+    #[test]
+    fn assert_img_fat_type() {
+        static TEST_CASES: &[(&[u8], FATType)] = &[
+            /*(MINFS, FATType::FAT12), TODO: uncomment this when we add support for FAT12
+            (FAT12, FATType::FAT12),*/
+            (FAT16, FATType::FAT16),
+        ];
+
+        for case in TEST_CASES {
+            use std::io::Cursor;
+
+            let mut storage = Cursor::new(case.0.to_owned());
+            let fs = FileSystem::from_storage(&mut storage).unwrap();
+
+            assert_eq!(fs.fat_type, case.1)
+        }
+    }
+
+    #[test]
+    fn cluster_sector_conversions() {
+        use std::io::Cursor;
+
+        // todo: switch to FAT12 .img when support arrives
+        let mut storage = Cursor::new(FAT16.to_owned());
+        let fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        const TEST_CASES: &[u32] = &[1, 2, 3, 4];
+        for mut n in TEST_CASES.iter().cloned() {
+            n *= SECTOR_SIZE_MAX as u32;
+
+            // a cluster can be bigger (or equal, but not in this case) than a sector
+            assert!(fs.sector_to_cluster(n) < n.into());
+            assert!(fs.cluster_to_sector(n.into()) > n);
+        }
+    }
+}
