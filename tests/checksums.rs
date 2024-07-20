@@ -12,7 +12,7 @@ fn verify_checksums() {
     for file in fs::read_dir(img_commons::get_imgs_path())
         .unwrap()
         .map(|f| f.unwrap().path())
-        .filter(|p| p.extension().unwrap() == "ck")
+        .filter(|p| p.extension().unwrap() == "check")
     {
         total_checks += 1;
 
