@@ -1,4 +1,7 @@
-on: [ push ]
+name: Update CHANGELOG.md weekly
+on:
+  schedule:
+    - cron: "0 0 * * 0"
 
 jobs:
   changelog:
@@ -12,12 +15,24 @@ jobs:
 
       - name: Generate a changelog
         uses: orhun/git-cliff-action@v3
-        id: git-cliff
         with:
           config: cliff.toml
           args: --verbose
         env:
           OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_BRANCH: ${{ github.ref_name }}
 
-      - name: Print the changelog
-        run: cat "${{ steps.git-cliff.outputs.changelog }}"
+      - name: Prepare commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          set +e
+          git add CHANGELOG.md
+          git commit -m "ci(changelog): Update changelog"
+
+      - name: Push commit
+        # if there is nothing to commit, `git commit` returns 1
+        if: success()
+        run: |
+          git push https://${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git ${GITHUB_BRANCH}
