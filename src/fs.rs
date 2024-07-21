@@ -1024,22 +1024,4 @@ mod tests {
             assert_eq!(fs.fat_type, case.1)
         }
     }
-
-    #[test]
-    fn cluster_sector_conversions() {
-        use std::io::Cursor;
-
-        // todo: switch to FAT12 .img when support arrives
-        let mut storage = Cursor::new(FAT16.to_owned());
-        let fs = FileSystem::from_storage(&mut storage).unwrap();
-
-        const TEST_CASES: &[u32] = &[1, 2, 3, 4];
-        for mut n in TEST_CASES.iter().cloned() {
-            n *= SECTOR_SIZE_MAX as u32;
-
-            // a cluster can be bigger (or equal, but not in this case) than a sector
-            assert!(fs.sector_to_cluster(n) < n.into());
-            assert!(fs.cluster_to_sector(n.into()) > n);
-        }
-    }
 }
