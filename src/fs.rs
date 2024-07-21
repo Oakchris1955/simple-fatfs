@@ -425,7 +425,7 @@ impl File {
 
         loop {
             // FAT specification, section 6.7
-            let first_sector_of_cluster = fs.cluster_to_data_sector((current_cluster - 2).into());
+            let first_sector_of_cluster = fs.data_cluster_to_partition_sector(current_cluster);
             for sector in
                 first_sector_of_cluster..(first_sector_of_cluster + fs.sectors_per_cluster() as u32)
             {
@@ -476,10 +476,6 @@ trait OffsetConversions {
             .try_into()
             .unwrap()
     }
-    #[inline]
-    fn sector_to_cluster(&self, sector: u32) -> u64 {
-        (sector as u64 * self.sector_size() as u64 / self.cluster_size()).into()
-    }
 
     #[inline]
     fn sectors_per_cluster(&self) -> u64 {
@@ -494,16 +490,8 @@ trait OffsetConversions {
 
     // these three functions assume that the first sector (or cluster) is the first sector (or cluster) of the data area
     #[inline]
-    fn cluster_to_data_offset(&self, cluster: u32) -> u32 {
-        self.sector_to_data_offset(self.cluster_to_sector(cluster.into()))
-    }
-    #[inline]
-    fn sector_to_data_offset(&self, sector: u32) -> u32 {
-        self.sector_to_partition_offset(sector + self.first_data_sector())
-    }
-    #[inline]
-    fn cluster_to_data_sector(&self, cluster: u32) -> u32 {
-        self.cluster_to_sector(cluster.into()) + self.first_data_sector()
+    fn data_cluster_to_partition_sector(&self, cluster: u32) -> u32 {
+        self.cluster_to_sector((cluster - 2).into()) + self.first_data_sector()
     }
 }
 
@@ -816,7 +804,7 @@ where
 
         loop {
             // FAT specification, section 6.7
-            let first_sector_of_cluster = self.cluster_to_data_sector((data_cluster - 2).into());
+            let first_sector_of_cluster = self.data_cluster_to_partition_sector(data_cluster);
             for sector in first_sector_of_cluster
                 ..(first_sector_of_cluster + self.sectors_per_cluster() as u32)
             {
