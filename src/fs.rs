@@ -270,6 +270,29 @@ struct SFN {
     ext: [u8; 3],
 }
 
+impl SFN {
+    fn get_byte_slice(&self) -> [u8; 11] {
+        let mut slice = [0; 11];
+
+        slice[..8].copy_from_slice(&self.name);
+        slice[8..].copy_from_slice(&self.ext);
+
+        slice
+    }
+
+    fn gen_checksum(&self) -> u8 {
+        let mut sum = 0;
+
+        for c in self.get_byte_slice() {
+            sum = (if (sum & 1) != 0 { 0x80_u8 } else { 0_u8 })
+                .wrapping_add(sum >> 1)
+                .wrapping_add(c)
+        }
+
+        sum
+    }
+}
+
 impl fmt::Display for SFN {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // we begin by writing the name (even if it is padded with spaces, they will be trimmed, so we don't care)
@@ -334,7 +357,7 @@ struct EntryModificationTime {
 
 #[repr(packed)]
 struct FATDirEntry {
-    short_filename: SFN,
+    sfn: SFN,
     attributes: EntryAttributes,
     _reserved: [u8; 1],
     created: EntryCreationTime,
@@ -355,7 +378,9 @@ struct LFNEntry {
     /// Both OSDev and the FAT specification say this is always 0
     _long_entry_type: u8,
     /// If this doesn't match with the computed cksum, then the set of LFNs is considered corrupt
-    // TODO: check whether modifying only the short filename corrupts this
+    ///
+    /// A [`LFNEntry`] will be marked as corrupt even if it isn't, if the SFN is modifed by a legacy system,
+    /// since the new SFN's signature and the one on this field won't (probably) match
     checksum: u8,
     mid_chars: [u8; 12],
     _zeroed: [u8; 2],
@@ -363,13 +388,19 @@ struct LFNEntry {
 }
 
 impl LFNEntry {
-    fn verify_signature(&self) -> bool {
-        self._long_entry_type == 0 && self._zeroed.iter().all(|v| *v == 0) && self.verify_checksum()
+    fn get_byte_slice(&self) -> [u16; 13] {
+        let mut slice = [0_u8; 13 * 2];
+
+        slice[..10].copy_from_slice(&self.first_chars);
+        slice[10..22].copy_from_slice(&self.mid_chars);
+        slice[22..].copy_from_slice(&self.last_chars);
+
+        // this is safe since u8 is half the size of u16 and the len of the src slice is even
+        unsafe { slice.align_to().1.try_into().unwrap() }
     }
 
-    fn verify_checksum(&self) -> bool {
-        // TODO: Implement the checksum algorithm
-        true
+    fn verify_signature(&self) -> bool {
+        self._long_entry_type == 0 && self._zeroed.iter().all(|v| *v == 0)
     }
 }
 
@@ -451,12 +482,7 @@ impl File {
 }
 
 /// variation of https://stackoverflow.com/a/42067321/19247098 for processing LFNs
-pub(crate) fn string_from_lfn_nul_utf8(utf16_bytes: &[u8]) -> Result<String, FromUtf16Error> {
-    let utf16_src: Vec<u16> = utf16_bytes
-        .chunks(2)
-        .map(|c| u16::from_le_bytes(c.try_into().unwrap()))
-        .collect();
-
+pub(crate) fn string_from_lfn(utf16_src: &[u16]) -> Result<String, FromUtf16Error> {
     let nul_range_end = utf16_src
         .iter()
         .position(|c| *c == 0x0000)
@@ -703,6 +729,7 @@ where
     ) -> FSResult<Vec<ResolvedEntry>, S::Error> {
         let mut entries = Vec::new();
         let mut lfn_buf: Vec<String> = Vec::new();
+        let mut lfn_checksum: Option<u8> = None;
 
         'outer: loop {
             self.storage.seek(SeekFrom::Start(
@@ -726,33 +753,42 @@ where
 
                 if entry.attributes.contains(EntryAttributes::LFN) {
                     // TODO: perhaps there is a way to utilize the `order` field?
-
                     let lfn_entry: LFNEntry = mem::transmute(entry);
 
-                    // If the checksum and signatures verification fails, consider this entry corrupted
-                    if !lfn_entry.verify_checksum() || !lfn_entry.verify_signature() {
+                    // If the signature verification fails, consider this entry corrupted
+                    if !lfn_entry.verify_signature() {
                         continue;
                     }
 
-                    let mut temp_buf: Vec<u8> = Vec::new();
-                    temp_buf.append(&mut lfn_entry.first_chars.to_vec());
-                    temp_buf.append(&mut lfn_entry.mid_chars.to_vec());
-                    temp_buf.append(&mut lfn_entry.last_chars.to_vec());
+                    match lfn_checksum {
+                        Some(checksum) => {
+                            if checksum != lfn_entry.checksum {
+                                lfn_checksum = None;
+                                lfn_buf.clear();
+                                continue;
+                            }
+                        }
+                        None => lfn_checksum = Some(lfn_entry.checksum),
+                    }
 
-                    if let Ok(temp_str) = string_from_lfn_nul_utf8(&temp_buf) {
+                    let char_arr = lfn_entry.get_byte_slice().to_vec();
+                    if let Ok(temp_str) = string_from_lfn(&char_arr) {
                         lfn_buf.push(temp_str);
                     }
 
                     continue;
                 }
 
-                let filename = if !lfn_buf.is_empty() {
+                let filename = if !lfn_buf.is_empty()
+                    && lfn_checksum.is_some_and(|checksum| checksum == entry.sfn.gen_checksum())
+                {
                     // for efficiency reasons, we store the LFN string sequences as we read them
                     let parsed_str: String = lfn_buf.iter().cloned().rev().collect();
                     lfn_buf.clear();
+                    lfn_checksum = None;
                     parsed_str
                 } else {
-                    entry.short_filename.to_string()
+                    entry.sfn.to_string()
                 };
 
                 entries.push(ResolvedEntry {
