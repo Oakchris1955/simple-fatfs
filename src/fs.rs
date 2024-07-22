@@ -240,6 +240,7 @@ pub enum FATType {
 }
 
 impl FATType {
+    #[inline]
     pub fn bits_per_entry(&self) -> u8 {
         match self {
             FATType::FAT12 => 12,
@@ -866,106 +867,73 @@ where
 
     #[allow(non_snake_case)]
     fn read_nth_FAT_entry(&mut self, n: u32) -> FSResult<FATEntry, S::Error> {
-        // TODO: refactor this, many code segments are being reused
-        match self.fat_type {
-            FATType::FAT12 => {
-                todo!("FAT12 not yet implemented")
-                /*let fat_offset = n * 3 / 2;
-                let fat_sector_offset = self.props.fat_offset + fat_offset / self.props.sector_size;
-                let ent_offset: usize = (fat_offset % self.props.sector_size) as usize;
+        // the size of an entry rounded up to bytes
+        let entry_size = self.fat_type.bits_per_entry().next_power_of_two() as u32 / 8;
+        let fat_offset: u32 = n * entry_size;
+        let fat_sector_offset = self.props.fat_offset + fat_offset / self.props.sector_size;
+        let entry_offset: usize = (fat_offset % self.props.sector_size) as usize;
 
-                self.storage
-                    .seek(SeekFrom::Start(fat_sector_offset.into()))?;
-                self.storage.read_exact(&mut self.sector_buffer)?;
+        self.storage
+            .seek(SeekFrom::Start(fat_sector_offset.into()))?;
+        self.storage.read_exact(&mut self.sector_buffer)?;
 
-                let mut value = u16::from_le_bytes(
-                    self.sector_buffer[ent_offset..ent_offset + 2]
-                        .try_into()
-                        .unwrap(), // this shouldn't panic
-                );
+        let mut value_bytes = [0_u8; 4];
+        value_bytes[..(4_usize - entry_size as usize)]
+            .copy_from_slice(&self.sector_buffer[entry_offset..entry_offset + entry_size as usize]); // this shouldn't panic
 
-                if (n & 1) != 0 {
-                    value >>= 4;
-                } else {
-                    value &= 0xFFF;
-                }
-
-                Ok(match value {
-                    0x000 => FATEntry::Free,
-                    0xFF7 => FATEntry::Bad,
-                    0xFF8..=0xFFE | 0xFFF => FATEntry::EOF,
-                    _ => {
-                        if (0x002..(self.props.total_clusters + 1)).contains(&value.into()) {
-                            FATEntry::Allocated(value.into())
-                        } else {
-                            FATEntry::Reserved
-                        }
-                    }
-                })*/
-            }
-            FATType::FAT16 => {
-                let fat_offset = n * 2;
-                let fat_sector_offset = self.props.fat_offset + fat_offset / self.props.sector_size;
-                let ent_offset: usize = (fat_offset % self.props.sector_size) as usize;
-
-                self.storage
-                    .seek(SeekFrom::Start(fat_sector_offset.into()))?;
-                self.storage.read_exact(&mut self.sector_buffer)?;
-
-                let value = u16::from_le_bytes(
-                    self.sector_buffer[ent_offset..ent_offset + 2]
-                        .try_into()
-                        .unwrap(), // this shouldn't panic
-                );
-
-                Ok(match value {
-                    0x0000 => FATEntry::Free,
-                    0xFFF7 => FATEntry::Bad,
-                    0xFFF8..=0xFFFE | 0xFFFF => FATEntry::EOF,
-                    _ => {
-                        if (0x0002..(self.props.total_clusters + 1)).contains(&value.into()) {
-                            FATEntry::Allocated(value.into())
-                        } else {
-                            FATEntry::Reserved
-                        }
-                    }
-                })
-            }
-            FATType::FAT32 | FATType::ExFAT => {
-                let fat_offset = n * 4;
-                let fat_sector_offset = self.props.fat_offset + fat_offset / self.props.sector_size;
-                let ent_offset: usize = (fat_offset % self.props.sector_size) as usize;
-
-                self.storage
-                    .seek(SeekFrom::Start(fat_sector_offset.into()))?;
-                self.storage.read_exact(&mut self.sector_buffer)?;
-
-                let mut value = u32::from_le_bytes(
-                    self.sector_buffer[ent_offset..ent_offset + 2]
-                        .try_into()
-                        .unwrap(), // this shouldn't panic
-                );
-
-                // remember to ignore the high 4 bits if this is FAT32
-                if self.fat_type == FATType::FAT32 {
-                    value &= 0x0FFFFFFF
-                }
-
-                Ok(match value {
-                    0x0000000 => FATEntry::Free,
-                    0xFFFFFF7 => FATEntry::Bad,
-                    // TODO: handle ExFAT for this inclusive range
-                    0xFFFFFF8..=0xFFFFFFE | 0xFFFFFFFF => FATEntry::EOF,
-                    _ => {
-                        if (0x0000002..(self.props.total_clusters + 1)).contains(&value.into()) {
-                            FATEntry::Allocated(value.into())
-                        } else {
-                            FATEntry::Reserved
-                        }
-                    }
-                })
-            }
+        let mut value = u32::from_le_bytes(value_bytes);
+        // ignore the high 4 bits if this is FAT32
+        if self.fat_type == FATType::FAT32 {
+            value &= 0x0FFFFFFF
         }
+
+        /*
+        // pad unused bytes with 1s
+        let padding: u32 = u32::MAX.to_be() << self.fat_type.bits_per_entry();
+        value |= padding.to_le();
+        panic!("{:?} {:?}", value.to_be_bytes(), padding.to_be_bytes());
+        */
+
+        // TODO: perhaps byte padding can replace some redundant code here?
+        Ok(match self.fat_type {
+            FATType::FAT12 => match value {
+                0x000 => FATEntry::Free,
+                0xFF7 => FATEntry::Bad,
+                0xFF8..=0xFFE | 0xFFF => FATEntry::EOF,
+                _ => {
+                    if (0x002..(self.props.total_clusters + 1)).contains(&value.into()) {
+                        FATEntry::Allocated(value.into())
+                    } else {
+                        FATEntry::Reserved
+                    }
+                }
+            },
+            FATType::FAT16 => match value {
+                0x0000 => FATEntry::Free,
+                0xFFF7 => FATEntry::Bad,
+                0xFFF8..=0xFFFE | 0xFFFF => FATEntry::EOF,
+                _ => {
+                    if (0x0002..(self.props.total_clusters + 1)).contains(&value.into()) {
+                        FATEntry::Allocated(value.into())
+                    } else {
+                        FATEntry::Reserved
+                    }
+                }
+            },
+            FATType::FAT32 => match value {
+                0x00000000 => FATEntry::Free,
+                0xFFFFFFF7 => FATEntry::Bad,
+                0xFFFFFFF8..=0xFFFFFFFE | 0xFFFFFFFF => FATEntry::EOF,
+                _ => {
+                    if (0x00000002..(self.props.total_clusters + 1)).contains(&value.into()) {
+                        FATEntry::Allocated(value.into())
+                    } else {
+                        FATEntry::Reserved
+                    }
+                }
+            },
+            FATType::ExFAT => todo!("ExFAT not yet implemented"),
+        })
     }
 }
 
