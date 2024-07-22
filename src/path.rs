@@ -1,5 +1,9 @@
 //! Note: Paths here are Unix-like when converted to [`String`]s (the root directory is `/`, and the directory separator is `/`),
 //! but DOS-like paths are also accepted and converted to Unix-like when pushed
+//!
+//! It is possible to push forbidden characters to a [`PathBuf`], doing so however will make most functions
+//! return a [`MalformedPath`](crate::error::FSError::MalformedPath) error
+//!
 
 #[cfg(not(feature = "std"))]
 use core::*;
@@ -17,27 +21,41 @@ use ::alloc::{
 #[cfg(feature = "std")]
 use std::collections::VecDeque;
 
-// A (not yet complete) list of all the forbidden filename/directory name characters
-// See https://stackoverflow.com/a/31976060/
-const FORBIDDEN_CHARS: &[char] = &['<', '>', ':', '"', '/', '\\', ',', '?', '*'];
-const RESERVED_FILENAMES: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+// A (incomplete) list of all the forbidden filename/directory name characters
+// See https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file?redirectedfrom=MSDN
+
+/// A list of all the characters that are forbidden to exist in a filename
+pub const FORBIDDEN_CHARS: &[char] = &['<', '>', ':', '"', '/', '\\', ',', '?', '*'];
+/// A list of all filenames that are reserved in Windows (and should probably also not be used by FAT)
+pub const RESERVED_FILENAMES: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+    "COM8", "COM9", "COM¹", "COM²", "COM³", "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6",
+    "LPT7", "LPT8", "LPT9", "LPT¹", "LPT²", "LPT³",
 ];
 
-/// Check whether a [`String`] is forbidden for use in filenames or directory names
-pub fn is_forbidden<S>(string: S) -> bool
-where
-    S: ToString,
-{
-    let string = string.to_string();
+/// Check whether a [`PathBuf`] is forbidden for use in filenames or directory names
+pub fn is_forbidden(pathbuf: &PathBuf) -> bool {
+    for subpath in pathbuf.clone() {
+        if subpath
+            .chars()
+            .any(|c| c.is_control() || FORBIDDEN_CHARS.contains(&c))
+        {
+            return true;
+        }
+    }
 
-    string
-        .chars()
-        .any(|c| c.is_control() || FORBIDDEN_CHARS.contains(&c))
-        || RESERVED_FILENAMES
+    if let Some(file_name) = pathbuf.file_name() {
+        if RESERVED_FILENAMES
             .iter()
-            .any(|reserved| string.contains(reserved))
+            // remove extension
+            .map(|file_name| file_name.split_once(".").map(|s| s.0).unwrap_or(file_name))
+            .any(|reserved| file_name == reserved)
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[derive(Debug, Clone)]
@@ -51,8 +69,7 @@ impl PathBuf {
     }
 
     // Seperate by "\" or "/" and push into inner vector
-    /// `unsafe` until we correctly handle (or reject) malformed subpaths
-    pub unsafe fn push<P>(&mut self, subpath: P)
+    pub fn push<P>(&mut self, subpath: P)
     where
         P: ToString,
     {
@@ -123,26 +140,14 @@ impl PathBuf {
 
     /// Checks whether this [`PathBuf`] is malformed (as if someone pushed a string with many consecutive slashes)
     pub fn is_malformed(&self) -> bool {
-        for (index, subpath) in self.inner.iter().enumerate() {
-            // check for forbidden filenames
-            if is_forbidden(subpath) {
-                return true;
-            }
-
-            // check for empty directory names
-            if subpath.is_empty() && index < self.inner.len() - 1 {
-                return true;
-            }
-        }
-
-        false
+        is_forbidden(&self)
     }
 }
 
 impl From<String> for PathBuf {
     fn from(value: String) -> Self {
         let mut pathbuf = PathBuf::new();
-        unsafe { pathbuf.push(value) };
+        pathbuf.push(value);
 
         pathbuf
     }
@@ -190,11 +195,24 @@ fn empty_pathbuf_tostring() {
 }
 
 #[test]
-fn catch_malformed_pathbuf_slashes() {
-    let mut pathbuf = PathBuf::new();
-    unsafe { pathbuf.push("\\//\\/") };
+fn catch_invalid_path() {
+    #[cfg(not(feature = "std"))]
+    use ::alloc::format;
 
-    assert!(pathbuf.is_malformed())
+    let mut pathbuf = PathBuf::new();
+
+    // ignore path separators
+    for filename in RESERVED_FILENAMES {
+        pathbuf.push(format!("/{filename}"));
+
+        assert!(
+            pathbuf.is_malformed(),
+            "unable to detect invalid filename {}",
+            pathbuf
+        );
+
+        pathbuf.clear();
+    }
 }
 
 #[test]
@@ -204,8 +222,14 @@ fn catch_non_control_forbidden_chars() {
 
     let mut pathbuf = PathBuf::new();
 
-    for c in FORBIDDEN_CHARS {
-        unsafe { pathbuf.push(format!("/{c}")) };
+    // ignore path separators
+    const PATH_SEPARATORS: &[char] = &['/', '\\'];
+    for c in FORBIDDEN_CHARS
+        .iter()
+        .filter(|c| !PATH_SEPARATORS.contains(c))
+    {
+        pathbuf.push(format!("/{c}"));
+
         assert!(
             pathbuf.is_malformed(),
             "unable to detect character {} (hex: {:#02x}) as forbidden {:?}",
@@ -213,6 +237,7 @@ fn catch_non_control_forbidden_chars() {
             (*c as usize),
             pathbuf
         );
+
         pathbuf.clear();
     }
 }
@@ -220,12 +245,11 @@ fn catch_non_control_forbidden_chars() {
 #[test]
 fn ignore_multiple_separators() {
     let mut pathbuf = PathBuf::new();
-    unsafe {
-        pathbuf.push("first/");
-        pathbuf.push("second\\");
-        pathbuf.push("/third\\");
-        pathbuf.push("\\last/");
-    }
+
+    pathbuf.push("first/");
+    pathbuf.push("second\\");
+    pathbuf.push("/third\\");
+    pathbuf.push("\\last/");
 
     assert_eq!(pathbuf.to_string(), "/first/second/third/last/")
 }
@@ -233,15 +257,14 @@ fn ignore_multiple_separators() {
 #[test]
 fn push_to_pathbuf() {
     let mut pathbuf = PathBuf::new();
-    unsafe {
-        pathbuf.push("foo");
-        pathbuf.push("bar/test");
-        pathbuf.push("bar2\\test2");
-        pathbuf.push("ignored\\../.");
-        pathbuf.push("\\fintest1");
-        pathbuf.push("fintest2/");
-        pathbuf.push("last");
-    }
+
+    pathbuf.push("foo");
+    pathbuf.push("bar/test");
+    pathbuf.push("bar2\\test2");
+    pathbuf.push("ignored\\../.");
+    pathbuf.push("\\fintest1");
+    pathbuf.push("fintest2/");
+    pathbuf.push("last");
 
     assert_eq!(
         pathbuf.to_string(),

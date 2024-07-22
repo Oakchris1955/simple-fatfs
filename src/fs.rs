@@ -680,13 +680,12 @@ where
             .into_iter()
             .map(|entry| {
                 let mut entry_path = path.clone();
-                unsafe {
-                    entry_path.push(format!(
-                        "{}{}",
-                        entry.name,
-                        if entry.is_dir { "/" } else { "" }
-                    ))
-                };
+
+                entry_path.push(format!(
+                    "{}{}",
+                    entry.name,
+                    if entry.is_dir { "/" } else { "" }
+                ));
                 DirEntry {
                     path: entry_path,
                     cluster: entry.data_cluster,
