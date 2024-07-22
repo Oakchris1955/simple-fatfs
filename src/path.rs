@@ -8,6 +8,7 @@ use std::*;
 
 #[cfg(not(feature = "std"))]
 use ::alloc::{
+    borrow::ToOwned,
     collections::vec_deque::VecDeque,
     string::{String, ToString},
     vec::Vec,
