@@ -7,7 +7,6 @@ use ::alloc::{
     borrow::ToOwned,
     format,
     string::{FromUtf16Error, String, ToString},
-    vec,
     vec::*,
 };
 
@@ -463,11 +462,11 @@ impl File {
             for sector in
                 first_sector_of_cluster..(first_sector_of_cluster + fs.sectors_per_cluster() as u32)
             {
-                fs.storage.seek(SeekFrom::Start(
-                    fs.sector_to_partition_offset(sector).into(),
-                ))?;
-                fs.storage.read_exact(&mut fs.sector_buffer)?;
-                bytes.append(&mut fs.sector_buffer);
+                bytes.append(
+                    &mut fs
+                        .read_nth_sector(fs.sector_to_partition_offset(sector).into())?
+                        .clone(),
+                );
 
                 if bytes.len() >= self.file_size as usize {
                     // remove any bytes that don't belong to the file
@@ -545,6 +544,7 @@ where
 
     /// The length of this will be the sector size of the FS for all FAT types except FAT12, in that case, it will be double that value
     sector_buffer: Vec<u8>,
+    stored_sector: u64,
 
     boot_record: BootRecord,
     /// since `self.fat_type()` calls like 5 nested functions, we keep this cached and expose it as a public field
@@ -644,7 +644,8 @@ where
 
         Ok(Self {
             storage,
-            sector_buffer: vec![0; unsafe { boot_record.fat.bytes_per_sector as usize }],
+            sector_buffer: buffer[..sector_size as usize].to_vec(),
+            stored_sector: 0,
             boot_record,
             fat_type,
             props,
@@ -734,12 +735,10 @@ where
         let mut lfn_checksum: Option<u8> = None;
 
         'outer: loop {
-            self.storage.seek(SeekFrom::Start(
-                self.sector_to_partition_offset(sector) as u64
-            ))?;
-            self.storage.read_exact(&mut self.sector_buffer)?;
-
-            for chunk in self.sector_buffer.chunks(mem::size_of::<FATDirEntry>()) {
+            for chunk in self
+                .read_nth_sector(self.sector_to_partition_offset(sector).into())?
+                .chunks(mem::size_of::<FATDirEntry>())
+            {
                 match chunk[0] {
                     // nothing else to read
                     0 => break 'outer,
@@ -866,6 +865,19 @@ where
         Ok(entries)
     }
 
+    /// Read the nth sector from the partition's beginning and store it in [`self.sector_buffer`](Self::sector_buffer)
+    ///
+    /// This function also returns an immutable reference to [`self.sector_buffer`](Self::sector_buffer)
+    fn read_nth_sector(&mut self, n: u64) -> FSResult<&Vec<u8>, S::Error> {
+        // nothing to do if the sector we wanna read is already cached
+        if n != self.stored_sector {
+            self.storage.seek(SeekFrom::Start(n))?;
+            self.storage.read_exact(&mut self.sector_buffer)?;
+        }
+
+        Ok(&self.sector_buffer)
+    }
+
     #[allow(non_snake_case)]
     fn read_nth_FAT_entry(&mut self, n: u32) -> FSResult<FATEntry, S::Error> {
         // the size of an entry rounded up to bytes
@@ -874,9 +886,7 @@ where
         let fat_sector_offset = self.props.fat_offset + fat_offset / self.props.sector_size;
         let entry_offset: usize = (fat_offset % self.props.sector_size) as usize;
 
-        self.storage
-            .seek(SeekFrom::Start(fat_sector_offset.into()))?;
-        self.storage.read_exact(&mut self.sector_buffer)?;
+        self.read_nth_sector(fat_sector_offset.into())?;
 
         let mut value_bytes = [0_u8; 4];
         value_bytes[..(4_usize - entry_size as usize)]
@@ -940,8 +950,6 @@ where
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
-    use io::Read;
-
     use super::*;
 
     static MINFS: &[u8] = include_bytes!("../imgs/minfs.img");
@@ -957,10 +965,7 @@ mod tests {
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
         // we manually read the first and second entry of the FAT table
-        fs.storage
-            .seek(SeekFrom::Start(fs.props.fat_offset.into()))
-            .unwrap();
-        fs.storage.read_exact(&mut fs.sector_buffer).unwrap();
+        fs.read_nth_sector(fs.props.fat_offset.into()).unwrap();
 
         let first_entry = u16::from_le_bytes(fs.sector_buffer[0..2].try_into().unwrap());
         let media_type = unsafe { fs.boot_record.fat._media_type };
