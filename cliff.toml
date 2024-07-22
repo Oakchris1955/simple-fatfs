@@ -55,6 +55,9 @@ filter_unconventional = true
 split_commits = false
 # regex for parsing and grouping commits
 commit_parsers = [
+  { message = "^chore", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^test", skip = true },
   { message = "^.*: add", group = "Added" },
   { message = "^.*: create", group = "Added" },
   { message = "^.*: support", group = "Added" },
