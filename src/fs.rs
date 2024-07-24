@@ -13,6 +13,9 @@ use ::alloc::{
 use bit_struct::*;
 use bitflags::bitflags;
 
+use ::time;
+use time::{Date, PrimitiveDateTime, Time};
+
 use crate::{error::*, io::prelude::*, path::PathBuf};
 
 pub const SECTOR_SIZE_MIN: usize = 512;
@@ -327,18 +330,48 @@ bitflags! {
     }
 }
 
+const START_YEAR: i32 = 1980;
+
 bit_struct! {
-    struct CreationTime(u16) {
+    struct TimeAttribute(u16) {
         hour: u5,
         minutes: u6,
         /// Multiply by 2
         seconds: u5,
     }
 
-    struct CreationDate(u16) {
+    struct DateAttribute(u16) {
         year: u7,
         month: u4,
         day: u5,
+    }
+}
+
+impl TryFrom<TimeAttribute> for Time {
+    type Error = ();
+
+    fn try_from(mut value: TimeAttribute) -> Result<Self, Self::Error> {
+        time::parsing::Parsed::new()
+            .with_hour_24(value.hour().get().value())
+            .and_then(|parsed| parsed.with_minute(value.minutes().get().value()))
+            .and_then(|parsed| parsed.with_second(value.seconds().get().value() * 2))
+            .map(|parsed| parsed.try_into().ok())
+            .flatten()
+            .ok_or(())
+    }
+}
+
+impl TryFrom<DateAttribute> for Date {
+    type Error = ();
+
+    fn try_from(mut value: DateAttribute) -> Result<Self, Self::Error> {
+        time::parsing::Parsed::new()
+            .with_year(i32::from(value.year().get().value()) + START_YEAR)
+            .and_then(|parsed| parsed.with_month(value.month().get().value().try_into().ok()?))
+            .and_then(|parsed| parsed.with_day(num::NonZeroU8::new(value.day().get().value())?))
+            .map(|parsed| parsed.try_into().ok())
+            .flatten()
+            .ok_or(())
     }
 }
 
@@ -346,15 +379,46 @@ bit_struct! {
 #[repr(packed)]
 struct EntryCreationTime {
     hundredths_of_second: u8,
-    time: CreationTime,
-    date: CreationDate,
+    time: TimeAttribute,
+    date: DateAttribute,
+}
+
+impl TryFrom<EntryCreationTime> for PrimitiveDateTime {
+    type Error = ();
+
+    fn try_from(value: EntryCreationTime) -> Result<Self, Self::Error> {
+        let mut time: Time = value.time.try_into()?;
+
+        let new_seconds = time.second() + value.hundredths_of_second / 100;
+        let milliseconds = u16::from(value.hundredths_of_second) % 100 * 10;
+        time = time
+            .replace_second(new_seconds)
+            .map_err(|_| ())?
+            .replace_millisecond(milliseconds)
+            .map_err(|_| ())?;
+
+        let date: Date = value.date.try_into()?;
+
+        Ok(PrimitiveDateTime::new(date, time))
+    }
 }
 
 #[derive(Debug, Clone)]
 #[repr(packed)]
 struct EntryModificationTime {
-    time: CreationTime,
-    date: CreationDate,
+    time: TimeAttribute,
+    date: DateAttribute,
+}
+
+impl TryFrom<EntryModificationTime> for PrimitiveDateTime {
+    type Error = ();
+
+    fn try_from(value: EntryModificationTime) -> Result<Self, Self::Error> {
+        Ok(PrimitiveDateTime::new(
+            value.date.try_into()?,
+            value.time.try_into()?,
+        ))
+    }
 }
 
 #[repr(packed)]
@@ -363,7 +427,7 @@ struct FATDirEntry {
     attributes: Attributes,
     _reserved: [u8; 1],
     created: EntryCreationTime,
-    accessed: CreationDate,
+    accessed: DateAttribute,
     cluster_high: u16,
     modified: EntryModificationTime,
     cluster_low: u16,
@@ -412,8 +476,9 @@ struct RawProperties {
     name: String,
     is_dir: bool,
     attributes: Attributes,
-    created: EntryCreationTime,
-    modified: EntryModificationTime,
+    created: PrimitiveDateTime,
+    modified: PrimitiveDateTime,
+    accessed: Date,
     file_size: u32,
     data_cluster: u32,
 }
@@ -422,6 +487,9 @@ struct RawProperties {
 pub struct Properties {
     path: PathBuf,
     attributes: Attributes,
+    created: PrimitiveDateTime,
+    modified: PrimitiveDateTime,
+    accessed: Date,
     file_size: u32,
     data_cluster: u32,
 }
@@ -436,6 +504,18 @@ impl Properties {
         &self.attributes
     }
 
+    pub fn creation_time(&self) -> &PrimitiveDateTime {
+        &self.created
+    }
+
+    pub fn modification_time(&self) -> &PrimitiveDateTime {
+        &self.modified
+    }
+
+    pub fn last_accessed_date(&self) -> &Date {
+        &self.accessed
+    }
+
     pub fn file_size(&self) -> u32 {
         self.file_size
     }
@@ -447,6 +527,9 @@ impl Properties {
         Properties {
             path,
             attributes: raw.attributes,
+            created: raw.created,
+            modified: raw.modified,
+            accessed: raw.accessed,
             file_size: raw.file_size,
             data_cluster: raw.data_cluster,
         }
@@ -816,15 +899,23 @@ where
                     entry.sfn.to_string()
                 };
 
-                entries.push(RawProperties {
-                    name: filename,
-                    is_dir: entry.attributes.contains(Attributes::DIRECTORY),
-                    attributes: entry.attributes,
-                    created: entry.created,
-                    modified: entry.modified,
-                    file_size: entry.file_size,
-                    data_cluster: ((entry.cluster_high as u32) << 16) + entry.cluster_low as u32,
-                })
+                if let (Ok(created), Ok(modified), Ok(accessed)) = (
+                    entry.created.try_into(),
+                    entry.modified.try_into(),
+                    entry.accessed.try_into(),
+                ) {
+                    entries.push(RawProperties {
+                        name: filename,
+                        is_dir: entry.attributes.contains(Attributes::DIRECTORY),
+                        attributes: entry.attributes,
+                        created,
+                        modified,
+                        accessed,
+                        file_size: entry.file_size,
+                        data_cluster: ((entry.cluster_high as u32) << 16)
+                            + entry.cluster_low as u32,
+                    })
+                }
             }
         }
 
@@ -975,6 +1066,7 @@ where
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
+    use time::macros::*;
 
     static MINFS: &[u8] = include_bytes!("../imgs/minfs.img");
     static FAT12: &[u8] = include_bytes!("../imgs/fat12.img");
@@ -1027,6 +1119,20 @@ mod tests {
         let file_string = String::from_utf8_lossy(&file_bytes).to_string();
         const EXPECTED_STR: &str = "I am not in the root directory :(\n\n";
         assert_eq!(file_string, EXPECTED_STR);
+    }
+
+    #[test]
+    fn check_file_timestamps() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT16.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        let file = fs.get_file(PathBuf::from("/rootdir/example.txt")).unwrap();
+
+        assert_eq!(datetime!(2024-07-11 13:02:38.15), file.entry.created);
+        assert_eq!(datetime!(2024-07-11 13:02:38.0), file.entry.modified);
+        assert_eq!(date!(2024 - 07 - 11), file.entry.accessed);
     }
 
     #[test]
