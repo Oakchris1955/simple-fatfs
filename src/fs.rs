@@ -52,6 +52,7 @@ const BOOT_SIGNATURE: u8 = 0x29;
 const FAT_SIGNATURE: u16 = 0x55AA;
 
 impl BootRecordFAT {
+    #[inline]
     fn verify_signature(&self) -> bool {
         match self.fat_type() {
             FATType::FAT12 | FATType::FAT16 => unsafe {
@@ -66,7 +67,8 @@ impl BootRecordFAT {
         }
     }
 
-    /// Total sectors in volume (including VBR)
+    #[inline]
+    /// Total sectors in volume (including VBR)s
     pub(crate) fn total_sectors(&self) -> u32 {
         if self.total_sectors_16 == 0 {
             self.total_sectors_32
@@ -75,6 +77,7 @@ impl BootRecordFAT {
         }
     }
 
+    #[inline]
     /// FAT size in sectors
     pub(crate) fn fat_sector_size(&self) -> u32 {
         if self.table_size_16 == 0 {
@@ -85,6 +88,7 @@ impl BootRecordFAT {
         }
     }
 
+    #[inline]
     /// The size of the root directory (unless we have FAT32, in which case the size will be 0)
     /// This calculation will round up
     pub(crate) fn root_dir_sectors(&self) -> u16 {
@@ -92,32 +96,38 @@ impl BootRecordFAT {
         ((self.root_entry_count * 32) + (self.bytes_per_sector - 1)) / self.bytes_per_sector
     }
 
+    #[inline]
     /// The first sector in the File Allocation Table
     pub(crate) fn first_fat_sector(&self) -> u16 {
         self.reserved_sector_count
     }
 
+    #[inline]
     /// The first sector of the root directory
     pub(crate) fn first_root_dir_sector(&self) -> u16 {
         self.first_fat_sector() + self.table_count as u16 * self.fat_sector_size() as u16
     }
 
+    #[inline]
     /// The first data sector (that is, the first sector in which directories and files may be stored)
     pub(crate) fn first_data_sector(&self) -> u16 {
         self.first_root_dir_sector() + self.root_dir_sectors()
     }
 
+    #[inline]
     /// The total number of data sectors
     pub(crate) fn total_data_sectors(&self) -> u32 {
         self.total_sectors() - (self.table_count as u32 * self.fat_sector_size())
             + self.root_dir_sectors() as u32
     }
 
+    #[inline]
     /// The total number of clusters
     pub(crate) fn total_clusters(&self) -> u32 {
         self.total_data_sectors() / self.sectors_per_cluster as u32
     }
 
+    #[inline]
     /// The FAT type of this file system
     pub(crate) fn fat_type(&self) -> FATType {
         if self.bytes_per_sector == 0 {
@@ -465,6 +475,7 @@ impl LFNEntry {
         unsafe { slice.align_to().1.try_into().unwrap() }
     }
 
+    #[inline]
     fn verify_signature(&self) -> bool {
         self._long_entry_type == 0 && self._zeroed.iter().all(|v| *v == 0)
     }
@@ -496,26 +507,32 @@ pub struct Properties {
 
 /// Getter methods
 impl Properties {
+    #[inline]
     pub fn path(&self) -> &PathBuf {
         &self.path
     }
 
+    #[inline]
     pub fn attributes(&self) -> &Attributes {
         &self.attributes
     }
 
+    #[inline]
     pub fn creation_time(&self) -> &PrimitiveDateTime {
         &self.created
     }
 
+    #[inline]
     pub fn modification_time(&self) -> &PrimitiveDateTime {
         &self.modified
     }
 
+    #[inline]
     pub fn last_accessed_date(&self) -> &Date {
         &self.accessed
     }
 
+    #[inline]
     pub fn file_size(&self) -> u32 {
         self.file_size
     }
@@ -523,6 +540,7 @@ impl Properties {
 
 /// Serialization methods
 impl Properties {
+    #[inline]
     fn from_raw(raw: RawProperties, path: PathBuf) -> Self {
         Properties {
             path,
@@ -544,6 +562,7 @@ pub struct DirEntry {
 impl ops::Deref for DirEntry {
     type Target = Properties;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.entry
     }
@@ -683,6 +702,7 @@ where
     }
 }
 
+/// Public functions
 impl<S> FileSystem<S>
 where
     S: Read + Write + Seek,
@@ -829,7 +849,13 @@ where
             Err(FSError::IsADirectory)
         }
     }
+}
 
+/// Internal low-level functions
+impl<S> FileSystem<S>
+where
+    S: Read + Write + Seek,
+{
     /// Unsafe because the sector number must point to an area with directory entries
     ///
     /// Also the sector number starts from the beginning of the partition
