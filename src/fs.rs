@@ -312,7 +312,7 @@ impl fmt::Display for SFN {
 
 bitflags! {
     #[derive(Debug, PartialEq)]
-    pub struct EntryAttributes: u8 {
+    pub struct Attributes: u8 {
         const READ_ONLY = 0x01;
         const HIDDEN = 0x02;
         const SYSTEM = 0x04;
@@ -360,7 +360,7 @@ struct EntryModificationTime {
 #[repr(packed)]
 struct FATDirEntry {
     sfn: SFN,
-    attributes: EntryAttributes,
+    attributes: Attributes,
     _reserved: [u8; 1],
     created: EntryCreationTime,
     accessed: CreationDate,
@@ -406,12 +406,12 @@ impl LFNEntry {
     }
 }
 
-/// A resolved file/directory entry
+/// A resolved file/directory entry (for internal usage only)
 #[derive(Debug)]
-struct ResolvedEntry {
+struct RawProperties {
     name: String,
     is_dir: bool,
-    attributes: EntryAttributes,
+    attributes: Attributes,
     created: EntryCreationTime,
     modified: EntryModificationTime,
     file_size: u32,
@@ -419,63 +419,91 @@ struct ResolvedEntry {
 }
 
 #[derive(Debug)]
-pub struct DirEntry {
+pub struct Properties {
     path: PathBuf,
-    cluster: u32,
+    attributes: Attributes,
     file_size: u32,
-    attributes: EntryAttributes,
+    data_cluster: u32,
 }
 
-impl DirEntry {
-    pub fn path(&self) -> PathBuf {
-        self.path.to_owned()
+/// Getter methods
+impl Properties {
+    pub fn path(&self) -> &PathBuf {
+        &self.path
+    }
+
+    pub fn attributes(&self) -> &Attributes {
+        &self.attributes
+    }
+
+    pub fn file_size(&self) -> u32 {
+        self.file_size
     }
 }
 
-impl ops::Deref for DirEntry {
-    type Target = PathBuf;
-
-    fn deref(&self) -> &Self::Target {
-        &self.path
+/// Serialization methods
+impl Properties {
+    fn from_raw(raw: RawProperties, path: PathBuf) -> Self {
+        Properties {
+            path,
+            attributes: raw.attributes,
+            file_size: raw.file_size,
+            data_cluster: raw.data_cluster,
+        }
     }
 }
 
 #[derive(Debug)]
-pub struct File {
-    path: PathBuf,
-    data_cluster: u32,
-    file_size: u32,
-    attributes: EntryAttributes,
+pub struct DirEntry {
+    entry: Properties,
 }
 
-impl File {
-    pub fn read_to_end<S>(&self, fs: &mut FileSystem<S>) -> FSResult<Vec<u8>, S::Error>
-    where
-        S: Read + Write + Seek,
-    {
-        let mut current_cluster = self.data_cluster;
+impl ops::Deref for DirEntry {
+    type Target = Properties;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entry
+    }
+}
+
+pub struct File<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    path: PathBuf,
+    fs: &'a mut FileSystem<S>,
+    entry: Properties,
+}
+
+impl<'a, S> File<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    pub fn read_to_end(&mut self) -> FSResult<Vec<u8>, S::Error> {
+        let mut current_cluster = self.entry.data_cluster;
         let mut bytes: Vec<u8> = Vec::new();
 
         loop {
             // FAT specification, section 6.7
-            let first_sector_of_cluster = fs.data_cluster_to_partition_sector(current_cluster);
-            for sector in
-                first_sector_of_cluster..(first_sector_of_cluster + fs.sectors_per_cluster() as u32)
+            let first_sector_of_cluster = self.fs.data_cluster_to_partition_sector(current_cluster);
+            for sector in first_sector_of_cluster
+                ..(first_sector_of_cluster + self.fs.sectors_per_cluster() as u32)
             {
                 bytes.append(
-                    &mut fs
-                        .read_nth_sector(fs.sector_to_partition_offset(sector).into())?
+                    &mut self
+                        .fs
+                        .read_nth_sector(self.fs.sector_to_partition_offset(sector).into())?
                         .clone(),
                 );
 
-                if bytes.len() >= self.file_size as usize {
+                if bytes.len() >= self.entry.file_size as usize {
                     // remove any bytes that don't belong to the file
-                    bytes.truncate(self.file_size as usize);
+                    bytes.truncate(self.entry.file_size as usize);
                     return Ok(bytes);
                 }
             }
 
-            match fs.read_nth_FAT_entry(self.data_cluster)? {
+            match self.fs.read_nth_FAT_entry(self.entry.data_cluster)? {
                 FATEntry::Allocated(next_cluster) => current_cluster = next_cluster,
                 _ => return Err(FSError::UnexpectedEOF),
             };
@@ -664,7 +692,7 @@ where
 
         for dir_name in path.clone().into_iter() {
             let dir_cluster = match entries.iter().find(|entry| {
-                entry.name == dir_name && entry.attributes.contains(EntryAttributes::DIRECTORY)
+                entry.name == dir_name && entry.attributes.contains(Attributes::DIRECTORY)
             }) {
                 Some(entry) => entry.data_cluster,
                 None => {
@@ -679,45 +707,41 @@ where
         // contains what we want, let's map it to DirEntries and return
         Ok(entries
             .into_iter()
-            .map(|entry| {
+            .map(|rawentry| {
                 let mut entry_path = path.clone();
 
                 entry_path.push(format!(
                     "{}{}",
-                    entry.name,
-                    if entry.is_dir { "/" } else { "" }
+                    rawentry.name,
+                    if rawentry.is_dir { "/" } else { "" }
                 ));
                 DirEntry {
-                    path: entry_path,
-                    cluster: entry.data_cluster,
-                    file_size: entry.file_size,
-                    attributes: entry.attributes,
+                    entry: Properties::from_raw(rawentry, entry_path),
                 }
             })
             .collect())
     }
 
-    pub fn get_file(&mut self, path: PathBuf) -> FSResult<File, S::Error> {
+    pub fn get_file(&mut self, path: PathBuf) -> FSResult<File<S>, S::Error> {
         if path.is_malformed() {
             return Err(FSError::MalformedPath);
         }
 
         if let Some(file_name) = path.file_name() {
             let parent_dir = self.read_dir(path.parent())?;
-            parent_dir
-                .into_iter()
-                .find(|entry| {
-                    entry
-                        .file_name()
-                        .is_some_and(|entry_name| entry_name == file_name)
-                })
-                .map(|entry| File {
-                    path: entry.path,
-                    data_cluster: entry.cluster,
-                    file_size: entry.file_size,
-                    attributes: entry.attributes,
-                })
-                .ok_or(FSError::NotFound)
+            match parent_dir.into_iter().find(|direntry| {
+                direntry
+                    .path()
+                    .file_name()
+                    .is_some_and(|entry_name| entry_name == file_name)
+            }) {
+                Some(direntry) => Ok(File {
+                    path: direntry.path().to_owned(),
+                    fs: self,
+                    entry: direntry.entry,
+                }),
+                None => Err(FSError::NotFound),
+            }
         } else {
             Err(FSError::IsADirectory)
         }
@@ -729,7 +753,7 @@ where
     unsafe fn process_entry_sector(
         &mut self,
         sector: u32,
-    ) -> FSResult<Vec<ResolvedEntry>, S::Error> {
+    ) -> FSResult<Vec<RawProperties>, S::Error> {
         let mut entries = Vec::new();
         let mut lfn_buf: Vec<String> = Vec::new();
         let mut lfn_checksum: Option<u8> = None;
@@ -752,7 +776,7 @@ where
                     chunk.try_into().unwrap(),
                 );
 
-                if entry.attributes.contains(EntryAttributes::LFN) {
+                if entry.attributes.contains(Attributes::LFN) {
                     // TODO: perhaps there is a way to utilize the `order` field?
                     let lfn_entry: LFNEntry = mem::transmute(entry);
 
@@ -792,9 +816,9 @@ where
                     entry.sfn.to_string()
                 };
 
-                entries.push(ResolvedEntry {
+                entries.push(RawProperties {
                     name: filename,
-                    is_dir: entry.attributes.contains(EntryAttributes::DIRECTORY),
+                    is_dir: entry.attributes.contains(Attributes::DIRECTORY),
                     attributes: entry.attributes,
                     created: entry.created,
                     modified: entry.modified,
@@ -807,7 +831,7 @@ where
         Ok(entries)
     }
 
-    fn process_root_dir(&mut self) -> FSResult<Vec<ResolvedEntry>, S::Error> {
+    fn process_root_dir(&mut self) -> FSResult<Vec<RawProperties>, S::Error> {
         match self.fat_type {
             FATType::FAT12 | FATType::FAT16 => {
                 let mut entries = Vec::new();
@@ -836,7 +860,7 @@ where
     unsafe fn process_normal_dir(
         &mut self,
         mut data_cluster: u32,
-    ) -> FSResult<Vec<ResolvedEntry>, S::Error> {
+    ) -> FSResult<Vec<RawProperties>, S::Error> {
         let mut entries = Vec::new();
 
         loop {
@@ -982,8 +1006,8 @@ mod tests {
         let mut storage = Cursor::new(FAT16.to_owned());
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
-        let file = fs.get_file(PathBuf::from("/root.txt")).unwrap();
-        let file_bytes = file.read_to_end(&mut fs).unwrap();
+        let mut file = fs.get_file(PathBuf::from("/root.txt")).unwrap();
+        let file_bytes = file.read_to_end().unwrap();
 
         let file_string = String::from_utf8_lossy(&file_bytes).to_string();
         const EXPECTED_STR: &str = "I am in the filesystem's root!!!\n\n";
@@ -997,8 +1021,8 @@ mod tests {
         let mut storage = Cursor::new(FAT16.to_owned());
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
-        let file = fs.get_file(PathBuf::from("/rootdir/example.txt")).unwrap();
-        let file_bytes = file.read_to_end(&mut fs).unwrap();
+        let mut file = fs.get_file(PathBuf::from("/rootdir/example.txt")).unwrap();
+        let file_bytes = file.read_to_end().unwrap();
 
         let file_string = String::from_utf8_lossy(&file_bytes).to_string();
         const EXPECTED_STR: &str = "I am not in the root directory :(\n\n";
