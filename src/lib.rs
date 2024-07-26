@@ -2,7 +2,11 @@
 
 extern crate alloc;
 
-pub mod error;
-pub mod fs;
+mod error;
+mod fs;
 pub mod io;
-pub mod path;
+mod path;
+
+pub use error::*;
+pub use fs::*;
+pub use path::*;

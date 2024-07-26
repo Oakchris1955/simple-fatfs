@@ -1,13 +1,17 @@
+//! This module contains all the IO-related objects of the crate
+
 use crate::error::IOError;
 
+/// With `use prelude::*`, all IO-related traits are automatically imported
 pub mod prelude {
     pub use super::{IOBase, Read, Seek, SeekFrom, Write};
 }
 
 // Some things here were borrowed from the Rust Standard Library and the source code of the `ciborium-io` crate
 
-/// The base trait on which [`Read`], [`Write`] and [`Seek`] build
-/// Mainly used to provide a shared error type
+/// All other IO traits ([`Read`], [`Write`] and [`Seek`]) are supertraits of this
+///
+/// Used to define a shared error type for these traits
 pub trait IOBase {
     /// The error type
     type Error: IOError;
@@ -26,7 +30,7 @@ pub trait Read: IOBase {
     fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), Self::Error>;
 }
 
-/// A simplified version of `std::io::Write` for use within a `no_std` context
+/// A simplified version of [`std::io::Write`] for use within a `no_std` context
 pub trait Write: IOBase {
     /// Attempts to write an entire buffer into this writer.
     ///
@@ -40,7 +44,7 @@ pub trait Write: IOBase {
     fn flush(&mut self) -> Result<(), Self::Error>;
 }
 
-/// A literal copy of the `std::io::Seekfrom` enum for use within a `no_std` context
+/// A copy of [`std::io::SeekFrom`] for use within a `no_std` context
 pub enum SeekFrom {
     /// Sets the offset to the provided number of bytes.
     Start(u64),
@@ -82,7 +86,7 @@ impl From<std::io::SeekFrom> for SeekFrom {
     }
 }
 
-/// A simplified version of `std::io::Seek` for use within a `no_std` context
+/// A simplified version of [`std::io::Seek`] for use within a `no_std` context
 pub trait Seek: IOBase {
     /// Seek to an offset, in bytes, in a stream.
     ///

@@ -34,7 +34,7 @@ pub const RESERVED_FILENAMES: &[&str] = &[
 ];
 
 /// Check whether a [`PathBuf`] is forbidden for use in filenames or directory names
-pub fn is_forbidden(pathbuf: &PathBuf) -> bool {
+fn is_forbidden(pathbuf: &PathBuf) -> bool {
     for subpath in pathbuf.clone() {
         if subpath
             .chars()
@@ -58,17 +58,24 @@ pub fn is_forbidden(pathbuf: &PathBuf) -> bool {
     false
 }
 
+// TODO: pathbuf, if it is a file, what happens when pushing.
+// TODO: pushing an absolute path should replace a pathbuf
+
+/// Represents an owned, mutable path
 #[derive(Debug, Clone)]
 pub struct PathBuf {
     inner: VecDeque<String>,
 }
 
 impl PathBuf {
+    /// Create a new, empty [`PathBuf`] pointing to the root directory ("/")
     pub fn new() -> Self {
         Self::default()
     }
 
-    // Seperate by "\" or "/" and push into inner vector
+    /// Extends `self` with `subpath`
+    ///
+    /// Doesn't replace the current path if the `path` is absolute
     pub fn push<P>(&mut self, subpath: P)
     where
         P: ToString,
@@ -99,7 +106,7 @@ impl PathBuf {
         }
     }
 
-    // Assumes that the [`PathBuf`] isn't malformed
+    /// If `self` is a file, returns `Ok(file_name)`, otherwise `None`
     pub fn file_name(&self) -> Option<String> {
         if let Some(file_name) = self.inner.back() {
             if !file_name.is_empty() {
@@ -121,6 +128,7 @@ impl PathBuf {
         }
     }
 
+    /// Whether or not `self` represents a directory
     pub fn is_dir(&self) -> bool {
         match self.inner.len() {
             // root directory
@@ -129,17 +137,18 @@ impl PathBuf {
         }
     }
 
+    /// Whether or not `self` represents a file
     pub fn is_file(&self) -> bool {
         !self.is_dir()
     }
 
-    /// Resets the [`PathBuf`]
+    /// Resets `self`
     pub fn clear(&mut self) {
-        self.inner.clear()
+        *self = Self::new();
     }
 
-    /// Checks whether this [`PathBuf`] is malformed (as if someone pushed a string with many consecutive slashes)
-    pub fn is_malformed(&self) -> bool {
+    /// Checks whether `self` is malformed (as if someone pushed a string with many consecutive slashes)
+    pub(crate) fn is_malformed(&self) -> bool {
         is_forbidden(&self)
     }
 }

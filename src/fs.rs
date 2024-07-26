@@ -14,12 +14,13 @@ use bitfield_struct::bitfield;
 use bitflags::bitflags;
 
 use ::time;
+use ops::Deref;
 use time::{Date, PrimitiveDateTime, Time};
 
 use crate::{error::*, io::prelude::*, path::PathBuf};
 
-pub const SECTOR_SIZE_MIN: usize = 512;
-pub const SECTOR_SIZE_MAX: usize = 4096;
+const SECTOR_SIZE_MIN: usize = 512;
+const SECTOR_SIZE_MAX: usize = 4096;
 
 /// Place this in the BPB _jmpboot field to hang if a computer attempts to boot this partition
 /// The first two bytes jump to 0 on all bit modes and the third byte is just a NOP
@@ -27,7 +28,7 @@ const INFINITE_LOOP: [u8; 3] = [0xEB, 0xFE, 0x90];
 
 #[derive(Debug, Clone, Copy)]
 #[repr(packed)]
-pub struct BootRecordFAT {
+struct BootRecordFAT {
     _jmpboot: [u8; 3],
     _oem_identifier: [u8; 8],
     bytes_per_sector: u16,
@@ -150,7 +151,7 @@ impl BootRecordFAT {
 #[derive(Debug, Clone, Copy)]
 #[repr(packed)]
 // Everything here is naturally aligned (thank god), so there's no need to make this a packed struct
-pub struct BootRecordExFAT {
+struct BootRecordExFAT {
     _dummy_jmp: [u8; 3],
     _oem_identifier: [u8; 8],
     _zeroed: [u8; 53],
@@ -174,14 +175,14 @@ pub struct BootRecordExFAT {
 
 #[derive(Clone, Copy)]
 #[repr(packed)]
-pub union BootRecord {
+union BootRecord {
     fat: BootRecordFAT,
     exfat: BootRecordExFAT,
 }
 
 #[derive(Clone, Copy)]
 #[repr(packed)]
-pub union EBR {
+union EBR {
     fat12_16: mem::ManuallyDrop<EBRFAT12_16>,
     fat32: mem::ManuallyDrop<EBRFAT32>,
 }
@@ -195,7 +196,7 @@ impl fmt::Debug for EBR {
 
 #[derive(Clone, Copy)]
 #[repr(packed)]
-pub struct EBRFAT12_16 {
+struct EBRFAT12_16 {
     _drive_num: u8,
     _windows_nt_flags: u8,
     boot_signature: u8,
@@ -208,7 +209,7 @@ pub struct EBRFAT12_16 {
 
 // FIXME: these might be the other way around
 #[derive(Debug, Clone, Copy)]
-pub struct FATVersion {
+struct FATVersion {
     minor: u8,
     major: u8,
 }
@@ -245,7 +246,8 @@ struct FSInfoFAT32 {
     trail_signature: [u8; 4],
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// An enum representing different versions of the FAT filesystem
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FATType {
     FAT12,
     FAT16,
@@ -324,15 +326,28 @@ impl fmt::Display for SFN {
 }
 
 bitflags! {
+    /// A list of the various attributes specified for a file/directory
+    ///
+    /// To check whether a given [`Attributes`] struct contains a flag, use the [`contains()`](Attributes::contains()) method
+    ///
+    /// Generated using [bitflags](https://docs.rs/bitflags/2.6.0/bitflags/)
     #[derive(Debug, PartialEq)]
     pub struct Attributes: u8 {
+        /// This entry is read-only
         const READ_ONLY = 0x01;
+        /// This entry is normally hidden
         const HIDDEN = 0x02;
+        /// This entry is a system file
         const SYSTEM = 0x04;
+        /// This entry represents the volume's ID.
+        /// This is used internally and the library will never return such an entry
         const VOLUME_ID = 0x08;
+        /// This entry is a directory. You should normally use a [`PathBuf`]s [`is_dir()`](PathBuf::is_dir) method instead
         const DIRECTORY = 0x10;
+        /// This entry is marked to be archived. Used by archiving software for backing up files and directories
         const ARCHIVE = 0x20;
 
+        /// This entry is part of a LFN (long filename). Used internally
         const LFN = Self::READ_ONLY.bits() |
                     Self::HIDDEN.bits() |
                     Self::SYSTEM.bits() |
@@ -500,6 +515,7 @@ struct RawProperties {
     data_cluster: u32,
 }
 
+/// A container for file/directory properties
 #[derive(Debug)]
 pub struct Properties {
     path: PathBuf,
@@ -560,6 +576,7 @@ impl Properties {
     }
 }
 
+/// A thin wrapper for [`Properties`] represing a directory entry
 #[derive(Debug)]
 pub struct DirEntry {
     entry: Properties,
@@ -574,19 +591,31 @@ impl ops::Deref for DirEntry {
     }
 }
 
+/// A file within the FAT filesystem
 pub struct File<'a, S>
 where
     S: Read + Write + Seek,
 {
-    path: PathBuf,
     fs: &'a mut FileSystem<S>,
     entry: Properties,
+}
+
+impl<'a, S> Deref for File<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    type Target = Properties;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entry
+    }
 }
 
 impl<'a, S> File<'a, S>
 where
     S: Read + Write + Seek,
 {
+    /// Read all of the file's bytes to the end into a [`Vec<u8>`]
     pub fn read_to_end(&mut self) -> FSResult<Vec<u8>, S::Error> {
         let mut current_cluster = self.entry.data_cluster;
         let mut bytes: Vec<u8> = Vec::new();
@@ -671,6 +700,7 @@ struct FSProperties {
     first_data_sector: u32,
 }
 
+/// An API to process a FAT filesystem
 pub struct FileSystem<S>
 where
     S: Read + Write + Seek,
@@ -683,8 +713,8 @@ where
     stored_sector: u64,
 
     boot_record: BootRecord,
-    /// since `self.fat_type()` calls like 5 nested functions, we keep this cached and expose it as a public field
-    pub fat_type: FATType,
+    // since `self.fat_type()` calls like 5 nested functions, we keep this cached and expose it as a public field
+    fat_type: FATType,
     props: FSProperties,
 }
 
@@ -708,11 +738,26 @@ where
     }
 }
 
+/// Getter functions
+impl<S> FileSystem<S>
+where
+    S: Read + Write + Seek,
+{
+    /// What is the [`FATType`] of the filesystem
+    pub fn fat_type(&self) -> FATType {
+        self.fat_type
+    }
+}
+
 /// Public functions
 impl<S> FileSystem<S>
 where
     S: Read + Write + Seek,
 {
+    /// Create a [`FileSystem`] from a storage object that implements [`Read`], [`Write`] & [`Seek`]
+    ///
+    /// Fails if the storage is way too small to support a FAT filesystem.
+    /// For most use cases, that shouldn't be an issue, you can just call [`.unwrap()`](Result::unwrap)
     pub fn from_storage(mut storage: S) -> FSResult<Self, S::Error> {
         // Begin by reading the boot record
         // We don't know the sector size yet, so we just go with the biggest possible one for now
@@ -789,6 +834,9 @@ where
         })
     }
 
+    /// Read all the entries of a directory ([`PathBuf`]) into [`Vec<DirEntry>`]
+    ///
+    /// Fails if `path` doesn't represent a directory, or if that directory doesn't exist
     pub fn read_dir(&mut self, path: PathBuf) -> FSResult<Vec<DirEntry>, S::Error> {
         if path.is_malformed() {
             return Err(FSError::MalformedPath);
@@ -831,6 +879,11 @@ where
             .collect())
     }
 
+    /// Get a corresponding [`File`] object from a [`PathBuf`]
+    ///
+    /// Borrows `&mut self` until that [`File`] object is dropped, effectively locking `self` until that file closed
+    ///
+    /// Fails if `path` doesn't represent a file, or if that file doesn't exist
     pub fn get_file(&mut self, path: PathBuf) -> FSResult<File<S>, S::Error> {
         if path.is_malformed() {
             return Err(FSError::MalformedPath);
@@ -845,7 +898,6 @@ where
                     .is_some_and(|entry_name| entry_name == file_name)
             }) {
                 Some(direntry) => Ok(File {
-                    path: direntry.path().to_owned(),
                     fs: self,
                     entry: direntry.entry,
                 }),
