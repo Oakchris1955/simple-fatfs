@@ -10,7 +10,7 @@ use ::alloc::{
     vec::*,
 };
 
-use bit_struct::*;
+use bitfield_struct::bitfield;
 use bitflags::bitflags;
 
 use ::time;
