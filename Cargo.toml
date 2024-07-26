@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bit-struct = "0.3.2"
+bitfield-struct = "0.8.0"
 bitflags = "2.6.0"
 displaydoc = { version = "0.2.5", default-features = false }
 time = { version = "0.3.36", default-features = false, features = [ "alloc", "parsing", "macros" ]}

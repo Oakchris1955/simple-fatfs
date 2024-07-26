@@ -342,29 +342,35 @@ bitflags! {
 
 const START_YEAR: i32 = 1980;
 
-bit_struct! {
-    struct TimeAttribute(u16) {
-        hour: u5,
-        minutes: u6,
-        /// Multiply by 2
-        seconds: u5,
-    }
+#[bitfield(u16)]
+struct TimeAttribute {
+    /// Multiply by 2
+    #[bits(5)]
+    seconds: u8,
+    #[bits(6)]
+    minutes: u8,
+    #[bits(5)]
+    hour: u8,
+}
 
-    struct DateAttribute(u16) {
-        year: u7,
-        month: u4,
-        day: u5,
-    }
+#[bitfield(u16)]
+struct DateAttribute {
+    #[bits(5)]
+    day: u8,
+    #[bits(4)]
+    month: u8,
+    #[bits(7)]
+    year: u8,
 }
 
 impl TryFrom<TimeAttribute> for Time {
     type Error = ();
 
-    fn try_from(mut value: TimeAttribute) -> Result<Self, Self::Error> {
+    fn try_from(value: TimeAttribute) -> Result<Self, Self::Error> {
         time::parsing::Parsed::new()
-            .with_hour_24(value.hour().get().value())
-            .and_then(|parsed| parsed.with_minute(value.minutes().get().value()))
-            .and_then(|parsed| parsed.with_second(value.seconds().get().value() * 2))
+            .with_hour_24(value.hour())
+            .and_then(|parsed| parsed.with_minute(value.minutes()))
+            .and_then(|parsed| parsed.with_second(value.seconds() * 2))
             .map(|parsed| parsed.try_into().ok())
             .flatten()
             .ok_or(())
@@ -374,11 +380,11 @@ impl TryFrom<TimeAttribute> for Time {
 impl TryFrom<DateAttribute> for Date {
     type Error = ();
 
-    fn try_from(mut value: DateAttribute) -> Result<Self, Self::Error> {
+    fn try_from(value: DateAttribute) -> Result<Self, Self::Error> {
         time::parsing::Parsed::new()
-            .with_year(i32::from(value.year().get().value()) + START_YEAR)
-            .and_then(|parsed| parsed.with_month(value.month().get().value().try_into().ok()?))
-            .and_then(|parsed| parsed.with_day(num::NonZeroU8::new(value.day().get().value())?))
+            .with_year(i32::from(value.year()) + START_YEAR)
+            .and_then(|parsed| parsed.with_month(value.month().try_into().ok()?))
+            .and_then(|parsed| parsed.with_day(num::NonZeroU8::new(value.day())?))
             .map(|parsed| parsed.try_into().ok())
             .flatten()
             .ok_or(())
