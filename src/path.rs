@@ -58,7 +58,6 @@ fn is_forbidden(pathbuf: &PathBuf) -> bool {
     false
 }
 
-// TODO: pathbuf, if it is a file, what happens when pushing.
 // TODO: pushing an absolute path should replace a pathbuf
 
 /// Represents an owned, mutable path
@@ -81,6 +80,11 @@ impl PathBuf {
         P: ToString,
     {
         let subpath = subpath.to_string();
+
+        // if this is an absolute path, clear `self`
+        if ['\\', '/'].contains(&subpath.chars().next().unwrap_or_default()) {
+            self.clear()
+        }
 
         let mut split_subpath: VecDeque<&str> =
             subpath.split(|c| ['\\', '/'].contains(&c)).collect();
@@ -252,18 +256,6 @@ fn catch_non_control_forbidden_chars() {
 }
 
 #[test]
-fn ignore_multiple_separators() {
-    let mut pathbuf = PathBuf::new();
-
-    pathbuf.push("first/");
-    pathbuf.push("second\\");
-    pathbuf.push("/third\\");
-    pathbuf.push("\\last/");
-
-    assert_eq!(pathbuf.to_string(), "/first/second/third/last/")
-}
-
-#[test]
 fn push_to_pathbuf() {
     let mut pathbuf = PathBuf::new();
 
@@ -271,7 +263,7 @@ fn push_to_pathbuf() {
     pathbuf.push("bar/test");
     pathbuf.push("bar2\\test2");
     pathbuf.push("ignored\\../.");
-    pathbuf.push("\\fintest1");
+    pathbuf.push("fintest1");
     pathbuf.push("fintest2/");
     pathbuf.push("last");
 
@@ -279,4 +271,13 @@ fn push_to_pathbuf() {
         pathbuf.to_string(),
         "/foo/bar/test/bar2/test2/fintest1/fintest2/last"
     )
+}
+
+#[test]
+fn push_absolute_path() {
+    let mut pathbuf = PathBuf::from("/foo/bar.txt");
+
+    pathbuf.push("\\test");
+
+    assert_eq!(pathbuf.to_string(), "/test")
 }
