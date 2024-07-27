@@ -7,17 +7,70 @@ use std::*;
 ///
 /// To be replaced with [`core::error`] when feature [`error_in_core`](https://github.com/rust-lang/rust/issues/103765) gets pushed to `stable`
 pub trait Error: fmt::Debug + fmt::Display {}
-impl<T> Error for T where T: fmt::Debug + fmt::Display {}
+
+#[cfg(feature = "std")]
+impl Error for std::io::Error {}
 
 /// Base IO error type
 pub trait IOError: Error {
-    fn is_unexpected_eof(&self) -> bool;
+    /// The type of the kind of this [`IOError`]
+    type Kind: IOErrorKind;
+
+    /// Construct a new [`IOError`] from an [`IOErrorKind`] and a `msg`
+    fn new<M>(kind: Self::Kind, msg: M) -> Self
+    where
+        M: fmt::Display;
+
+    /// Get the kind of this [`IOError`]
+    fn kind(&self) -> Self::Kind;
 }
 
 #[cfg(feature = "std")]
 impl IOError for std::io::Error {
+    type Kind = std::io::ErrorKind;
+
+    #[inline]
+    fn new<M>(kind: Self::Kind, msg: M) -> Self
+    where
+        M: fmt::Display,
+    {
+        std::io::Error::new(kind, msg.to_string())
+    }
+
+    #[inline]
+    fn kind(&self) -> Self::Kind {
+        self.kind()
+    }
+}
+
+/// The kind of an [`IOError`]
+pub trait IOErrorKind: PartialEq + Sized {
+    /// Create a new `UnexpectedEOF` [`IOErrorKind`]
+    fn new_unexpected_eof() -> Self;
+    /// Create a new `Interrupted` [`IOErrorKind`]
+    fn new_interrupted() -> Self;
+
+    #[inline]
+    /// Check whether this [`IOErrorKind`] is of kind `UnexpectedEOF`
     fn is_unexpected_eof(&self) -> bool {
-        self.kind() == std::io::ErrorKind::UnexpectedEof
+        self == &Self::new_unexpected_eof()
+    }
+    /// Check whether this [`IOErrorKind`] is of kind `Interrupted`
+    #[inline]
+    fn is_interrupted(&self) -> bool {
+        self == &Self::new_interrupted()
+    }
+}
+
+#[cfg(feature = "std")]
+impl IOErrorKind for std::io::ErrorKind {
+    #[inline]
+    fn new_unexpected_eof() -> Self {
+        std::io::ErrorKind::UnexpectedEof
+    }
+    #[inline]
+    fn new_interrupted() -> Self {
+        std::io::ErrorKind::Interrupted
     }
 }
 
@@ -57,6 +110,7 @@ impl<I> From<I> for FSError<I>
 where
     I: IOError,
 {
+    #[inline]
     fn from(value: I) -> Self {
         FSError::IOError(value)
     }
