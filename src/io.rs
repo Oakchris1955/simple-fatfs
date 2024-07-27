@@ -1,6 +1,6 @@
 //! This module contains all the IO-related objects of the crate
 
-use crate::error::IOError;
+use crate::error::{IOError, IOErrorKind};
 
 /// With `use prelude::*`, all IO-related traits are automatically imported
 pub mod prelude {
@@ -27,7 +27,24 @@ pub trait Read: IOBase {
     /// Blocks until enough bytes could be read
     ///
     /// Returns an error if EOF is met.
-    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), Self::Error>;
+    fn read_exact(&mut self, mut buf: &mut [u8]) -> Result<(), Self::Error> {
+        while !buf.is_empty() {
+            match self.read(buf) {
+                Ok(0) => break,
+                Ok(n) => buf = &mut buf[n..],
+                Err(ref e) if e.kind().is_interrupted() => {}
+                Err(e) => return Err(e),
+            }
+        }
+        if !buf.is_empty() {
+            Err(Self::Error::new(
+                <<Self::Error as IOError>::Kind as IOErrorKind>::new_unexpected_eof(),
+                "failed to fill whole buffer",
+            ))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// A simplified version of [`std::io::Write`] for use within a `no_std` context
