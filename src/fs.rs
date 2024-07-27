@@ -640,7 +640,7 @@ where
                 }
             }
 
-            match self.fs.read_nth_FAT_entry(self.entry.data_cluster)? {
+            match self.fs.read_nth_FAT_entry(current_cluster)? {
                 FATEntry::Allocated(next_cluster) => current_cluster = next_cluster,
                 _ => return Err(FSError::UnexpectedEOF),
             };
