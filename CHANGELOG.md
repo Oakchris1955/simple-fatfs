@@ -12,13 +12,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add basic filesystem functionality
 - Create CHANGELOG and git-cliff config file
 - Create README
+- Implement checksum validation for LFNs
+- Implement sector caching
+- Add basic documentation
 
 ### Changed
 
 - Update .gitignore
 - Upload FAT .img files
-- Implement checksum validation for LFNs
 - FileSystem's internal read_nth_FAT_entry function
+- Make public API more usable
+- Use "time" crate for date & time handling
+- Make some functions inlined & split impl functions to different impl blocks
+- Pushing an absolute path replaces destination pathbuf
+- IOError now have an IOErrorKind
+- In the Read trait, read_exact is now auto-implemented
+
+### Fixed
+
+- Correctly handle forbidden/reserved filenames
+- Due to a bug in the code, files larger than 1 cluster wouldn't be read properly
 
 ### Removed
 
