@@ -1303,6 +1303,61 @@ mod tests {
     }
 
     #[test]
+    fn read_huge_file() {
+        use std::io::Cursor;
+
+        static BEE_MOVIE_SCRIPT: &str = include_str!("../tests/bee movie script.txt");
+
+        let mut storage = Cursor::new(FAT16.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        let mut file = fs.get_file(PathBuf::from("/bee movie script.txt")).unwrap();
+        let mut file_bytes = [0_u8; 65536];
+        let bytes_read = file.read(&mut file_bytes).unwrap();
+
+        const EXPECTED_FILESIZE: usize = 49474;
+        assert_eq!(bytes_read, EXPECTED_FILESIZE);
+
+        //panic!("{}", String::from_utf8_lossy(&file_bytes[..bytes_read]));
+        let utf8_string = str::from_utf8(&file_bytes[..bytes_read]).unwrap();
+        assert_eq!(utf8_string, BEE_MOVIE_SCRIPT);
+    }
+
+    #[test]
+    fn seek_n_read() {
+        // this uses the famous "I'd like to interject for a moment" copypasta as a test file
+        // you can find it online by just searching this term
+
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT16.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        let mut file = fs
+            .get_file(PathBuf::from("/GNU ⁄ Linux copypasta.txt"))
+            .unwrap();
+        let mut file_bytes = [0_u8; 4096];
+
+        // we first perform a forward seek...
+        const EXPECTED_STR1: &str = "Linux is the kernel";
+        file.seek(SeekFrom::Start(792)).unwrap();
+        let bytes_read = file.read(&mut file_bytes[..EXPECTED_STR1.len()]).unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&file_bytes[..bytes_read]),
+            EXPECTED_STR1
+        );
+
+        // ...then a backward one
+        const EXPECTED_STR2: &str = "What you're referring to as Linux, is in fact, GNU/Linux";
+        file.seek(SeekFrom::Start(39)).unwrap();
+        let bytes_read = file.read(&mut file_bytes[..EXPECTED_STR2.len()]).unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&file_bytes[..bytes_read]),
+            EXPECTED_STR2
+        );
+    }
+
+    #[test]
     fn read_file_in_subdir() {
         use std::io::Cursor;
 
