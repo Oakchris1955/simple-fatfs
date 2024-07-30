@@ -1,0 +1,14 @@
+# remove Cargo.toml from workspace
+3ab8735c80d6b1304afb7f09b74289fd0818bf8e
+
+# create README
+9c49238f25ec6c97f79fa2dd7816691514b6eec7
+
+# create CHANGELOG and git-cliff config file
+ceabaf891782f99cb935748f8f7bcc18627b872d
+
+# upload FAT .img files
+69bb0a8e3c34891401f1c746ca44fb902a7b0997
+
+# update .gitignore
+21c7d6ba6e1336239efb875f9f157cd98f2066c6

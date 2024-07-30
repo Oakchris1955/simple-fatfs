@@ -7,6 +7,8 @@ header = """
 # Changelog\n
 All notable changes to this project will be documented in this file.
 
+This changelog is automatically updated weekly by a cron job
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).\n
 """
@@ -35,9 +37,13 @@ footer = """
                     /compare/{{ release.previous.version }}..{{ release.version }}
         {% endif -%}
     {% else -%}
+    [Unreleased]: \
         {% if release.previous.version -%}
-            [Unreleased]: https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}\
+            https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}\
                 /compare/{{ release.previous.version }}..HEAD
+        {% else -%}
+            https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}\
+                /tree/HEAD
         {% endif -%}
     {% endif -%}
 {% endfor %}\
@@ -58,6 +64,7 @@ commit_parsers = [
   { message = "^chore", skip = true },
   { message = "^ci", skip = true },
   { message = "^test", skip = true },
+  { message = "^refactor", skip = true },
   { message = "^.*: add", group = "Added" },
   { message = "^.*: create", group = "Added" },
   { message = "^.*: support", group = "Added" },
@@ -76,7 +83,7 @@ filter_commits = true
 # regex for matching git tags
 tag_pattern = "v[0-9].*"
 # regex for skipping tags
-skip_tags = "v0.1.0-beta.1"
+skip_tags = ""
 # regex for ignoring tags
 ignore_tags = ""
 # sort the tags topologically
