@@ -598,6 +598,9 @@ where
 {
     fs: &'a mut FileSystem<S>,
     entry: Properties,
+    /// the byte offset of the R/W pointer
+    offset: u64,
+    current_cluster: u32,
 }
 
 impl<'a, S> Deref for File<'a, S>
@@ -611,40 +614,138 @@ where
     }
 }
 
-impl<'a, S> File<'a, S>
+impl<'a, S> IOBase for File<'a, S>
 where
     S: Read + Write + Seek,
 {
-    /// Read all of the file's bytes to the end into a [`Vec<u8>`]
-    pub fn read_to_end(&mut self) -> FSResult<Vec<u8>, S::Error> {
-        let mut current_cluster = self.entry.data_cluster;
-        let mut bytes: Vec<u8> = Vec::new();
+    type Error = S::Error;
+}
 
-        loop {
-            // FAT specification, section 6.7
-            let first_sector_of_cluster = self.fs.data_cluster_to_partition_sector(current_cluster);
+impl<'a, S> Read for File<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        let mut current_cluster = self.current_cluster;
+        let mut bytes_read = 0;
+        // this is the maximum amount of bytes that can be read
+        let read_cap = cmp::min(buf.len(), self.file_size as usize - self.offset as usize);
+
+        'outer: loop {
+            let sector_init_offset = u32::try_from(self.offset % self.fs.cluster_size()).unwrap()
+                / self.fs.sector_size();
+            let first_sector_of_cluster =
+                self.fs.data_cluster_to_partition_sector(current_cluster) + sector_init_offset;
             for sector in first_sector_of_cluster
-                ..(first_sector_of_cluster + self.fs.sectors_per_cluster() as u32)
+                ..first_sector_of_cluster + self.fs.sectors_per_cluster() as u32
             {
-                bytes.append(
-                    &mut self
-                        .fs
-                        .read_nth_sector(self.fs.sector_to_partition_offset(sector).into())?
-                        .clone(),
+                self.fs
+                    .read_nth_sector(self.fs.sector_to_partition_offset(sector).into())?;
+
+                let start_index = self.offset as usize % self.fs.sector_size() as usize;
+
+                let bytes_to_be_written = cmp::min(
+                    read_cap - bytes_read,
+                    self.fs.sector_size() as usize - start_index,
                 );
 
-                if bytes.len() >= self.entry.file_size as usize {
-                    // remove any bytes that don't belong to the file
-                    bytes.truncate(self.entry.file_size as usize);
-                    return Ok(bytes);
+                buf[bytes_read..bytes_read + bytes_to_be_written].copy_from_slice(
+                    &self.fs.sector_buffer[start_index..start_index + bytes_to_be_written],
+                );
+
+                bytes_read += bytes_to_be_written;
+                self.offset += bytes_to_be_written as u64;
+
+                if bytes_read >= read_cap || self.offset >= self.file_size.into() {
+                    break 'outer;
                 }
             }
 
             match self.fs.read_nth_FAT_entry(current_cluster)? {
                 FATEntry::Allocated(next_cluster) => current_cluster = next_cluster,
-                _ => return Err(FSError::UnexpectedEOF),
+                // when a `File` is created, `cluster_chain_is_healthy` is called, if it fails, that File is dropped
+                _ => unreachable!(
+                    "{} {} {} {} {}",
+                    current_cluster, self.data_cluster, bytes_read, self.offset, self.file_size,
+                ),
             };
         }
+
+        Ok(bytes_read as usize)
+    }
+}
+
+impl<'a, S> Seek for File<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error> {
+        let mut offset = match pos {
+            SeekFrom::Start(offset) => offset,
+            SeekFrom::Current(offset) => {
+                let offset = self.offset as i64 + offset;
+                offset.try_into().unwrap_or(u64::MIN)
+            }
+            SeekFrom::End(offset) => {
+                let offset = self.file_size as i64 + offset;
+                offset.try_into().unwrap_or(u64::MIN)
+            }
+        };
+
+        if offset > self.file_size.into() {
+            offset = self.file_size.into();
+        }
+
+        use cmp::Ordering;
+        match offset.cmp(&self.offset) {
+            Ordering::Less => {
+                // here, we basically "rewind" back to the start of the file and then seek to where we want
+                // this of course has performance issues, so TODO: find a solution that is both memory & time efficient
+                // (perhaps we could follow a similar approach to elm-chan's FATFS, by using a cluster link map table, perhaps as an optional feature)
+                self.offset = 0;
+                self.current_cluster = self.data_cluster;
+                self.seek(pos)?;
+            }
+            Ordering::Equal => (),
+            Ordering::Greater => {
+                for _ in (self.offset / self.fs.cluster_size()..offset / self.fs.cluster_size())
+                    .step_by(self.fs.cluster_size() as usize)
+                {
+                    match self.fs.read_nth_FAT_entry(self.current_cluster)? {
+                        FATEntry::Allocated(next_cluster) => self.current_cluster = next_cluster,
+                        _ => unreachable!(),
+                    }
+                }
+                self.offset = offset;
+            }
+        }
+
+        Ok(self.offset)
+    }
+}
+
+impl<'a, S> File<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    fn cluster_chain_is_healthy(&mut self) -> Result<bool, S::Error> {
+        let mut current_cluster = self.entry.data_cluster;
+        let mut cluster_count = 0;
+
+        loop {
+            cluster_count += 1;
+
+            if cluster_count * self.fs.cluster_size() >= self.file_size.into() {
+                break;
+            }
+
+            match self.fs.read_nth_FAT_entry(current_cluster)? {
+                FATEntry::Allocated(next_cluster) => current_cluster = next_cluster,
+                _ => return Ok(false),
+            };
+        }
+
+        Ok(true)
     }
 }
 
@@ -897,10 +998,20 @@ where
                     .file_name()
                     .is_some_and(|entry_name| entry_name == file_name)
             }) {
-                Some(direntry) => Ok(File {
-                    fs: self,
-                    entry: direntry.entry,
-                }),
+                Some(direntry) => {
+                    let mut file = File {
+                        fs: self,
+                        offset: 0,
+                        current_cluster: direntry.entry.data_cluster,
+                        entry: direntry.entry,
+                    };
+
+                    if file.cluster_chain_is_healthy()? {
+                        Ok(file)
+                    } else {
+                        Err(FSError::MalformedClusterChain)
+                    }
+                }
                 None => Err(FSError::NotFound),
             }
         } else {
@@ -1067,7 +1178,7 @@ where
     /// Read the nth sector from the partition's beginning and store it in [`self.sector_buffer`](Self::sector_buffer)
     ///
     /// This function also returns an immutable reference to [`self.sector_buffer`](Self::sector_buffer)
-    fn read_nth_sector(&mut self, n: u64) -> FSResult<&Vec<u8>, S::Error> {
+    fn read_nth_sector(&mut self, n: u64) -> Result<&Vec<u8>, S::Error> {
         // nothing to do if the sector we wanna read is already cached
         if n != self.stored_sector {
             self.storage.seek(SeekFrom::Start(n))?;
@@ -1078,7 +1189,7 @@ where
     }
 
     #[allow(non_snake_case)]
-    fn read_nth_FAT_entry(&mut self, n: u32) -> FSResult<FATEntry, S::Error> {
+    fn read_nth_FAT_entry(&mut self, n: u32) -> Result<FATEntry, S::Error> {
         // the size of an entry rounded up to bytes
         let entry_size = self.fat_type.bits_per_entry().next_power_of_two() as u32 / 8;
         let fat_offset: u32 = n * entry_size;
@@ -1183,9 +1294,10 @@ mod tests {
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
         let mut file = fs.get_file(PathBuf::from("/root.txt")).unwrap();
-        let file_bytes = file.read_to_end().unwrap();
+        let mut file_bytes = [0_u8; 1024];
+        let bytes_read = file.read(&mut file_bytes).unwrap();
 
-        let file_string = String::from_utf8_lossy(&file_bytes).to_string();
+        let file_string = String::from_utf8_lossy(&file_bytes[..bytes_read]).to_string();
         const EXPECTED_STR: &str = "I am in the filesystem's root!!!\n\n";
         assert_eq!(file_string, EXPECTED_STR);
     }
@@ -1198,9 +1310,10 @@ mod tests {
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
         let mut file = fs.get_file(PathBuf::from("/rootdir/example.txt")).unwrap();
-        let file_bytes = file.read_to_end().unwrap();
+        let mut file_bytes = [0_u8; 1024];
+        let bytes_read = file.read(&mut file_bytes).unwrap();
 
-        let file_string = String::from_utf8_lossy(&file_bytes).to_string();
+        let file_string = String::from_utf8_lossy(&file_bytes[..bytes_read]).to_string();
         const EXPECTED_STR: &str = "I am not in the root directory :(\n\n";
         assert_eq!(file_string, EXPECTED_STR);
     }
