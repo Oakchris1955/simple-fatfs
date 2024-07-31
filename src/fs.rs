@@ -639,8 +639,7 @@ where
             for sector in first_sector_of_cluster
                 ..first_sector_of_cluster + self.fs.sectors_per_cluster() as u32
             {
-                self.fs
-                    .read_nth_sector(self.fs.sector_to_partition_offset(sector).into())?;
+                self.fs.read_nth_sector(sector.into())?;
 
                 let start_index = self.offset as usize % self.fs.sector_size() as usize;
 
@@ -919,7 +918,7 @@ where
         let props = FSProperties {
             sector_size,
             cluster_size,
-            fat_offset: unsafe { boot_record.fat.reserved_sector_count as u32 } * sector_size,
+            fat_offset: unsafe { boot_record.fat.reserved_sector_count as u32 },
             total_clusters: unsafe { boot_record.fat.total_clusters() },
             reserved_sectors,
             first_data_sector,
@@ -1038,7 +1037,7 @@ where
 
         'outer: loop {
             for chunk in self
-                .read_nth_sector(self.sector_to_partition_offset(sector).into())?
+                .read_nth_sector(sector.into())?
                 .chunks(mem::size_of::<FATDirEntry>())
             {
                 match chunk[0] {
@@ -1181,8 +1180,11 @@ where
     fn read_nth_sector(&mut self, n: u64) -> Result<&Vec<u8>, S::Error> {
         // nothing to do if the sector we wanna read is already cached
         if n != self.stored_sector {
-            self.storage.seek(SeekFrom::Start(n))?;
+            self.storage.seek(SeekFrom::Start(
+                self.sector_to_partition_offset(n as u32).into(),
+            ))?;
             self.storage.read_exact(&mut self.sector_buffer)?;
+            self.stored_sector = n;
         }
 
         Ok(&self.sector_buffer)
