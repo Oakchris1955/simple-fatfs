@@ -137,7 +137,6 @@ impl BootRecordFAT {
         } else {
             let total_clusters = self.total_clusters();
             if total_clusters < 4085 {
-                todo!("FAT12 not yet implemented");
                 FATType::FAT12
             } else if total_clusters < 65525 {
                 FATType::FAT16
@@ -1194,20 +1193,49 @@ where
     fn read_nth_FAT_entry(&mut self, n: u32) -> Result<FATEntry, S::Error> {
         // the size of an entry rounded up to bytes
         let entry_size = self.fat_type.bits_per_entry().next_power_of_two() as u32 / 8;
-        let fat_offset: u32 = n * entry_size;
+        let fat_offset: u32 = n * self.fat_type.bits_per_entry() as u32 / 8;
         let fat_sector_offset = self.props.fat_offset + fat_offset / self.props.sector_size;
         let entry_offset: usize = (fat_offset % self.props.sector_size) as usize;
 
         self.read_nth_sector(fat_sector_offset.into())?;
 
         let mut value_bytes = [0_u8; 4];
-        value_bytes[..(4_usize - entry_size as usize)]
-            .copy_from_slice(&self.sector_buffer[entry_offset..entry_offset + entry_size as usize]); // this shouldn't panic
+        let bytes_to_read: usize = cmp::min(
+            entry_offset + entry_size as usize,
+            self.sector_size() as usize,
+        ) - entry_offset;
+        value_bytes[..bytes_to_read]
+            .copy_from_slice(&self.sector_buffer[entry_offset..entry_offset + bytes_to_read]); // this shouldn't panic
+
+        // in FAT12, FAT entries may be split between two different sectors
+        if self.fat_type == FATType::FAT12 && (bytes_to_read as u32) < entry_size {
+            self.read_nth_sector((fat_sector_offset + 1).into())?;
+
+            value_bytes[bytes_to_read..entry_size as usize]
+                .copy_from_slice(&self.sector_buffer[..(entry_size as usize - bytes_to_read)]);
+
+            /*todo!(
+                "read: {} {:?} n: {} offset: {}",
+                bytes_to_read,
+                value_bytes,
+                n,
+                fat_offset
+            );*/
+        }
 
         let mut value = u32::from_le_bytes(value_bytes);
-        // ignore the high 4 bits if this is FAT32
-        if self.fat_type == FATType::FAT32 {
-            value &= 0x0FFFFFFF
+        match self.fat_type {
+            // FAT12 entries are split between different bytes
+            FATType::FAT12 => {
+                if n & 1 != 0 {
+                    value >>= 4
+                } else {
+                    value &= 0xFFF
+                }
+            }
+            // ignore the high 4 bits if this is FAT32
+            FATType::FAT32 => value &= 0x0FFFFFFF,
+            _ => (),
         }
 
         /*
@@ -1304,25 +1332,30 @@ mod tests {
         assert_eq!(file_string, EXPECTED_STR);
     }
 
+    static BEE_MOVIE_SCRIPT: &str = include_str!("../tests/bee movie script.txt");
+    fn assert_file_is_bee_movie_script<S>(file: &mut File<S>)
+    where
+        S: Read + Write + Seek,
+    {
+        let mut file_bytes = [0_u8; 65536];
+        let bytes_read = file.read(&mut file_bytes).unwrap();
+
+        let expected_filesize = BEE_MOVIE_SCRIPT.len();
+        assert_eq!(bytes_read, expected_filesize);
+
+        let utf8_string = str::from_utf8(&file_bytes[..bytes_read]).unwrap();
+        assert_eq!(utf8_string, BEE_MOVIE_SCRIPT);
+    }
+
     #[test]
     fn read_huge_file() {
         use std::io::Cursor;
-
-        static BEE_MOVIE_SCRIPT: &str = include_str!("../tests/bee movie script.txt");
 
         let mut storage = Cursor::new(FAT16.to_owned());
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
         let mut file = fs.get_file(PathBuf::from("/bee movie script.txt")).unwrap();
-        let mut file_bytes = [0_u8; 65536];
-        let bytes_read = file.read(&mut file_bytes).unwrap();
-
-        const EXPECTED_FILESIZE: usize = 49474;
-        assert_eq!(bytes_read, EXPECTED_FILESIZE);
-
-        //panic!("{}", String::from_utf8_lossy(&file_bytes[..bytes_read]));
-        let utf8_string = str::from_utf8(&file_bytes[..bytes_read]).unwrap();
-        assert_eq!(utf8_string, BEE_MOVIE_SCRIPT);
+        assert_file_is_bee_movie_script(&mut file);
     }
 
     #[test]
@@ -1390,10 +1423,34 @@ mod tests {
     }
 
     #[test]
+    fn read_file_fat12() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT12.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        let mut file = fs.get_file(PathBuf::from("/foo/bar.txt")).unwrap();
+        let mut file_bytes = [0_u8; 1024];
+        let bytes_read = file.read(&mut file_bytes).unwrap();
+
+        let file_string = String::from_utf8_lossy(&file_bytes[..bytes_read]).to_string();
+        const EXPECTED_STR: &str = "Hello, World!\n";
+        assert_eq!(file_string, EXPECTED_STR);
+
+        // please not that the FAT12 image has been modified so that
+        // one FAT entry of the file we are reading is split between different sectors
+        // this way, we also test for this case
+        let mut file = fs
+            .get_file(PathBuf::from("/test/bee movie script.txt"))
+            .unwrap();
+        assert_file_is_bee_movie_script(&mut file);
+    }
+
+    #[test]
     fn assert_img_fat_type() {
         static TEST_CASES: &[(&[u8], FATType)] = &[
-            /*(MINFS, FATType::FAT12), TODO: uncomment this when we add support for FAT12
-            (FAT12, FATType::FAT12),*/
+            (MINFS, FATType::FAT12),
+            (FAT12, FATType::FAT12),
             (FAT16, FATType::FAT16),
         ];
 
