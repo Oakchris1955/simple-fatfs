@@ -74,18 +74,27 @@ impl IOErrorKind for std::io::ErrorKind {
     }
 }
 
-/// An error indicating that a filesystem-related operation has failed
+/// An error type that denotes that there is something wrong
+/// with the filesystem's structure itself (perhaps the FS itself is malformed/corrupted)
 #[derive(Debug, displaydoc::Display)]
-pub enum FSError<I>
-where
-    I: IOError,
-{
+pub enum InternalFSError {
     /// The storage medium isn't large enough to accompany a FAT filesystem
     StorageTooSmall,
     /// Invalid boot sector signature. Perharps this isn't a FAT filesystem?
     InvalidBPBSig,
     /// Encountered a malformed cluster chain
     MalformedClusterChain,
+}
+
+/// An error indicating that a filesystem-related operation has failed
+#[derive(Debug, displaydoc::Display)]
+pub enum FSError<I>
+where
+    I: IOError,
+{
+    /// An internal FS error occured
+    #[displaydoc("An internal FS error occured: {0}")]
+    InternalFSError(InternalFSError),
     /**
      The [PathBuf](`crate::path::PathBuf`) provided is malformed.
 
@@ -99,8 +108,6 @@ where
     IsADirectory,
     /// A file or directory wasn't found
     NotFound,
-    /// Found an unexpected EOF while reading a file
-    UnexpectedEOF,
     /// An IO error occured
     #[displaydoc("An IO error occured: {0}")]
     IOError(I),

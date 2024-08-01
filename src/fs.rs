@@ -865,7 +865,7 @@ where
         let bytes_read = storage.read(&mut buffer)?;
 
         if bytes_read < mem::size_of::<BootRecord>() {
-            return Err(FSError::StorageTooSmall);
+            return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));
         }
 
         let boot_record: BootRecord = unsafe { mem::transmute_copy(&buffer) };
@@ -876,7 +876,7 @@ where
         match fat_type {
             FATType::FAT12 | FATType::FAT16 | FATType::FAT32 => {
                 if unsafe { boot_record.fat.verify_signature() } {
-                    return Err(FSError::InvalidBPBSig);
+                    return Err(FSError::InternalFSError(InternalFSError::InvalidBPBSig));
                 }
             }
             FATType::ExFAT => todo!("ExFAT not yet implemented"),
@@ -1007,7 +1007,9 @@ where
                     if file.cluster_chain_is_healthy()? {
                         Ok(file)
                     } else {
-                        Err(FSError::MalformedClusterChain)
+                        Err(FSError::InternalFSError(
+                            InternalFSError::MalformedClusterChain,
+                        ))
                     }
                 }
                 None => Err(FSError::NotFound),
@@ -1166,7 +1168,11 @@ where
                 // this cluster chain goes on, follow it
                 FATEntry::Allocated(next_cluster) => data_cluster = next_cluster,
                 // any other case (whether a bad, reserved or free cluster) is invalid, consider this cluster chain malformed
-                _ => return Err(FSError::MalformedClusterChain),
+                _ => {
+                    return Err(FSError::InternalFSError(
+                        InternalFSError::MalformedClusterChain,
+                    ))
+                }
             }
         }
 
