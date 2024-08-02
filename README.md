@@ -21,12 +21,11 @@ A fully-working FAT driver that covers the following criteria:
 
 ## TODO
 
-- [ ] FAT12 support (just handle entries between 2 sectors)
+- [x] FAT12 support (just handle entries between 2 sectors)
 - [x] Distinguish between dirs and files in paths (this must also be verified by the filesystem, just like in the `std`)
 - [ ] Check whether system endianness matters (FAT is little-endian)
 - [ ] Handle non-printable characters in names of files and directories
 - [ ] ExFAT support
-- [ ] no `alloc` support (if possible)
 - [ ] when [feature(error_in_core)](https://github.com/rust-lang/rust/issues/103765) gets released to stable, bump MSRV & use the `core::error::Error` trait instead of our custom `error::Error`
 
 [crates.io]: https://crates.io
