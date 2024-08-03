@@ -620,12 +620,28 @@ where
     type Error = S::Error;
 }
 
+/// Internal functions
+impl<'a, S> File<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    /// Panics if the current cluser doesn't point to another clluster
+    fn next_cluster(&mut self) -> Result<(), <Self as IOBase>::Error> {
+        match self.fs.read_nth_FAT_entry(self.current_cluster)? {
+            FATEntry::Allocated(next_cluster) => self.current_cluster = next_cluster,
+            // when a `File` is created, `cluster_chain_is_healthy` is called, if it fails, that File is dropped
+            _ => unreachable!(),
+        };
+
+        Ok(())
+    }
+}
+
 impl<'a, S> Read for File<'a, S>
 where
     S: Read + Write + Seek,
 {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        let mut current_cluster = self.current_cluster;
         let mut bytes_read = 0;
         // this is the maximum amount of bytes that can be read
         let read_cap = cmp::min(buf.len(), self.file_size as usize - self.offset as usize);
@@ -633,43 +649,47 @@ where
         'outer: loop {
             let sector_init_offset = u32::try_from(self.offset % self.fs.cluster_size()).unwrap()
                 / self.fs.sector_size();
-            let first_sector_of_cluster =
-                self.fs.data_cluster_to_partition_sector(current_cluster) + sector_init_offset;
-            for sector in first_sector_of_cluster
-                ..first_sector_of_cluster + self.fs.sectors_per_cluster() as u32
-            {
+            let first_sector_of_cluster = self
+                .fs
+                .data_cluster_to_partition_sector(self.current_cluster)
+                + sector_init_offset;
+            let last_sector_of_cluster = first_sector_of_cluster
+                + self.fs.sectors_per_cluster() as u32
+                - sector_init_offset
+                - 1;
+            for sector in first_sector_of_cluster..=last_sector_of_cluster {
                 self.fs.read_nth_sector(sector.into())?;
 
                 let start_index = self.offset as usize % self.fs.sector_size() as usize;
 
-                let bytes_to_be_written = cmp::min(
+                let bytes_to_read = cmp::min(
                     read_cap - bytes_read,
                     self.fs.sector_size() as usize - start_index,
                 );
 
-                buf[bytes_read..bytes_read + bytes_to_be_written].copy_from_slice(
-                    &self.fs.sector_buffer[start_index..start_index + bytes_to_be_written],
+                buf[bytes_read..bytes_read + bytes_to_read].copy_from_slice(
+                    &self.fs.sector_buffer[start_index..start_index + bytes_to_read],
                 );
 
-                bytes_read += bytes_to_be_written;
-                self.offset += bytes_to_be_written as u64;
+                bytes_read += bytes_to_read;
+                self.offset += bytes_to_read as u64;
 
-                if bytes_read >= read_cap || self.offset >= self.file_size.into() {
+                // if we have read as many bytes as we want...
+                if bytes_read >= read_cap {
+                    // ...but we must process get the next cluster for future uses,
+                    // we do that before breaking
+                    if self.offset % self.fs.cluster_size() == 0 {
+                        self.next_cluster()?;
+                    }
+
                     break 'outer;
                 }
             }
 
-            match self.fs.read_nth_FAT_entry(current_cluster)? {
-                FATEntry::Allocated(next_cluster) => current_cluster = next_cluster,
-                // when a `File` is created, `cluster_chain_is_healthy` is called, if it fails, that File is dropped
-                _ => unreachable!(
-                    "{} {} {} {} {}",
-                    current_cluster, self.data_cluster, bytes_read, self.offset, self.file_size,
-                ),
-            };
+            self.next_cluster()?;
         }
 
-        Ok(bytes_read as usize)
+        Ok(bytes_read)
     }
 }
 
@@ -709,10 +729,7 @@ where
                 for _ in (self.offset / self.fs.cluster_size()..offset / self.fs.cluster_size())
                     .step_by(self.fs.cluster_size() as usize)
                 {
-                    match self.fs.read_nth_FAT_entry(self.current_cluster)? {
-                        FATEntry::Allocated(next_cluster) => self.current_cluster = next_cluster,
-                        _ => unreachable!(),
-                    }
+                    self.next_cluster()?;
                 }
                 self.offset = offset;
             }
