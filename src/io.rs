@@ -1,5 +1,12 @@
 //! This module contains all the IO-related objects of the crate
 
+#[cfg(not(feature = "std"))]
+use core::*;
+#[cfg(feature = "std")]
+use std::*;
+
+use ::alloc::{string::String, vec::Vec};
+
 use crate::error::{IOError, IOErrorKind};
 
 /// With `use prelude::*`, all IO-related traits are automatically imported
@@ -19,14 +26,86 @@ pub trait IOBase {
 
 /// A simplified version of [`std::io::Read`] for use within a `no_std` context
 pub trait Read: IOBase {
-    /// Pull some bytes from this source into the specified buffer, returning how many bytes were read.
+    /// Pull some bytes from this source into the specified buffer,
+    /// returning how many bytes were read.
+    ///
+    /// If the return value of this method is [`Ok(n)`], then implementations must
+    /// guarantee that `0 <= n <= buf.len()`. A nonzero `n` value indicates
+    /// that the buffer `buf` has been filled in with `n` bytes of data from this
+    /// source. If `n` is `0`, then it can indicate one of two scenarios:
+    ///
+    /// 1. This reader has reached its "end of file" and will likely no longer
+    ///    be able to produce bytes. Note that this does not mean that the
+    ///    reader will *always* no longer be able to produce bytes.
+    /// 2. The buffer specified was 0 bytes in length.
+    ///
+    /// It is not an error if the returned value `n` is smaller than the buffer size,
+    /// even when the reader is not at the end of the stream yet.
+    /// This may happen for example because fewer bytes are actually available right now
+    /// (e. g. being close to end-of-file) or because read() was interrupted by a signal,
+    /// although for the later, an [`IOErrorKind`] of kind `Interrupted` should preferably be raised
+    ///
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error>;
+
+    /// Read all bytes until EOF in this source, placing them into `buf`.
+    ///
+    /// All bytes read from this source will be appended to the specified buffer
+    /// `buf`. This function will continuously call [`read()`] to append more data to
+    /// `buf` until [`read()`] returns either [`Ok(0)`] or an [`IOErrorKind`] of
+    /// non-`Interrupted` kind.
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize, Self::Error> {
+        let mut bytes_read = 0;
+
+        const PROBE_SIZE: usize = 32;
+        let mut probe = [0_u8; PROBE_SIZE];
+
+        loop {
+            match self.read(&mut probe) {
+                Ok(0) => break,
+                Ok(n) => {
+                    buf.extend_from_slice(&probe[..n]);
+                    bytes_read += n;
+                }
+                Err(ref e) if e.kind().is_interrupted() => continue,
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(bytes_read)
+    }
+
+    /// Read all bytes until EOF in this source, appending them to `string`.
+    ///
+    /// If successful, this function returns the number of bytes which were read and appended to buf.
+    ///
+    /// # Errors
+    ///
+    /// If the data in this stream is *not* valid UTF-8 then an error is returned and `string` is unchanged.
+    ///
+    /// See [`read_to_end`](Read::read_to_end) for other error semantics.
+    fn read_to_string(&mut self, string: &mut String) -> Result<usize, Self::Error> {
+        let mut buf = Vec::new();
+        let bytes_read = self.read_to_end(&mut buf)?;
+
+        string.push_str(str::from_utf8(&buf).map_err(|_| {
+            IOError::new(
+                <Self::Error as IOError>::Kind::new_invalid_data(),
+                "found invalid utf-8",
+            )
+        })?);
+
+        Ok(bytes_read)
+    }
 
     /// Read the exact number of bytes required to fill `buf`.
     ///
-    /// Blocks until enough bytes could be read
+    /// This function reads as many bytes as necessary to completely fill the
+    /// specified buffer `buf`.
     ///
-    /// Returns an error if EOF is met.
+    /// *Implementations* of this method can make no assumptions about the contents of `buf` when
+    /// this function is called. It is recommended that implementations only write data to `buf`
+    /// instead of reading its contents. The documentation on [`read`](Read::read) has a more detailed
+    /// explanation of this subject.
     fn read_exact(&mut self, mut buf: &mut [u8]) -> Result<(), Self::Error> {
         while !buf.is_empty() {
             match self.read(buf) {
@@ -49,15 +128,73 @@ pub trait Read: IOBase {
 
 /// A simplified version of [`std::io::Write`] for use within a `no_std` context
 pub trait Write: IOBase {
-    /// Attempts to write an entire buffer into this writer.
+    /// Write a buffer into this writer, returning how many bytes were written.
     ///
-    /// Blocks until the entire buffer has been written
-    fn write_all(&mut self, data: &[u8]) -> Result<(), Self::Error>;
-
-    /// Flush this output stream, ensuring that all intermediately buffered contents reach their destination.
+    /// This function will attempt to write the entire contents of `buf`, but
+    /// the entire write might not succeed, or the write may also generate an
+    /// error. Typically, a call to `write` represents one attempt to write to
+    /// any wrapped object.
+    ///
+    /// If this method consumed `n > 0` bytes of `buf` it must return [`Ok(n)`].
+    /// If the return value is `Ok(n)` then `n` must satisfy `n <= buf.len()`.
+    /// A return value of `Ok(0)` typically means that the underlying object is
+    /// no longer able to accept bytes and will likely not be able to in the
+    /// future as well, or that the buffer provided is empty.
     ///
     /// # Errors
-    /// It is considered an error if not all bytes could be written due to I/O errors or EOF being reached.
+    ///
+    /// Each call to `write` may generate an I/O error indicating that the
+    /// operation could not be completed. If an error is returned then no bytes
+    /// in the buffer were written to this writer.
+    ///
+    /// It is **not** considered an error if the entire buffer could not be
+    /// written to this writer.
+    ///
+    /// An error of the `Interrupted` [`IOErrorKind`] is non-fatal and the
+    /// write operation should be retried if there is nothing else to do.
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error>;
+
+    /// Attempts to write an entire buffer into this writer.
+    ///
+    /// This method will continuously call [`write`] until there is no more data
+    /// to be written or an error of non-[`ErrorKind::Interrupted`] kind is
+    /// returned. This method will not return until the entire buffer has been
+    /// successfully written or such an error occurs. The first error that is
+    /// not of [`ErrorKind::Interrupted`] kind generated from this method will be
+    /// returned.
+    ///
+    /// If the buffer contains no data, this will never call [`write`].
+    ///
+    /// # Errors
+    ///
+    /// This function will return the first error of
+    /// non-[`ErrorKind::Interrupted`] kind that [`write`] returns.
+    ///
+    /// [`write`]: Write::write
+    fn write_all(&mut self, mut buf: &[u8]) -> Result<(), Self::Error> {
+        while !buf.is_empty() {
+            match self.write(buf) {
+                Ok(0) => {
+                    return Err(IOError::new(
+                        IOErrorKind::new_unexpected_eof(),
+                        "writer returned EOF before all data could be written",
+                    ));
+                }
+                Ok(n) => buf = &buf[n..],
+                Err(ref e) if e.kind().is_interrupted() => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+
+    /// Flush this output stream, ensuring that all intermediately buffered
+    /// contents reach their destination.
+    ///
+    /// # Errors
+    ///
+    /// It is considered an error if not all bytes could be written due to
+    /// I/O errors or EOF being reached.
     fn flush(&mut self) -> Result<(), Self::Error>;
 }
 
@@ -152,13 +289,23 @@ where
     T: std::io::Read + IOBase<Error = std::io::Error>,
 {
     #[inline]
-    fn read(&mut self, data: &mut [u8]) -> Result<usize, Self::Error> {
-        self.read(data)
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        self.read(buf)
     }
 
     #[inline]
-    fn read_exact(&mut self, data: &mut [u8]) -> Result<(), Self::Error> {
-        self.read_exact(data)
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize, Self::Error> {
+        self.read_to_end(buf)
+    }
+
+    #[inline]
+    fn read_to_string(&mut self, string: &mut String) -> Result<usize, Self::Error> {
+        self.read_to_string(string)
+    }
+
+    #[inline]
+    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), Self::Error> {
+        self.read_exact(buf)
     }
 }
 
@@ -168,8 +315,13 @@ where
     T: std::io::Write + IOBase<Error = std::io::Error>,
 {
     #[inline]
-    fn write_all(&mut self, data: &[u8]) -> Result<(), Self::Error> {
-        self.write_all(data)
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.write(buf)
+    }
+
+    #[inline]
+    fn write_all(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+        self.write_all(buf)
     }
 
     #[inline]
@@ -211,21 +363,36 @@ where
 #[cfg(not(feature = "std"))]
 impl<R: Read + IOBase> Read for &mut R {
     #[inline]
-    fn read(&mut self, data: &mut [u8]) -> Result<usize, R::Error> {
-        (**self).read(data)
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, R::Error> {
+        (**self).read(buf)
     }
 
     #[inline]
-    fn read_exact(&mut self, data: &mut [u8]) -> Result<(), R::Error> {
-        (**self).read_exact(data)
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize, R::Error> {
+        (**self).read_to_end(buf)
+    }
+
+    #[inline]
+    fn read_to_string(&mut self, buf: &mut String) -> Result<usize, R::Error> {
+        (**self).read_to_string(buf)
+    }
+
+    #[inline]
+    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), R::Error> {
+        (**self).read_exact(buf)
     }
 }
 
 #[cfg(not(feature = "std"))]
 impl<W: Write + IOBase> Write for &mut W {
     #[inline]
-    fn write_all(&mut self, data: &[u8]) -> Result<(), W::Error> {
-        (**self).write_all(data)
+    fn write(&mut self, buf: &[u8]) -> Result<usize, W::Error> {
+        (**self).write(buf)
+    }
+
+    #[inline]
+    fn write_all(&mut self, buf: &[u8]) -> Result<(), W::Error> {
+        (**self).write_all(buf)
     }
 
     #[inline]

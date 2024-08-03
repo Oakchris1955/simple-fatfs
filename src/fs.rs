@@ -691,6 +691,20 @@ where
 
         Ok(bytes_read)
     }
+
+    // the default `read_to_end` implementation isn't efficient enough, so we just do this
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize, Self::Error> {
+        let bytes_to_read = self.file_size as usize - self.offset as usize;
+        let init_buf_len = buf.len();
+
+        // resize buffer to fit the file contents exactly
+        buf.resize(init_buf_len + bytes_to_read, 0);
+
+        // this is guaranteed not to raise an EOF (although other error kinds might be raised...)
+        self.read_exact(&mut buf[init_buf_len..])?;
+
+        Ok(bytes_to_read)
+    }
 }
 
 impl<'a, S> Seek for File<'a, S>
@@ -1347,10 +1361,9 @@ mod tests {
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
         let mut file = fs.get_file(PathBuf::from("/root.txt")).unwrap();
-        let mut file_bytes = [0_u8; 1024];
-        let bytes_read = file.read(&mut file_bytes).unwrap();
 
-        let file_string = String::from_utf8_lossy(&file_bytes[..bytes_read]).to_string();
+        let mut file_string = String::new();
+        file.read_to_string(&mut file_string).unwrap();
         const EXPECTED_STR: &str = "I am in the filesystem's root!!!\n\n";
         assert_eq!(file_string, EXPECTED_STR);
     }
@@ -1360,14 +1373,13 @@ mod tests {
     where
         S: Read + Write + Seek,
     {
-        let mut file_bytes = [0_u8; 65536];
-        let bytes_read = file.read(&mut file_bytes).unwrap();
+        let mut file_string = String::new();
+        let bytes_read = file.read_to_string(&mut file_string).unwrap();
 
         let expected_filesize = BEE_MOVIE_SCRIPT.len();
         assert_eq!(bytes_read, expected_filesize);
 
-        let utf8_string = str::from_utf8(&file_bytes[..bytes_read]).unwrap();
-        assert_eq!(utf8_string, BEE_MOVIE_SCRIPT);
+        assert_eq!(file_string, BEE_MOVIE_SCRIPT);
     }
 
     #[test]
@@ -1423,10 +1435,9 @@ mod tests {
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
         let mut file = fs.get_file(PathBuf::from("/rootdir/example.txt")).unwrap();
-        let mut file_bytes = [0_u8; 1024];
-        let bytes_read = file.read(&mut file_bytes).unwrap();
 
-        let file_string = String::from_utf8_lossy(&file_bytes[..bytes_read]).to_string();
+        let mut file_string = String::new();
+        file.read_to_string(&mut file_string).unwrap();
         const EXPECTED_STR: &str = "I am not in the root directory :(\n\n";
         assert_eq!(file_string, EXPECTED_STR);
     }
@@ -1453,10 +1464,8 @@ mod tests {
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
         let mut file = fs.get_file(PathBuf::from("/foo/bar.txt")).unwrap();
-        let mut file_bytes = [0_u8; 1024];
-        let bytes_read = file.read(&mut file_bytes).unwrap();
-
-        let file_string = String::from_utf8_lossy(&file_bytes[..bytes_read]).to_string();
+        let mut file_string = String::new();
+        file.read_to_string(&mut file_string).unwrap();
         const EXPECTED_STR: &str = "Hello, World!\n";
         assert_eq!(file_string, EXPECTED_STR);
 

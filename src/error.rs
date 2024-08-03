@@ -49,6 +49,8 @@ pub trait IOErrorKind: PartialEq + Sized {
     fn new_unexpected_eof() -> Self;
     /// Create a new `Interrupted` [`IOErrorKind`]
     fn new_interrupted() -> Self;
+    /// Create a new `InvalidData` [`IOErrorKind`]
+    fn new_invalid_data() -> Self;
 
     #[inline]
     /// Check whether this [`IOErrorKind`] is of kind `UnexpectedEOF`
@@ -59,6 +61,11 @@ pub trait IOErrorKind: PartialEq + Sized {
     #[inline]
     fn is_interrupted(&self) -> bool {
         self == &Self::new_interrupted()
+    }
+    /// Check whether this [`IOErrorKind`] is of kind `InvalidData`
+    #[inline]
+    fn is_invalid_data(&self) -> bool {
+        self == &Self::new_invalid_data()
     }
 }
 
@@ -71,6 +78,10 @@ impl IOErrorKind for std::io::ErrorKind {
     #[inline]
     fn new_interrupted() -> Self {
         std::io::ErrorKind::Interrupted
+    }
+    #[inline]
+    fn new_invalid_data() -> Self {
+        std::io::ErrorKind::InvalidData
     }
 }
 
