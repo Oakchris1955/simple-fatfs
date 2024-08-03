@@ -485,14 +485,18 @@ struct LFNEntry {
 
 impl LFNEntry {
     fn get_byte_slice(&self) -> [u16; 13] {
-        let mut slice = [0_u8; 13 * 2];
+        let mut slice = [0_u8; 13 * mem::size_of::<u16>()];
 
         slice[..10].copy_from_slice(&self.first_chars);
         slice[10..22].copy_from_slice(&self.mid_chars);
         slice[22..].copy_from_slice(&self.last_chars);
 
-        // this is safe since u8 is half the size of u16 and the len of the src slice is even
-        unsafe { slice.align_to().1.try_into().unwrap() }
+        let mut out_slice = [0_u16; 13];
+        for (i, chunk) in slice.chunks(mem::size_of::<u16>()).enumerate() {
+            out_slice[i] = u16::from_le_bytes(chunk.try_into().unwrap());
+        }
+
+        out_slice
     }
 
     #[inline]
