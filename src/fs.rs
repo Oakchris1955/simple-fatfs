@@ -1080,14 +1080,16 @@ where
                     _ => (),
                 };
 
-                let entry = mem::transmute::<[u8; mem::size_of::<FATDirEntry>()], FATDirEntry>(
-                    // this is guaranteed NOT TO PANIC
-                    chunk.try_into().unwrap(),
-                );
+                let entry: FATDirEntry = unsafe {
+                    mem::transmute::<[u8; mem::size_of::<FATDirEntry>()], FATDirEntry>(
+                        // this is guaranteed NOT TO PANIC
+                        chunk.try_into().unwrap(),
+                    )
+                };
 
                 if entry.attributes.contains(Attributes::LFN) {
                     // TODO: perhaps there is a way to utilize the `order` field?
-                    let lfn_entry: LFNEntry = mem::transmute(entry);
+                    let lfn_entry: LFNEntry = unsafe { mem::transmute(entry) };
 
                     // If the signature verification fails, consider this entry corrupted
                     if !lfn_entry.verify_signature() {
