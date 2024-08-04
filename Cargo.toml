@@ -1,7 +1,11 @@
 [package]
 name = "simple-fatfs"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2021"
+description = "A simple-to-use FAT filesystem library for Rust (mainly targeted at embedded systems)"
+license = "MIT"
+repository = "https://github.com/Oakchris1955/simple-fatfs"
+exclude = ["/.github", ".vscode", "/imgs", "**/*cliff*"]
 
 [dependencies]
 bitfield-struct = "0.8.0"

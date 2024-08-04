@@ -1,5 +1,11 @@
 # simple-fatfs
 
+[![CI Status](https://github.com/Oakchris1955/simple-fatfs/actions/workflows/test.yml/badge.svg)](https://github.com/Oakchris1955/simple-fatfs/actions/workflows/test.yml)
+![GitHub License](https://img.shields.io/github/license/Oakchris1955/simple-fatfs?color=blue)
+[![Crates.io Version](https://img.shields.io/crates/v/simple-fatfs)](https://crates.io/crates/simple-fatfs)
+[![docs.rs](https://docs.rs/simple-fatfs/badge.svg)](https://docs.rs/simple-fatfs)
+![Crates.io MSRV](https://img.shields.io/crates/msrv/simple-fatfs)
+
 A simple-to-use filesystem driver for the File Allocation Table (FAT)
 
 ## Motive
