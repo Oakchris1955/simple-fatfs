@@ -149,7 +149,7 @@ impl BootRecordFAT {
 
 #[derive(Debug, Clone, Copy)]
 #[repr(packed)]
-// Everything here is naturally aligned (thank god), so there's no need to make this a packed struct
+// Everything here is naturally aligned (thank god)
 struct BootRecordExFAT {
     _dummy_jmp: [u8; 3],
     _oem_identifier: [u8; 8],
@@ -247,6 +247,8 @@ struct FSInfoFAT32 {
 
 /// An enum representing different versions of the FAT filesystem
 #[derive(Debug, Clone, Copy, PartialEq)]
+// no need for enum variant documentation here
+#[allow(missing_docs)]
 pub enum FATType {
     FAT12,
     FAT16,
@@ -256,6 +258,7 @@ pub enum FATType {
 
 impl FATType {
     #[inline]
+    /// How many bits this [`FATType`] uses to address clusters in the disk
     pub fn bits_per_entry(&self) -> u8 {
         match self {
             FATType::FAT12 => 12,
@@ -533,31 +536,45 @@ pub struct Properties {
 /// Getter methods
 impl Properties {
     #[inline]
+    /// Get the corresponding [`PathBuf`] to this entry
     pub fn path(&self) -> &PathBuf {
         &self.path
     }
 
     #[inline]
+    /// Get the corresponding [`Attributes`] to this entry
     pub fn attributes(&self) -> &Attributes {
         &self.attributes
     }
 
     #[inline]
+    /// Find out when this entry was created (max resolution: 1ms)
+    ///
+    /// Returns a [`PrimitiveDateTime`] from the [`time`] crate
     pub fn creation_time(&self) -> &PrimitiveDateTime {
         &self.created
     }
 
     #[inline]
+    /// Find out when this entry was last modified (max resolution: 2 secs)
+    ///
+    /// Returns a [`PrimitiveDateTime`] from the [`time`] crate
     pub fn modification_time(&self) -> &PrimitiveDateTime {
         &self.modified
     }
 
     #[inline]
+    /// Find out when this entry was last accessed (max resolution: 1 day)
+    ///
+    /// Returns a [`Date`] from the [`time`] crate
     pub fn last_accessed_date(&self) -> &Date {
         &self.accessed
     }
 
     #[inline]
+    /// Find out the size of this entry
+    ///
+    /// Always returns `0` for directories
     pub fn file_size(&self) -> u32 {
         self.file_size
     }

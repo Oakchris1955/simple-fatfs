@@ -1,4 +1,16 @@
 //! This module contains all the IO-related objects of the crate
+//!
+//! If you want to implement IO functionality in a `std` environment,
+//! it is advised to implement the relevant [`std::io`] traits, which will
+//! auto-`impl` the corresponding IO traits here. In a `no-std` environment,
+//! implement the traits directly
+//!
+//! # Traits
+//!
+//! - [`IOBase`] provides a common error type for [`Read`], [`Write`] & [`Seek`]
+//! - [`Read`] allows for reading bytes from a source.
+//! - [`Write`] allows for writing bytes to a sink.
+//! - [`Seek`] provides a cursor which can be moved within a stream of bytes
 
 #[cfg(not(feature = "std"))]
 use core::*;
@@ -53,6 +65,8 @@ pub trait Read: IOBase {
     /// `buf`. This function will continuously call [`read()`] to append more data to
     /// `buf` until [`read()`] returns either [`Ok(0)`] or an [`IOErrorKind`] of
     /// non-`Interrupted` kind.
+    ///
+    /// [`read()`]: Read::read
     fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize, Self::Error> {
         let mut bytes_read = 0;
 
@@ -157,10 +171,10 @@ pub trait Write: IOBase {
     /// Attempts to write an entire buffer into this writer.
     ///
     /// This method will continuously call [`write`] until there is no more data
-    /// to be written or an error of non-[`ErrorKind::Interrupted`] kind is
+    /// to be written or an error of non-`Interrupted` [`IOErrorKind`] is
     /// returned. This method will not return until the entire buffer has been
     /// successfully written or such an error occurs. The first error that is
-    /// not of [`ErrorKind::Interrupted`] kind generated from this method will be
+    /// not of `Interrupted` [`IOErrorKind`] generated from this method will be
     /// returned.
     ///
     /// If the buffer contains no data, this will never call [`write`].
@@ -168,7 +182,7 @@ pub trait Write: IOBase {
     /// # Errors
     ///
     /// This function will return the first error of
-    /// non-[`ErrorKind::Interrupted`] kind that [`write`] returns.
+    /// non-`Interrupted` [`IOErrorKind`] that [`write`] returns.
     ///
     /// [`write`]: Write::write
     fn write_all(&mut self, mut buf: &[u8]) -> Result<(), Self::Error> {
