@@ -12,6 +12,7 @@
 //!
 //! # Examples
 //! ```
+//! # // this test fails on a no_std environment, don't run it in such a case
 //! extern crate simple_fatfs;
 //! use simple_fatfs::*;
 //! use simple_fatfs::io::prelude::*;
