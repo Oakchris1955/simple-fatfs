@@ -213,6 +213,7 @@ pub trait Write: IOBase {
 }
 
 /// A copy of [`std::io::SeekFrom`] for use within a `no_std` context
+#[derive(Debug, Clone, Copy)]
 pub enum SeekFrom {
     /// Sets the offset to the provided number of bytes.
     Start(u64),

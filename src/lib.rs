@@ -50,8 +50,20 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 // Even inside unsafe functions, we must acknowlegde the usage of unsafe code
-#![deny(unsafe_op_in_unsafe_fn)]
+#![deny(deprecated)]
+#![deny(elided_lifetimes_in_paths)]
+#![deny(macro_use_extern_crate)]
+#![deny(missing_copy_implementations)]
+#![deny(missing_debug_implementations)]
 #![deny(missing_docs)]
+#![deny(non_ascii_idents)]
+#![deny(trivial_numeric_casts)]
+#![deny(single_use_lifetimes)]
+#![deny(unsafe_op_in_unsafe_fn)]
+#![deny(unused_crate_dependencies)]
+#![deny(unused_extern_crates)]
+#![deny(unused_import_braces)]
+#![deny(unused_lifetimes)]
 
 extern crate alloc;
 

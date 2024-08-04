@@ -179,6 +179,13 @@ union BootRecord {
     exfat: BootRecordExFAT,
 }
 
+impl fmt::Debug for BootRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: find a good way of printing this
+        write!(f, "FAT/ExFAT boot record...")
+    }
+}
+
 #[derive(Clone, Copy)]
 #[repr(packed)]
 union EBR {
@@ -612,6 +619,7 @@ impl ops::Deref for DirEntry {
 }
 
 /// A file within the FAT filesystem
+#[derive(Debug)]
 pub struct File<'a, S>
 where
     S: Read + Write + Seek,
@@ -623,7 +631,7 @@ where
     current_cluster: u32,
 }
 
-impl<'a, S> Deref for File<'a, S>
+impl<S> Deref for File<'_, S>
 where
     S: Read + Write + Seek,
 {
@@ -634,7 +642,7 @@ where
     }
 }
 
-impl<'a, S> IOBase for File<'a, S>
+impl<S> IOBase for File<'_, S>
 where
     S: Read + Write + Seek,
 {
@@ -642,7 +650,7 @@ where
 }
 
 /// Internal functions
-impl<'a, S> File<'a, S>
+impl<S> File<'_, S>
 where
     S: Read + Write + Seek,
 {
@@ -658,7 +666,7 @@ where
     }
 }
 
-impl<'a, S> Read for File<'a, S>
+impl<S> Read for File<'_, S>
 where
     S: Read + Write + Seek,
 {
@@ -728,7 +736,7 @@ where
     }
 }
 
-impl<'a, S> Seek for File<'a, S>
+impl<S> Seek for File<'_, S>
 where
     S: Read + Write + Seek,
 {
@@ -774,7 +782,7 @@ where
     }
 }
 
-impl<'a, S> File<'a, S>
+impl<S> File<'_, S>
 where
     S: Read + Write + Seek,
 {
@@ -852,6 +860,7 @@ struct FSProperties {
 }
 
 /// An API to process a FAT filesystem
+#[derive(Debug)]
 pub struct FileSystem<S>
 where
     S: Read + Write + Seek,
@@ -1035,7 +1044,7 @@ where
     /// Borrows `&mut self` until that [`File`] object is dropped, effectively locking `self` until that file closed
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
-    pub fn get_file(&mut self, path: PathBuf) -> FSResult<File<S>, S::Error> {
+    pub fn get_file(&mut self, path: PathBuf) -> FSResult<File<'_, S>, S::Error> {
         if path.is_malformed() {
             return Err(FSError::MalformedPath);
         }
@@ -1392,7 +1401,7 @@ mod tests {
     }
 
     static BEE_MOVIE_SCRIPT: &str = include_str!("../tests/bee movie script.txt");
-    fn assert_file_is_bee_movie_script<S>(file: &mut File<S>)
+    fn assert_file_is_bee_movie_script<S>(file: &mut File<'_, S>)
     where
         S: Read + Write + Seek,
     {
