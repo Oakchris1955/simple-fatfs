@@ -20,10 +20,11 @@ body = """
 {% else -%}
     ## [Unreleased]
 {% endif -%}
-{% for group, commits in commits | group_by(attribute="group") %}
+{% for group, commits in commits | filter(attribute="merge_commit", value=false) | group_by(attribute="group") %}
     ### {{ group | upper_first }}
     {% for commit in commits %}
-        - {{ commit.message | upper_first }}\
+        - {{ commit.message | upper_first }} \
+        ([{{ commit.id | truncate(length=7, end="") }}]({{ commit.id }}))\
     {% endfor %}
 {% endfor %}\n
 """
@@ -67,7 +68,7 @@ commit_parsers = [
   { message = "^refactor", skip = true },
   { message = "^.*: add", group = "Added" },
   { message = "^.*: create", group = "Added" },
-  { message = "^.*: support", group = "Added" },
+  { message = "^.*support", group = "Added" },
   { message = "^.*: implement", group = "Added" },
   { message = "^.*: remove", group = "Removed" },
   { message = "^.*: delete", group = "Removed" },
