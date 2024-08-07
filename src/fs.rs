@@ -876,7 +876,6 @@ struct FSProperties {
     total_clusters: u32,
     /// sector offset of the FAT
     fat_offset: u32,
-    reserved_sectors: u32,
     first_data_sector: u32,
 }
 
@@ -1002,22 +1001,13 @@ where
             }
         };
 
-        let reserved_sectors: u32 = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.bpb.reserved_sector_count.into(),
-            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
-        };
-
         let first_data_sector = match boot_record {
-            BootRecord::FAT(boot_record_fat) => {
-                boot_record_fat.bpb.reserved_sector_count as u32
-                    + (boot_record_fat.bpb.table_count as u32 * boot_record_fat.fat_sector_size())
-                    + boot_record_fat.root_dir_sectors() as u32
-            }
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_data_sector().into(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
 
         let fat_offset = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.bpb.reserved_sector_count.into(),
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_fat_sector().into(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
 
@@ -1031,7 +1021,6 @@ where
             cluster_size,
             fat_offset,
             total_clusters,
-            reserved_sectors,
             first_data_sector,
         };
 
