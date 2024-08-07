@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
 use ::time;
-use ops::Deref;
 use time::{Date, PrimitiveDateTime, Time};
 
 use crate::{error::*, io::prelude::*, path::PathBuf};
@@ -652,7 +651,7 @@ where
     current_cluster: u32,
 }
 
-impl<S> Deref for File<'_, S>
+impl<S> ops::Deref for File<'_, S>
 where
     S: Read + Write + Seek,
 {
