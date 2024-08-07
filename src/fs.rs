@@ -1319,14 +1319,6 @@ where
 
             value_bytes[bytes_to_read..entry_size as usize]
                 .copy_from_slice(&self.sector_buffer[..(entry_size as usize - bytes_to_read)]);
-
-            /*todo!(
-                "read: {} {:?} n: {} offset: {}",
-                bytes_to_read,
-                value_bytes,
-                n,
-                fat_offset
-            );*/
         }
 
         let mut value = u32::from_le_bytes(value_bytes);
@@ -1348,7 +1340,6 @@ where
         // pad unused bytes with 1s
         let padding: u32 = u32::MAX.to_be() << self.fat_type.bits_per_entry();
         value |= padding.to_le();
-        panic!("{:?} {:?}", value.to_be_bytes(), padding.to_be_bytes());
         */
 
         // TODO: perhaps byte padding can replace some redundant code here?
