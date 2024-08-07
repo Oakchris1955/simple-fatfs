@@ -8,11 +8,14 @@ repository = "https://github.com/Oakchris1955/simple-fatfs"
 exclude = ["/.github", ".vscode", "/imgs", "**/*cliff*"]
 
 [dependencies]
+bincode = "1.3.3"
 bitfield-struct = "0.8.0"
-bitflags = "2.6.0"
+bitflags = { version = "2.6.0", features = ["serde"] }
 displaydoc = { version = "0.2.5", default-features = false }
+serde = { version = "1.0.204", default-features = false, features = [ "alloc", "derive" ] }
+serde-big-array = "0.5.1"
 time = { version = "0.3.36", default-features = false, features = [ "alloc", "parsing", "macros" ]}
 
 [features]
 default = ["std"]
-std = ["displaydoc/std", "time/std"]
+std = ["displaydoc/std", "serde/std", "time/std"]

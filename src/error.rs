@@ -113,6 +113,13 @@ where
      If you get this error, open an issue: <https://github.com/Oakchris1955/simple-fatfs/issues>
     */
     MalformedPath,
+    /**
+     [`bincode`] errored out while (de)serializing
+
+     This error variant should NEVER be raised.
+     If you get this error, open an issue: <https://github.com/Oakchris1955/simple-fatfs/issues>
+    */
+    BincodeError(bincode::Error),
     /// Expected a directory
     NotADirectory,
     /// Found a directory when we expected a file
@@ -131,6 +138,16 @@ where
     #[inline]
     fn from(value: I) -> Self {
         FSError::IOError(value)
+    }
+}
+
+impl<I> From<bincode::Error> for FSError<I>
+where
+    I: IOError,
+{
+    #[inline]
+    fn from(value: bincode::Error) -> Self {
+        FSError::BincodeError(value)
     }
 }
 

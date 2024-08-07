@@ -13,6 +13,10 @@ use ::alloc::{
 use bitfield_struct::bitfield;
 use bitflags::bitflags;
 
+use bincode::Options as _;
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
+
 use ::time;
 use ops::Deref;
 use time::{Date, PrimitiveDateTime, Time};
@@ -26,9 +30,9 @@ const SECTOR_SIZE_MAX: usize = 4096;
 /// The first two bytes jump to 0 on all bit modes and the third byte is just a NOP
 const INFINITE_LOOP: [u8; 3] = [0xEB, 0xFE, 0x90];
 
-#[derive(Debug, Clone, Copy)]
-#[repr(packed)]
-struct BootRecordFAT {
+const BPBFAT_SIZE: usize = 36;
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+struct BPBFAT {
     _jmpboot: [u8; 3],
     _oem_identifier: [u8; 8],
     bytes_per_sector: u16,
@@ -44,25 +48,59 @@ struct BootRecordFAT {
     _head_side_count: u16,
     hidden_sector_count: u32,
     total_sectors_32: u32,
+}
 
-    // Extended boot record
-    ebr: EBR,
+#[derive(Debug)]
+enum BootRecord {
+    FAT(BootRecordFAT),
+    ExFAT(BootRecordExFAT),
+}
+
+impl BootRecord {
+    #[inline]
+    /// The FAT type of this file system
+    pub(crate) fn fat_type(&self) -> FATType {
+        match self {
+            BootRecord::FAT(boot_record_fat) => {
+                let total_clusters = boot_record_fat.total_clusters();
+                if total_clusters < 4085 {
+                    FATType::FAT12
+                } else if total_clusters < 65525 {
+                    FATType::FAT16
+                } else {
+                    FATType::FAT32
+                }
+            }
+            BootRecord::ExFAT(_boot_record_exfat) => {
+                todo!("ExFAT not yet implemented");
+                FATType::ExFAT
+            }
+        }
+    }
 }
 
 const BOOT_SIGNATURE: u8 = 0x29;
 const FAT_SIGNATURE: u16 = 0x55AA;
 
+#[derive(Debug, Clone, Copy)]
+struct BootRecordFAT {
+    bpb: BPBFAT,
+    ebr: EBR,
+}
+
 impl BootRecordFAT {
     #[inline]
     fn verify_signature(&self) -> bool {
         match self.fat_type() {
-            FATType::FAT12 | FATType::FAT16 => unsafe {
-                self.ebr.fat12_16.boot_signature == BOOT_SIGNATURE
-                    && self.ebr.fat12_16.signature == FAT_SIGNATURE
-            },
-            FATType::FAT32 => unsafe {
-                self.ebr.fat32.boot_signature == BOOT_SIGNATURE
-                    && self.ebr.fat32.signature == FAT_SIGNATURE
+            FATType::FAT12 | FATType::FAT16 | FATType::FAT32 => match self.ebr {
+                EBR::FAT12_16(ebr_fat12_16) => {
+                    ebr_fat12_16.boot_signature == BOOT_SIGNATURE
+                        && ebr_fat12_16.signature == FAT_SIGNATURE
+                }
+                EBR::FAT32(ebr_fat32) => {
+                    ebr_fat32.boot_signature == BOOT_SIGNATURE
+                        && ebr_fat32.signature == FAT_SIGNATURE
+                }
             },
             FATType::ExFAT => todo!("ExFAT not yet implemented"),
         }
@@ -71,21 +109,19 @@ impl BootRecordFAT {
     #[inline]
     /// Total sectors in volume (including VBR)s
     pub(crate) fn total_sectors(&self) -> u32 {
-        if self.total_sectors_16 == 0 {
-            self.total_sectors_32
+        if self.bpb.total_sectors_16 == 0 {
+            self.bpb.total_sectors_32
         } else {
-            self.total_sectors_16 as u32
+            self.bpb.total_sectors_16 as u32
         }
     }
 
     #[inline]
     /// FAT size in sectors
     pub(crate) fn fat_sector_size(&self) -> u32 {
-        if self.table_size_16 == 0 {
-            let ebr = self.ebr;
-            unsafe { ebr.fat32.table_size_32 }
-        } else {
-            self.table_size_16 as u32
+        match self.ebr {
+            EBR::FAT12_16(_ebr_fat12_16) => self.bpb.table_size_16.into(),
+            EBR::FAT32(ebr_fat32) => ebr_fat32.table_size_32,
         }
     }
 
@@ -94,19 +130,20 @@ impl BootRecordFAT {
     /// This calculation will round up
     pub(crate) fn root_dir_sectors(&self) -> u16 {
         // 32 is the size of a directory entry in bytes
-        ((self.root_entry_count * 32) + (self.bytes_per_sector - 1)) / self.bytes_per_sector
+        ((self.bpb.root_entry_count * 32) + (self.bpb.bytes_per_sector - 1))
+            / self.bpb.bytes_per_sector
     }
 
     #[inline]
     /// The first sector in the File Allocation Table
     pub(crate) fn first_fat_sector(&self) -> u16 {
-        self.reserved_sector_count
+        self.bpb.reserved_sector_count
     }
 
     #[inline]
     /// The first sector of the root directory
     pub(crate) fn first_root_dir_sector(&self) -> u16 {
-        self.first_fat_sector() + self.table_count as u16 * self.fat_sector_size() as u16
+        self.first_fat_sector() + self.bpb.table_count as u16 * self.fat_sector_size() as u16
     }
 
     #[inline]
@@ -118,20 +155,20 @@ impl BootRecordFAT {
     #[inline]
     /// The total number of data sectors
     pub(crate) fn total_data_sectors(&self) -> u32 {
-        self.total_sectors() - (self.table_count as u32 * self.fat_sector_size())
+        self.total_sectors() - (self.bpb.table_count as u32 * self.fat_sector_size())
             + self.root_dir_sectors() as u32
     }
 
     #[inline]
     /// The total number of clusters
     pub(crate) fn total_clusters(&self) -> u32 {
-        self.total_data_sectors() / self.sectors_per_cluster as u32
+        self.total_data_sectors() / self.bpb.sectors_per_cluster as u32
     }
 
     #[inline]
     /// The FAT type of this file system
     pub(crate) fn fat_type(&self) -> FATType {
-        if self.bytes_per_sector == 0 {
+        if self.bpb.bytes_per_sector == 0 {
             todo!("ExFAT not yet implemented");
             FATType::ExFAT
         } else {
@@ -148,7 +185,6 @@ impl BootRecordFAT {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[repr(packed)]
 // Everything here is naturally aligned (thank god)
 struct BootRecordExFAT {
     _dummy_jmp: [u8; 3],
@@ -172,25 +208,11 @@ struct BootRecordExFAT {
     _reserved: [u8; 7],
 }
 
+const EBR_SIZE: usize = 512 - BPBFAT_SIZE;
 #[derive(Clone, Copy)]
-#[repr(packed)]
-union BootRecord {
-    fat: BootRecordFAT,
-    exfat: BootRecordExFAT,
-}
-
-impl fmt::Debug for BootRecord {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: find a good way of printing this
-        write!(f, "FAT/ExFAT boot record...")
-    }
-}
-
-#[derive(Clone, Copy)]
-#[repr(packed)]
-union EBR {
-    fat12_16: mem::ManuallyDrop<EBRFAT12_16>,
-    fat32: mem::ManuallyDrop<EBRFAT32>,
+enum EBR {
+    FAT12_16(EBRFAT12_16),
+    FAT32(EBRFAT32),
 }
 
 impl fmt::Debug for EBR {
@@ -200,8 +222,7 @@ impl fmt::Debug for EBR {
     }
 }
 
-#[derive(Clone, Copy)]
-#[repr(packed)]
+#[derive(Deserialize, Serialize, Clone, Copy)]
 struct EBRFAT12_16 {
     _drive_num: u8,
     _windows_nt_flags: u8,
@@ -209,19 +230,19 @@ struct EBRFAT12_16 {
     volume_serial_num: u32,
     volume_label: [u8; 11],
     _system_identifier: [u8; 8],
+    #[serde(with = "BigArray")]
     _boot_code: [u8; 448],
     signature: u16,
 }
 
 // FIXME: these might be the other way around
-#[derive(Debug, Clone, Copy)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
 struct FATVersion {
     minor: u8,
     major: u8,
 }
 
-#[derive(Clone, Copy)]
-#[repr(packed)]
+#[derive(Deserialize, Serialize, Clone, Copy)]
 struct EBRFAT32 {
     table_size_32: u32,
     _extended_flags: u16,
@@ -236,12 +257,12 @@ struct EBRFAT32 {
     volume_serial_num: u32,
     volume_label: [u8; 11],
     _system_ident: [u8; 8],
+    #[serde(with = "BigArray")]
     _boot_code: [u8; 420],
     signature: u16,
 }
 
 #[derive(Clone, Copy)]
-#[repr(packed)]
 struct FSInfoFAT32 {
     lead_signature: [u8; 4],
     _reserved1: [u8; 480],
@@ -290,7 +311,7 @@ enum FATEntry {
     EOF,
 }
 
-#[repr(packed)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 struct SFN {
     name: [u8; 8],
     ext: [u8; 3],
@@ -340,7 +361,7 @@ bitflags! {
     /// To check whether a given [`Attributes`] struct contains a flag, use the [`contains()`](Attributes::contains()) method
     ///
     /// Generated using [bitflags](https://docs.rs/bitflags/2.6.0/bitflags/)
-    #[derive(Debug, PartialEq)]
+    #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
     pub struct Attributes: u8 {
         /// This entry is read-only
         const READ_ONLY = 0x01;
@@ -367,6 +388,7 @@ bitflags! {
 const START_YEAR: i32 = 1980;
 
 #[bitfield(u16)]
+#[derive(Serialize, Deserialize)]
 struct TimeAttribute {
     /// Multiply by 2
     #[bits(5)]
@@ -378,6 +400,7 @@ struct TimeAttribute {
 }
 
 #[bitfield(u16)]
+#[derive(Serialize, Deserialize)]
 struct DateAttribute {
     #[bits(5)]
     day: u8,
@@ -415,8 +438,7 @@ impl TryFrom<DateAttribute> for Date {
     }
 }
 
-#[derive(Debug, Clone)]
-#[repr(packed)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 struct EntryCreationTime {
     hundredths_of_second: u8,
     time: TimeAttribute,
@@ -443,8 +465,7 @@ impl TryFrom<EntryCreationTime> for PrimitiveDateTime {
     }
 }
 
-#[derive(Debug, Clone)]
-#[repr(packed)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 struct EntryModificationTime {
     time: TimeAttribute,
     date: DateAttribute,
@@ -461,7 +482,7 @@ impl TryFrom<EntryModificationTime> for PrimitiveDateTime {
     }
 }
 
-#[repr(packed)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 struct FATDirEntry {
     sfn: SFN,
     attributes: Attributes,
@@ -474,7 +495,7 @@ struct FATDirEntry {
     file_size: u32,
 }
 
-#[repr(packed)]
+#[derive(Debug, Deserialize, Serialize)]
 struct LFNEntry {
     /// masked with 0x40 if this is the last entry
     order: u8,
@@ -859,6 +880,16 @@ struct FSProperties {
     first_data_sector: u32,
 }
 
+#[inline]
+// an easy way to universally use the same bincode (de)serialization options
+fn bincode_config() -> impl bincode::Options + Copy {
+    // also check https://docs.rs/bincode/1.3.3/bincode/config/index.html#options-struct-vs-bincode-functions
+    bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .allow_trailing_bytes()
+        .with_little_endian()
+}
+
 /// An API to process a FAT filesystem
 #[derive(Debug)]
 pub struct FileSystem<S>
@@ -925,61 +956,81 @@ where
 
         let bytes_read = storage.read(&mut buffer)?;
 
-        if bytes_read < mem::size_of::<BootRecord>() {
+        if bytes_read < 512 {
             return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));
         }
 
-        let boot_record: BootRecord = unsafe { mem::transmute_copy(&buffer) };
+        let bpb: BPBFAT = bincode_config().deserialize(&buffer[..BPBFAT_SIZE])?;
+
+        let ebr = if bpb.table_size_16 == 0 {
+            EBR::FAT32(
+                bincode_config()
+                    .deserialize::<EBRFAT32>(&buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE])?,
+            )
+        } else {
+            EBR::FAT12_16(
+                bincode_config()
+                    .deserialize::<EBRFAT12_16>(&buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE])?,
+            )
+        };
+
+        // TODO: see how we will handle this for exfat
+        let boot_record = BootRecord::FAT(BootRecordFAT { bpb, ebr });
 
         // verify boot record signature
-        let fat_type = unsafe { boot_record.fat.fat_type() };
+        let fat_type = boot_record.fat_type();
 
-        match fat_type {
-            FATType::FAT12 | FATType::FAT16 | FATType::FAT32 => {
-                if unsafe { boot_record.fat.verify_signature() } {
+        match boot_record {
+            BootRecord::FAT(boot_record_fat) => {
+                if boot_record_fat.verify_signature() {
                     return Err(FSError::InternalFSError(InternalFSError::InvalidBPBSig));
                 }
             }
-            FATType::ExFAT => todo!("ExFAT not yet implemented"),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
         };
 
-        let sector_size: u32 = unsafe {
-            match fat_type {
-                FATType::FAT12 | FATType::FAT16 | FATType::FAT32 => {
-                    boot_record.fat.bytes_per_sector.into()
-                }
-                FATType::ExFAT => 1 << boot_record.exfat.sector_shift,
-            }
+        let sector_size: u32 = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.bpb.bytes_per_sector.into(),
+            BootRecord::ExFAT(boot_record_exfat) => 1 << boot_record_exfat.sector_shift,
         };
-        let cluster_size: u64 = unsafe {
-            match fat_type {
-                FATType::FAT12 | FATType::FAT16 | FATType::FAT32 => {
-                    (boot_record.fat.sectors_per_cluster as u32 * sector_size).into()
-                }
-                FATType::ExFAT => {
-                    1 << (boot_record.exfat.sector_shift + boot_record.exfat.cluster_shift)
-                }
+        let cluster_size: u64 = match boot_record {
+            BootRecord::FAT(boot_record_fat) => {
+                (boot_record_fat.bpb.sectors_per_cluster as u32 * sector_size).into()
+            }
+            BootRecord::ExFAT(boot_record_exfat) => {
+                1 << (boot_record_exfat.sector_shift + boot_record_exfat.cluster_shift)
             }
         };
 
-        let reserved_sectors: u32 = match fat_type {
-            FATType::FAT12 | FATType::FAT16 | FATType::FAT32 => unsafe {
-                boot_record.fat.reserved_sector_count as u32
-            },
-            FATType::ExFAT => todo!("ExFAT is not yet implemented"),
+        let reserved_sectors: u32 = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.bpb.reserved_sector_count.into(),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
 
-        let first_data_sector = unsafe {
-            boot_record.fat.reserved_sector_count as u32
-                + (boot_record.fat.table_count as u32 * boot_record.fat.fat_sector_size())
-                + boot_record.fat.root_dir_sectors() as u32
+        let first_data_sector = match boot_record {
+            BootRecord::FAT(boot_record_fat) => {
+                boot_record_fat.bpb.reserved_sector_count as u32
+                    + (boot_record_fat.bpb.table_count as u32 * boot_record_fat.fat_sector_size())
+                    + boot_record_fat.root_dir_sectors() as u32
+            }
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
+        };
+
+        let fat_offset = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.bpb.reserved_sector_count.into(),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
+        };
+
+        let total_clusters = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.total_clusters(),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
 
         let props = FSProperties {
             sector_size,
             cluster_size,
-            fat_offset: unsafe { boot_record.fat.reserved_sector_count as u32 },
-            total_clusters: unsafe { boot_record.fat.total_clusters() },
+            fat_offset,
+            total_clusters,
             reserved_sectors,
             first_data_sector,
         };
@@ -1098,10 +1149,7 @@ where
         let mut lfn_checksum: Option<u8> = None;
 
         'outer: loop {
-            for chunk in self
-                .read_nth_sector(sector.into())?
-                .chunks(mem::size_of::<FATDirEntry>())
-            {
+            for chunk in self.read_nth_sector(sector.into())?.chunks(32) {
                 match chunk[0] {
                     // nothing else to read
                     0 => break 'outer,
@@ -1110,16 +1158,15 @@ where
                     _ => (),
                 };
 
-                let entry: FATDirEntry = unsafe {
-                    mem::transmute::<[u8; mem::size_of::<FATDirEntry>()], FATDirEntry>(
-                        // this is guaranteed NOT TO PANIC
-                        chunk.try_into().unwrap(),
-                    )
+                let Ok(entry) = bincode_config().deserialize::<FATDirEntry>(&chunk) else {
+                    continue;
                 };
 
                 if entry.attributes.contains(Attributes::LFN) {
                     // TODO: perhaps there is a way to utilize the `order` field?
-                    let lfn_entry: LFNEntry = unsafe { mem::transmute(entry) };
+                    let Ok(lfn_entry) = bincode_config().deserialize::<LFNEntry>(&chunk) else {
+                        continue;
+                    };
 
                     // If the signature verification fails, consider this entry corrupted
                     if !lfn_entry.verify_signature() {
@@ -1181,27 +1228,27 @@ where
     }
 
     fn process_root_dir(&mut self) -> FSResult<Vec<RawProperties>, S::Error> {
-        match self.fat_type {
-            FATType::FAT12 | FATType::FAT16 => {
-                let mut entries = Vec::new();
+        match self.boot_record {
+            BootRecord::FAT(boot_record_fat) => match boot_record_fat.ebr {
+                EBR::FAT12_16(_ebr_fat12_16) => {
+                    let mut entries = Vec::new();
 
-                let root_dir_sector = unsafe { self.boot_record.fat.first_root_dir_sector() };
-                let sector_count = unsafe { self.boot_record.fat.root_dir_sectors() };
+                    let root_dir_sector = boot_record_fat.first_root_dir_sector();
+                    let sector_count = boot_record_fat.root_dir_sectors();
 
-                for sector in root_dir_sector..(root_dir_sector + sector_count) {
-                    let mut new_entries = unsafe { self.process_entry_sector(sector.into())? };
-                    entries.append(&mut new_entries);
+                    for sector in root_dir_sector..(root_dir_sector + sector_count) {
+                        let mut new_entries = unsafe { self.process_entry_sector(sector.into())? };
+                        entries.append(&mut new_entries);
+                    }
+
+                    Ok(entries)
                 }
-
-                Ok(entries)
-            }
-            FATType::FAT32 => unsafe {
-                let cluster = self.boot_record.exfat.root_dir_cluster;
-                self.process_normal_dir(cluster)
+                EBR::FAT32(ebr_fat32) => {
+                    let cluster = ebr_fat32.root_cluster;
+                    unsafe { self.process_normal_dir(cluster) }
+                }
             },
-            FATType::ExFAT => {
-                todo!("ExFAT not implemented yet")
-            }
+            BootRecord::ExFAT(_boot_record_exfat) => todo!(),
         }
     }
 
@@ -1378,7 +1425,11 @@ mod tests {
         fs.read_nth_sector(fs.props.fat_offset.into()).unwrap();
 
         let first_entry = u16::from_le_bytes(fs.sector_buffer[0..2].try_into().unwrap());
-        let media_type = unsafe { fs.boot_record.fat._media_type };
+        let media_type = if let BootRecord::FAT(boot_record_fat) = fs.boot_record {
+            boot_record_fat.bpb._media_type
+        } else {
+            unreachable!("this should be a FAT16 filesystem")
+        };
         assert_eq!(u16::MAX << 8 | media_type as u16, first_entry);
 
         let second_entry = u16::from_le_bytes(fs.sector_buffer[2..4].try_into().unwrap());
