@@ -1418,6 +1418,7 @@ mod tests {
     static MINFS: &[u8] = include_bytes!("../imgs/minfs.img");
     static FAT12: &[u8] = include_bytes!("../imgs/fat12.img");
     static FAT16: &[u8] = include_bytes!("../imgs/fat16.img");
+    static FAT32: &[u8] = include_bytes!("../imgs/fat32.img");
 
     #[test]
     #[allow(non_snake_case)]
@@ -1573,6 +1574,7 @@ mod tests {
             (MINFS, FATType::FAT12),
             (FAT12, FATType::FAT12),
             (FAT16, FATType::FAT16),
+            (FAT32, FATType::FAT32),
         ];
 
         for case in TEST_CASES {
