@@ -91,8 +91,13 @@ impl IOErrorKind for std::io::ErrorKind {
 pub enum InternalFSError {
     /// The storage medium isn't large enough to accompany a FAT filesystem
     StorageTooSmall,
-    /// Invalid boot sector signature. Perharps this isn't a FAT filesystem?
+    /// Invalid boot sector signature. Perhaps this isn't a FAT filesystem?
     InvalidBPBSig,
+    /**
+     Invalid FAT32 FSInfo signature.
+     Perhaps the FSInfo structure or the FAT32 EBR's fat_info field is malformed?
+    */
+    InvalidFSInfoSig,
     /// Encountered a malformed cluster chain
     MalformedClusterChain,
 }

@@ -98,7 +98,7 @@ impl BootRecordFAT {
                     ebr_fat12_16.boot_signature == BOOT_SIGNATURE
                         && ebr_fat12_16.signature == FAT_SIGNATURE
                 }
-                EBR::FAT32(ebr_fat32) => {
+                EBR::FAT32(ebr_fat32, _) => {
                     ebr_fat32.boot_signature == BOOT_SIGNATURE
                         && ebr_fat32.signature == FAT_SIGNATURE
                 }
@@ -122,7 +122,7 @@ impl BootRecordFAT {
     pub(crate) fn fat_sector_size(&self) -> u32 {
         match self.ebr {
             EBR::FAT12_16(_ebr_fat12_16) => self.bpb.table_size_16.into(),
-            EBR::FAT32(ebr_fat32) => ebr_fat32.table_size_32,
+            EBR::FAT32(ebr_fat32, _) => ebr_fat32.table_size_32,
         }
     }
 
@@ -213,7 +213,7 @@ const EBR_SIZE: usize = 512 - BPBFAT_SIZE;
 #[derive(Clone, Copy)]
 enum EBR {
     FAT12_16(EBRFAT12_16),
-    FAT32(EBRFAT32),
+    FAT32(EBRFAT32, FSInfoFAT32),
 }
 
 impl fmt::Debug for EBR {
@@ -263,15 +263,27 @@ struct EBRFAT32 {
     signature: u16,
 }
 
-#[derive(Clone, Copy)]
+const FSINFO_LEAD_SIGNATURE: u32 = 0x41615252;
+const FSINFO_MID_SIGNATURE: u32 = 0x61417272;
+const FSINFO_TRAIL_SIGNAUTE: u32 = 0xAA550000;
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 struct FSInfoFAT32 {
-    lead_signature: [u8; 4],
+    lead_signature: u32,
+    #[serde(with = "BigArray")]
     _reserved1: [u8; 480],
-    mid_signature: [u8; 4],
+    mid_signature: u32,
     last_free_cluster: u32,
     cluster_width: u32,
     _reserved2: [u8; 12],
-    trail_signature: [u8; 4],
+    trail_signature: u32,
+}
+
+impl FSInfoFAT32 {
+    fn verify_signature(&self) -> bool {
+        self.lead_signature == FSINFO_LEAD_SIGNATURE
+            && self.mid_signature == FSINFO_MID_SIGNATURE
+            && self.trail_signature == FSINFO_TRAIL_SIGNAUTE
+    }
 }
 
 /// An enum representing different versions of the FAT filesystem
@@ -955,6 +967,7 @@ where
         let mut buffer = [0u8; SECTOR_SIZE_MAX];
 
         let bytes_read = storage.read(&mut buffer)?;
+        let mut stored_sector = 0;
 
         if bytes_read < 512 {
             return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));
@@ -963,10 +976,22 @@ where
         let bpb: BPBFAT = bincode_config().deserialize(&buffer[..BPBFAT_SIZE])?;
 
         let ebr = if bpb.table_size_16 == 0 {
-            EBR::FAT32(
-                bincode_config()
-                    .deserialize::<EBRFAT32>(&buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE])?,
-            )
+            let ebr_fat32 = bincode_config()
+                .deserialize::<EBRFAT32>(&buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE])?;
+
+            storage.seek(SeekFrom::Start(
+                ebr_fat32.fat_info as u64 * bpb.bytes_per_sector as u64,
+            ))?;
+            stored_sector = ebr_fat32.fat_info.into();
+            storage.read_exact(&mut buffer[..bpb.bytes_per_sector as usize])?;
+            let fsinfo = bincode_config()
+                .deserialize::<FSInfoFAT32>(&buffer[..bpb.bytes_per_sector as usize])?;
+
+            if !fsinfo.verify_signature() {
+                return Err(FSError::InternalFSError(InternalFSError::InvalidFSInfoSig));
+            }
+
+            EBR::FAT32(ebr_fat32, fsinfo)
         } else {
             EBR::FAT12_16(
                 bincode_config()
@@ -1028,7 +1053,7 @@ where
         Ok(Self {
             storage,
             sector_buffer: buffer[..sector_size as usize].to_vec(),
-            stored_sector: 0,
+            stored_sector,
             boot_record,
             fat_type,
             props,
@@ -1233,7 +1258,7 @@ where
 
                     Ok(entries)
                 }
-                EBR::FAT32(ebr_fat32) => {
+                EBR::FAT32(ebr_fat32, _) => {
                     let cluster = ebr_fat32.root_cluster;
                     unsafe { self.process_normal_dir(cluster) }
                 }
