@@ -349,6 +349,8 @@ impl SFN {
                 .wrapping_add(c)
         }
 
+        log::debug!("SFN checksum: {:X}", sum);
+
         sum
     }
 }
@@ -708,6 +710,7 @@ where
         let mut bytes_read = 0;
         // this is the maximum amount of bytes that can be read
         let read_cap = cmp::min(buf.len(), self.file_size as usize - self.offset as usize);
+        log::debug!("Byte read cap set to {}", read_cap);
 
         'outer: loop {
             let sector_init_offset = u32::try_from(self.offset % self.fs.cluster_size()).unwrap()
@@ -720,14 +723,26 @@ where
                 + self.fs.sectors_per_cluster() as u32
                 - sector_init_offset
                 - 1;
+            log::debug!(
+                "Reading cluster {} from sectors {} to {}",
+                self.current_cluster,
+                first_sector_of_cluster,
+                last_sector_of_cluster
+            );
+
             for sector in first_sector_of_cluster..=last_sector_of_cluster {
                 self.fs.read_nth_sector(sector.into())?;
 
                 let start_index = self.offset as usize % self.fs.sector_size() as usize;
-
                 let bytes_to_read = cmp::min(
                     read_cap - bytes_read,
                     self.fs.sector_size() as usize - start_index,
+                );
+                log::debug!(
+                    "Gonna read {} bytes from sector {} starting at byte {}",
+                    bytes_to_read,
+                    sector,
+                    start_index
                 );
 
                 buf[bytes_read..bytes_read + bytes_to_read].copy_from_slice(
@@ -788,8 +803,15 @@ where
         };
 
         if offset > self.file_size.into() {
+            log::debug!("Capping cursor offset to file_size");
             offset = self.file_size.into();
         }
+
+        log::debug!(
+            "Previous cursor offset is {}, new cursor offset is {}",
+            self.offset,
+            offset
+        );
 
         use cmp::Ordering;
         match offset.cmp(&self.offset) {
@@ -988,6 +1010,7 @@ where
                 .deserialize::<FSInfoFAT32>(&buffer[..bpb.bytes_per_sector as usize])?;
 
             if !fsinfo.verify_signature() {
+                log::error!("FAT32 FSInfo has invalid signature(s)");
                 return Err(FSError::InternalFSError(InternalFSError::InvalidFSInfoSig));
             }
 
@@ -1004,10 +1027,12 @@ where
 
         // verify boot record signature
         let fat_type = boot_record.fat_type();
+        log::info!("The FAT type of the filesystem is {:?}", fat_type);
 
         match boot_record {
             BootRecord::FAT(boot_record_fat) => {
                 if boot_record_fat.verify_signature() {
+                    log::error!("FAT boot record has invalid signature(s)");
                     return Err(FSError::InternalFSError(InternalFSError::InvalidBPBSig));
                 }
             }
@@ -1068,6 +1093,7 @@ where
             return Err(FSError::MalformedPath);
         }
         if !path.is_dir() {
+            log::error!("Not a directory");
             return Err(FSError::NotADirectory);
         }
 
@@ -1079,6 +1105,7 @@ where
             }) {
                 Some(entry) => entry.data_cluster,
                 None => {
+                    log::error!("Directory {} not found", path);
                     return Err(FSError::NotFound);
                 }
             };
@@ -1134,14 +1161,19 @@ where
                     if file.cluster_chain_is_healthy()? {
                         Ok(file)
                     } else {
+                        log::error!("The cluster chain of a file is malformed");
                         Err(FSError::InternalFSError(
                             InternalFSError::MalformedClusterChain,
                         ))
                     }
                 }
-                None => Err(FSError::NotFound),
+                None => {
+                    log::error!("File {} not found", path);
+                    Err(FSError::NotFound)
+                }
             }
         } else {
+            log::error!("Is a directory (not a file)");
             Err(FSError::IsADirectory)
         }
     }
@@ -1294,9 +1326,10 @@ where
                 FATEntry::Allocated(next_cluster) => data_cluster = next_cluster,
                 // any other case (whether a bad, reserved or free cluster) is invalid, consider this cluster chain malformed
                 _ => {
+                    log::error!("Cluster chain of directory is malformed");
                     return Err(FSError::InternalFSError(
                         InternalFSError::MalformedClusterChain,
-                    ))
+                    ));
                 }
             }
         }
@@ -1413,6 +1446,7 @@ where
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
+    use test_log::test;
     use time::macros::*;
 
     static MINFS: &[u8] = include_bytes!("../imgs/minfs.img");

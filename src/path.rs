@@ -69,6 +69,7 @@ pub struct PathBuf {
 impl PathBuf {
     /// Create a new, empty [`PathBuf`] pointing to the root directory ("/")
     pub fn new() -> Self {
+        log::debug!("New PathBuf created");
         Self::default()
     }
 
@@ -108,6 +109,8 @@ impl PathBuf {
                 _ => self.inner.push_back(p.to_string()),
             }
         }
+
+        log::debug!("Pushed {} into PathBuf", subpath);
     }
 
     /// If `self` is a file, returns `Ok(file_name)`, otherwise `None`
@@ -199,85 +202,91 @@ impl iter::Iterator for PathBuf {
     }
 }
 
-#[test]
-fn empty_pathbuf_tostring() {
-    let pathbuf = PathBuf::new();
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+    use test_log::test;
 
-    assert_eq!(pathbuf.to_string(), "/");
-    assert!(!pathbuf.is_malformed());
-}
+    #[test]
+    fn empty_pathbuf_tostring() {
+        let pathbuf = PathBuf::new();
 
-#[test]
-fn catch_invalid_path() {
-    #[cfg(not(feature = "std"))]
-    use ::alloc::format;
-
-    let mut pathbuf = PathBuf::new();
-
-    // ignore path separators
-    for filename in RESERVED_FILENAMES {
-        pathbuf.push(format!("/{filename}"));
-
-        assert!(
-            pathbuf.is_malformed(),
-            "unable to detect invalid filename {}",
-            pathbuf
-        );
-
-        pathbuf.clear();
+        assert_eq!(pathbuf.to_string(), "/");
+        assert!(!pathbuf.is_malformed());
     }
-}
 
-#[test]
-fn catch_non_control_forbidden_chars() {
-    #[cfg(not(feature = "std"))]
-    use ::alloc::format;
+    #[test]
+    fn catch_invalid_path() {
+        #[cfg(not(feature = "std"))]
+        use ::alloc::format;
 
-    let mut pathbuf = PathBuf::new();
+        let mut pathbuf = PathBuf::new();
 
-    // ignore path separators
-    const PATH_SEPARATORS: &[char] = &['/', '\\'];
-    for c in FORBIDDEN_CHARS
-        .iter()
-        .filter(|c| !PATH_SEPARATORS.contains(c))
-    {
-        pathbuf.push(format!("/{c}"));
+        // ignore path separators
+        for filename in RESERVED_FILENAMES {
+            pathbuf.push(format!("/{filename}"));
 
-        assert!(
-            pathbuf.is_malformed(),
-            "unable to detect character {} (hex: {:#02x}) as forbidden {:?}",
-            c,
-            (*c as usize),
-            pathbuf
-        );
+            assert!(
+                pathbuf.is_malformed(),
+                "unable to detect invalid filename {}",
+                pathbuf
+            );
 
-        pathbuf.clear();
+            pathbuf.clear();
+        }
     }
-}
 
-#[test]
-fn push_to_pathbuf() {
-    let mut pathbuf = PathBuf::new();
+    #[test]
+    fn catch_non_control_forbidden_chars() {
+        #[cfg(not(feature = "std"))]
+        use ::alloc::format;
 
-    pathbuf.push("foo");
-    pathbuf.push("bar/test");
-    pathbuf.push("bar2\\test2");
-    pathbuf.push("ignored\\../.");
-    pathbuf.push("fintest1");
-    pathbuf.push("fintest2/");
-    pathbuf.push("last");
+        let mut pathbuf = PathBuf::new();
 
-    assert_eq!(
-        pathbuf.to_string(),
-        "/foo/bar/test/bar2/test2/fintest1/fintest2/last"
-    )
-}
+        // ignore path separators
+        const PATH_SEPARATORS: &[char] = &['/', '\\'];
+        for c in FORBIDDEN_CHARS
+            .iter()
+            .filter(|c| !PATH_SEPARATORS.contains(c))
+        {
+            pathbuf.push(format!("/{c}"));
 
-#[test]
-fn push_absolute_path() {
-    let mut pathbuf = PathBuf::from("/foo/bar.txt");
+            assert!(
+                pathbuf.is_malformed(),
+                "unable to detect character {} (hex: {:#02x}) as forbidden {:?}",
+                c,
+                (*c as usize),
+                pathbuf
+            );
 
-    pathbuf.push("\\test");
+            pathbuf.clear();
+        }
+    }
 
-    assert_eq!(pathbuf.to_string(), "/test")
+    #[test]
+    fn push_to_pathbuf() {
+        let mut pathbuf = PathBuf::new();
+
+        pathbuf.push("foo");
+        pathbuf.push("bar/test");
+        pathbuf.push("bar2\\test2");
+        pathbuf.push("ignored\\../.");
+        pathbuf.push("fintest1");
+        pathbuf.push("fintest2/");
+        pathbuf.push("last");
+
+        assert_eq!(
+            pathbuf.to_string(),
+            "/foo/bar/test/bar2/test2/fintest1/fintest2/last"
+        )
+    }
+
+    #[test]
+    fn push_absolute_path() {
+        let mut pathbuf = PathBuf::from("/foo/bar.txt");
+
+        pathbuf.push("\\test");
+
+        assert_eq!(pathbuf.to_string(), "/test")
+    }
 }
