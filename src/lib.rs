@@ -60,8 +60,6 @@
 #![deny(trivial_numeric_casts)]
 #![deny(single_use_lifetimes)]
 #![deny(unsafe_op_in_unsafe_fn)]
-#![deny(unused_crate_dependencies)]
-#![deny(unused_extern_crates)]
 #![deny(unused_import_braces)]
 #![deny(unused_lifetimes)]
 
