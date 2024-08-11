@@ -756,7 +756,9 @@ where
                 if bytes_read >= read_cap {
                     // ...but we must process get the next cluster for future uses,
                     // we do that before breaking
-                    if self.offset % self.fs.cluster_size() == 0 {
+                    if self.offset % self.fs.cluster_size() == 0
+                        && self.offset < self.file_size.into()
+                    {
                         self.next_cluster()?;
                     }
 
