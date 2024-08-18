@@ -272,8 +272,8 @@ struct FSInfoFAT32 {
     #[serde(with = "BigArray")]
     _reserved1: [u8; 480],
     mid_signature: u32,
-    last_free_cluster: u32,
-    cluster_width: u32,
+    free_cluster_count: u32,
+    first_free_cluster: u32,
     _reserved2: [u8; 12],
     trail_signature: u32,
 }
@@ -308,6 +308,12 @@ impl FATType {
             FATType::ExFAT => 32,
         }
     }
+
+    #[inline]
+    /// How many bytes this [`FATType`] spans across
+    fn entry_size(&self) -> u32 {
+        self.bits_per_entry().next_power_of_two() as u32 / 8
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -322,6 +328,24 @@ enum FATEntry {
     Bad,
     /// This cluster is allocated and is the final cluster of the file
     EOF,
+}
+
+impl From<FATEntry> for u32 {
+    fn from(value: FATEntry) -> Self {
+        Self::from(&value)
+    }
+}
+
+impl From<&FATEntry> for u32 {
+    fn from(value: &FATEntry) -> Self {
+        match value {
+            FATEntry::Free => u32::MIN,
+            FATEntry::Allocated(cluster) => *cluster,
+            FATEntry::Reserved => 0xFFFFFF6,
+            FATEntry::Bad => 0xFFFFFF7,
+            FATEntry::EOF => u32::MAX,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
@@ -678,6 +702,15 @@ where
     }
 }
 
+impl<S> ops::DerefMut for File<'_, S>
+where
+    S: Read + Write + Seek,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.entry
+    }
+}
+
 impl<S> IOBase for File<'_, S>
 where
     S: Read + Write + Seek,
@@ -699,6 +732,22 @@ where
         };
 
         Ok(())
+    }
+
+    /// Returns that last cluster in the file's cluster chain
+    fn last_cluster_in_chain(&mut self) -> Result<u32, <Self as IOBase>::Error> {
+        // we begin from the current cluster to save some time
+        let mut current_cluster = self.current_cluster;
+
+        loop {
+            match self.fs.read_nth_FAT_entry(current_cluster)? {
+                FATEntry::Allocated(next_cluster) => current_cluster = next_cluster,
+                FATEntry::EOF => break,
+                _ => unreachable!(),
+            }
+        }
+
+        Ok(current_cluster)
     }
 }
 
@@ -787,12 +836,78 @@ where
     }
 }
 
+impl<S> Write for File<'_, S>
+where
+    S: Read + Write + Seek,
+{
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        // allocate clusters
+        self.seek(SeekFrom::Current(buf.len() as i64))?;
+        // rewind back to where we were
+        self.seek(SeekFrom::Current(-(buf.len() as i64)))?;
+
+        let mut bytes_written = 0;
+
+        'outer: loop {
+            log::trace!("writing file data to cluster: {}", self.current_cluster);
+
+            let sector_init_offset = u32::try_from(self.offset % self.fs.cluster_size()).unwrap()
+                / self.fs.sector_size();
+            let first_sector_of_cluster = self
+                .fs
+                .data_cluster_to_partition_sector(self.current_cluster)
+                + sector_init_offset;
+            let last_sector_of_cluster = first_sector_of_cluster
+                + self.fs.sectors_per_cluster() as u32
+                - sector_init_offset
+                - 1;
+            for sector in first_sector_of_cluster..=last_sector_of_cluster {
+                self.fs.read_nth_sector(sector.into())?;
+
+                let start_index = self.offset as usize % self.fs.sector_size() as usize;
+
+                let bytes_to_write = cmp::min(
+                    buf.len() - bytes_written,
+                    self.fs.sector_size() as usize - start_index,
+                );
+
+                self.fs.sector_buffer[start_index..start_index + bytes_to_write]
+                    .copy_from_slice(&buf[bytes_written..bytes_written + bytes_to_write]);
+                self.fs.buffer_modified = true;
+
+                bytes_written += bytes_to_write;
+                self.offset += bytes_to_write as u64;
+
+                // if we have written as many bytes as we want...
+                if bytes_written >= buf.len() {
+                    // ...but we must process get the next cluster for future uses,
+                    // we do that before breaking
+                    if self.offset % self.fs.cluster_size() == 0 {
+                        self.next_cluster()?;
+                    }
+
+                    break 'outer;
+                }
+            }
+
+            self.next_cluster()?;
+        }
+
+        Ok(bytes_written)
+    }
+
+    // everything is immediately written to the storage medium
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
 impl<S> Seek for File<'_, S>
 where
     S: Read + Write + Seek,
 {
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error> {
-        let mut offset = match pos {
+        let offset = match pos {
             SeekFrom::Start(offset) => offset,
             SeekFrom::Current(offset) => {
                 let offset = self.offset as i64 + offset;
@@ -804,9 +919,60 @@ where
             }
         };
 
-        if offset > self.file_size.into() {
-            log::debug!("Capping cursor offset to file_size");
-            offset = self.file_size.into();
+        // in case the cursor goes beyond the EOF, allocate more clusters
+        if offset > (self.file_size as u64).next_multiple_of(self.fs.cluster_size()) {
+            let clusters_to_allocate = (offset
+                - (self.file_size as u64).next_multiple_of(self.fs.cluster_size()))
+            .div_ceil(self.fs.cluster_size())
+                + 1;
+            log::debug!(
+                "Seeking beyond EOF, allocating {} more clusters",
+                clusters_to_allocate
+            );
+
+            let mut last_cluster_in_chain = self.last_cluster_in_chain()?;
+
+            for clusters_allocated in 0..clusters_to_allocate {
+                match self.fs.next_free_cluster()? {
+                    Some(next_free_cluster) => {
+                        // we set the last allocated cluster to point to the next free one
+                        self.fs.write_nth_FAT_entry(
+                            last_cluster_in_chain,
+                            FATEntry::Allocated(next_free_cluster),
+                        )?;
+                        // we also set the next free cluster to be EOF
+                        self.fs
+                            .write_nth_FAT_entry(next_free_cluster, FATEntry::EOF)?;
+                        log::trace!(
+                            "cluster {} now points to {}",
+                            last_cluster_in_chain,
+                            next_free_cluster
+                        );
+                        // now the next free cluster i the last allocated one
+                        last_cluster_in_chain = next_free_cluster;
+                    }
+                    None => {
+                        self.file_size = (((self.file_size as u64)
+                            .next_multiple_of(self.fs.cluster_size())
+                            - offset)
+                            + clusters_allocated * self.fs.cluster_size())
+                            as u32;
+                        self.offset = self.file_size.into();
+
+                        log::error!("storage medium full while attempting to allocated more clusters for a File");
+                        return Err(IOError::new(
+                            <Self::Error as IOError>::Kind::new_unexpected_eof(),
+                            "the storage medium is full, can't increase size of file",
+                        ));
+                    }
+                }
+            }
+
+            self.file_size = offset as u32;
+            log::debug!(
+                "New file size after reallocation is {} bytes",
+                self.file_size
+            );
         }
 
         log::debug!(
@@ -823,7 +989,7 @@ where
                 // (perhaps we could follow a similar approach to elm-chan's FATFS, by using a cluster link map table, perhaps as an optional feature)
                 self.offset = 0;
                 self.current_cluster = self.data_cluster;
-                self.seek(pos)?;
+                self.seek(SeekFrom::Start(offset))?;
             }
             Ordering::Equal => (),
             Ordering::Greater => {
@@ -845,7 +1011,7 @@ where
     S: Read + Write + Seek,
 {
     fn cluster_chain_is_healthy(&mut self) -> Result<bool, S::Error> {
-        let mut current_cluster = self.entry.data_cluster;
+        let mut current_cluster = self.data_cluster;
         let mut cluster_count = 0;
 
         loop {
@@ -910,6 +1076,7 @@ trait OffsetConversions {
 struct FSProperties {
     sector_size: u32,
     cluster_size: u64,
+    total_sectors: u32,
     total_clusters: u32,
     /// sector offset of the FAT
     fat_offset: u32,
@@ -937,6 +1104,8 @@ where
 
     /// The length of this will be the sector size of the FS for all FAT types except FAT12, in that case, it will be double that value
     sector_buffer: Vec<u8>,
+    /// ANY CHANGES TO THE SECTOR BUFFER SHOULD ALSO SET THIS TO TRUE
+    buffer_modified: bool,
     stored_sector: u64,
 
     boot_record: BootRecord,
@@ -1064,6 +1233,11 @@ where
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
 
+        let total_sectors = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.total_sectors(),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
+        };
+
         let total_clusters = match boot_record {
             BootRecord::FAT(boot_record_fat) => boot_record_fat.total_clusters(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
@@ -1073,6 +1247,7 @@ where
             sector_size,
             cluster_size,
             fat_offset,
+            total_sectors,
             total_clusters,
             first_data_sector,
         };
@@ -1080,6 +1255,7 @@ where
         Ok(Self {
             storage,
             sector_buffer: buffer[..sector_size as usize].to_vec(),
+            buffer_modified: false,
             stored_sector,
             boot_record,
             fat_type,
@@ -1177,6 +1353,29 @@ where
         } else {
             log::error!("Is a directory (not a file)");
             Err(FSError::IsADirectory)
+        }
+    }
+}
+
+/// Properties about the position of a [`FATEntry`] inside the FAT region
+struct FATEntryProps {
+    fat_sector: u32,
+    sector_offset: usize,
+}
+
+impl FATEntryProps {
+    /// Get the [`FATEntryProps`] of the `n`-th [`FATEntry`] of a [`FileSystem`] (`fs`)
+    pub fn new<S>(n: u32, fs: &FileSystem<S>) -> Self
+    where
+        S: Read + Write + Seek,
+    {
+        let fat_byte_offset: u32 = n * fs.fat_type.bits_per_entry() as u32 / 8;
+        let fat_sector: u32 = fs.props.fat_offset + fat_byte_offset / fs.props.sector_size;
+        let sector_offset: usize = (fat_byte_offset % fs.props.sector_size) as usize;
+
+        FATEntryProps {
+            fat_sector,
+            sector_offset,
         }
     }
 }
@@ -1339,48 +1538,109 @@ where
         Ok(entries)
     }
 
+    /// Gets the next free cluster. Returns an IO [`Result`]
+    /// If the [`Result`] returns [`Ok`] that contains a [`None`], the drive is full
+    fn next_free_cluster(&mut self) -> Result<Option<u32>, S::Error> {
+        let start_cluster = match self.boot_record {
+            BootRecord::FAT(boot_record_fat) => {
+                // the first 2 entries are reserved
+                let mut first_free_cluster = 2;
+
+                if let EBR::FAT32(_, fsinfo) = boot_record_fat.ebr {
+                    // a value of u32::MAX denotes unawareness of the first free cluster
+                    // we also do a bit of range checking
+                    // TODO: if this is unknown, figure it out and write it to the FSInfo structure
+                    if fsinfo.first_free_cluster != u32::MAX
+                        && fsinfo.first_free_cluster <= self.props.total_sectors
+                    {
+                        first_free_cluster = fsinfo.first_free_cluster
+                    }
+                }
+
+                first_free_cluster
+            }
+            BootRecord::ExFAT(_) => todo!("ExFAT not yet implemented"),
+        };
+
+        let mut current_cluster = start_cluster;
+
+        while current_cluster < self.props.total_clusters {
+            match self.read_nth_FAT_entry(current_cluster)? {
+                FATEntry::Free => return Ok(Some(current_cluster)),
+                _ => (),
+            }
+            current_cluster += 1;
+        }
+
+        Ok(None)
+    }
+
     /// Read the nth sector from the partition's beginning and store it in [`self.sector_buffer`](Self::sector_buffer)
     ///
     /// This function also returns an immutable reference to [`self.sector_buffer`](Self::sector_buffer)
     fn read_nth_sector(&mut self, n: u64) -> Result<&Vec<u8>, S::Error> {
         // nothing to do if the sector we wanna read is already cached
         if n != self.stored_sector {
+            // let's sync the current sector first
+            self.sync_sector_buffer()?;
             self.storage.seek(SeekFrom::Start(
                 self.sector_to_partition_offset(n as u32).into(),
             ))?;
             self.storage.read_exact(&mut self.sector_buffer)?;
+            self.storage
+                .seek(SeekFrom::Current(-i64::from(self.props.sector_size)))?;
+
             self.stored_sector = n;
         }
 
         Ok(&self.sector_buffer)
     }
 
-    #[allow(non_snake_case)]
-    fn read_nth_FAT_entry(&mut self, n: u32) -> Result<FATEntry, S::Error> {
-        // the size of an entry rounded up to bytes
-        let entry_size = self.fat_type.bits_per_entry().next_power_of_two() as u32 / 8;
-        let fat_offset: u32 = n * self.fat_type.bits_per_entry() as u32 / 8;
-        let fat_sector_offset = self.props.fat_offset + fat_offset / self.props.sector_size;
-        let entry_offset: usize = (fat_offset % self.props.sector_size) as usize;
+    fn sync_sector_buffer(&mut self) -> Result<(), S::Error> {
+        if self.buffer_modified {
+            log::trace!("syncing sector {:?}", self.stored_sector);
+            self.storage.write_all(&self.sector_buffer)?;
+            self.storage
+                .seek(SeekFrom::Current(-i64::from(self.props.sector_size)))?;
+        }
+        self.buffer_modified = false;
 
-        self.read_nth_sector(fat_sector_offset.into())?;
+        Ok(())
+    }
+
+    #[allow(non_snake_case)]
+    /// Returns the bytes occupied by the FAT entry, padded up to 4
+    fn internal_read_nth_FAT_entry_to_bytes(&mut self, n: u32) -> Result<[u8; 4], S::Error> {
+        // the size of an entry rounded up to bytes
+        let entry_size = self.fat_type.entry_size();
+        let entry_props = FATEntryProps::new(n, &self);
+
+        self.read_nth_sector(entry_props.fat_sector.into())?;
 
         let mut value_bytes = [0_u8; 4];
         let bytes_to_read: usize = cmp::min(
-            entry_offset + entry_size as usize,
+            entry_props.sector_offset + entry_size as usize,
             self.sector_size() as usize,
-        ) - entry_offset;
-        value_bytes[..bytes_to_read]
-            .copy_from_slice(&self.sector_buffer[entry_offset..entry_offset + bytes_to_read]); // this shouldn't panic
+        ) - entry_props.sector_offset;
+        value_bytes[..bytes_to_read].copy_from_slice(
+            &self.sector_buffer
+                [entry_props.sector_offset..entry_props.sector_offset + bytes_to_read],
+        ); // this shouldn't panic
 
         // in FAT12, FAT entries may be split between two different sectors
         if self.fat_type == FATType::FAT12 && (bytes_to_read as u32) < entry_size {
-            self.read_nth_sector((fat_sector_offset + 1).into())?;
+            self.read_nth_sector((entry_props.fat_sector + 1).into())?;
 
             value_bytes[bytes_to_read..entry_size as usize]
                 .copy_from_slice(&self.sector_buffer[..(entry_size as usize - bytes_to_read)]);
-        }
+        };
 
+        Ok(value_bytes)
+    }
+
+    #[allow(non_snake_case)]
+    fn read_nth_FAT_entry(&mut self, n: u32) -> Result<FATEntry, S::Error> {
+        let value_bytes = self.internal_read_nth_FAT_entry_to_bytes(n)?;
         let mut value = u32::from_le_bytes(value_bytes);
         match self.fat_type {
             // FAT12 entries are split between different bytes
@@ -1443,6 +1703,65 @@ where
             FATType::ExFAT => todo!("ExFAT not yet implemented"),
         })
     }
+
+    #[allow(non_snake_case)]
+    fn write_nth_FAT_entry(&mut self, n: u32, entry: FATEntry) -> Result<(), S::Error> {
+        // the size of an entry rounded up to bytes
+        let entry_size = self.fat_type.entry_size();
+        let entry_props = FATEntryProps::new(n, &self);
+
+        let value_bytes = self.internal_read_nth_FAT_entry_to_bytes(n)?;
+        let mut old_value = u32::from_le_bytes(value_bytes);
+
+        let mut mask = (1 << self.fat_type.bits_per_entry()) - 1;
+        let mut value: u32 = u32::from(entry.clone()) & mask;
+
+        if self.fat_type == FATType::FAT12 {
+            if n & 1 != 0 {
+                // FAT12 entries are split between different bytes
+                value <<= 4;
+                mask <<= 4;
+            }
+
+            // mask the old value and bitwise OR it with the new one
+            old_value &= !mask;
+            value |= old_value;
+        }
+
+        // just in case we aren't in the correct sector
+        self.read_nth_sector(entry_props.fat_sector.into())?;
+
+        let value_bytes = value.to_le_bytes();
+        let bytes_to_write: usize = cmp::min(
+            entry_props.sector_offset + entry_size as usize,
+            self.sector_size() as usize,
+        ) - entry_props.sector_offset;
+        self.sector_buffer[entry_props.sector_offset..entry_props.sector_offset + bytes_to_write]
+            .copy_from_slice(&value_bytes[..bytes_to_write]); // this shouldn't panic
+        self.buffer_modified = true;
+
+        if self.fat_type == FATType::FAT12 && bytes_to_write < entry_size as usize {
+            // looks like this FAT12 entry spans multiple sectors, we must also update the other one
+            self.read_nth_sector((entry_props.fat_sector + 1).into())?;
+
+            self.sector_buffer[..(entry_size as usize - bytes_to_write)]
+                .copy_from_slice(&value_bytes[bytes_to_write..entry_size as usize]);
+            self.buffer_modified = true;
+        }
+
+        Ok(())
+    }
+}
+
+impl<S> ops::Drop for FileSystem<S>
+where
+    S: Read + Write + Seek,
+{
+    fn drop(&mut self) {
+        // nothing to do if these error out while dropping
+        let _ = self.sync_sector_buffer();
+        let _ = self.storage.flush();
+    }
 }
 
 #[cfg(all(test, feature = "std"))]
@@ -1495,17 +1814,21 @@ mod tests {
     }
 
     static BEE_MOVIE_SCRIPT: &str = include_str!("../tests/bee movie script.txt");
+    fn assert_vec_is_bee_movie_script(buf: &Vec<u8>) {
+        let string = str::from_utf8(&buf).unwrap();
+        let expected_size = BEE_MOVIE_SCRIPT.len();
+        assert_eq!(buf.len(), expected_size);
+
+        assert_eq!(string, BEE_MOVIE_SCRIPT);
+    }
     fn assert_file_is_bee_movie_script<S>(file: &mut File<'_, S>)
     where
         S: Read + Write + Seek,
     {
-        let mut file_string = String::new();
-        let bytes_read = file.read_to_string(&mut file_string).unwrap();
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).unwrap();
 
-        let expected_filesize = BEE_MOVIE_SCRIPT.len();
-        assert_eq!(bytes_read, expected_filesize);
-
-        assert_eq!(file_string, BEE_MOVIE_SCRIPT);
+        assert_vec_is_bee_movie_script(&buf);
     }
 
     #[test]
@@ -1551,6 +1874,55 @@ mod tests {
             String::from_utf8_lossy(&file_bytes[..bytes_read]),
             EXPECTED_STR2
         );
+    }
+
+    #[test]
+    // this won't actually modify the .img file or the static slices,
+    // since we run .to_owned(), which basically clones the data in the static slices,
+    // in order to make the Cursor readable/writable
+    fn write_to_file() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT12.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        let mut file = fs.get_file(PathBuf::from("/root.txt")).unwrap();
+
+        file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
+        file.rewind().unwrap();
+
+        assert_file_is_bee_movie_script(&mut file);
+
+        // now let's do something else
+        // this write operations will happen between 2 clusters
+        const TEXT_OFFSET: u64 = 4598;
+        const TEXT: &str = "Hello from the other side";
+
+        file.seek(SeekFrom::Start(TEXT_OFFSET)).unwrap();
+        file.write_all(TEXT.as_bytes()).unwrap();
+
+        // seek back to the start of where we wrote our text
+        file.seek(SeekFrom::Current(-(TEXT.len() as i64))).unwrap();
+        let mut buf = [0_u8; TEXT.len()];
+        file.read_exact(&mut buf).unwrap();
+        let stored_text = str::from_utf8(&buf).unwrap();
+
+        assert_eq!(TEXT, stored_text);
+
+        // we are also gonna write the bee movie ten more times to see if FAT12 can correctly handle split entries
+        for i in 0..10 {
+            log::debug!("Writing the bee movie script for the {i} consecutive time",);
+
+            let start_offset = file.seek(SeekFrom::End(0)).unwrap();
+
+            file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
+            file.seek(SeekFrom::Start(start_offset)).unwrap();
+
+            let mut buf = vec![0_u8; BEE_MOVIE_SCRIPT.len()];
+            file.read_exact(buf.as_mut_slice()).unwrap();
+
+            assert_vec_is_bee_movie_script(&buf);
+        }
     }
 
     #[test]

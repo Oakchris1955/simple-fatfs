@@ -267,7 +267,13 @@ pub trait Seek: IOBase {
     /// Seeking can fail, for example because it might involve flushing a buffer.
     ///
     /// Seeking to a negative offset is considered an error.
-    /// Seeking beyond the end of the stream should also be considered an error.
+    ///
+    /// Seeking beyond the end of the stream behaviour depends on the implementation.
+    /// If [`self`] can be extended (because it's a [`File`](fs::File) for example), this shouldn't error out.
+    /// In the case that a stream is being extended or if the stream can't be extended,
+    /// this should return an [`IOError`] with an [`IOErrorKind`] of `UnexpectedEOF`.
+    /// The [`seek`] operation should be considered partially successfull, since some clusters were allocated.
+    /// In general, for suchs cases, it is recommended that the user first checks if there's enough storage and then perform the action
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error>;
 
     /// Rewind to the beginning of a stream.
