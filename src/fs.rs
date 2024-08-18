@@ -749,6 +749,27 @@ where
 
         Ok(current_cluster)
     }
+
+    /// Checks whether the cluster chain of this file is healthy or malformed
+    fn cluster_chain_is_healthy(&mut self) -> Result<bool, S::Error> {
+        let mut current_cluster = self.data_cluster;
+        let mut cluster_count = 0;
+
+        loop {
+            cluster_count += 1;
+
+            if cluster_count * self.fs.cluster_size() >= self.file_size.into() {
+                break;
+            }
+
+            match self.fs.read_nth_FAT_entry(current_cluster)? {
+                FATEntry::Allocated(next_cluster) => current_cluster = next_cluster,
+                _ => return Ok(false),
+            };
+        }
+
+        Ok(true)
+    }
 }
 
 impl<S> Read for File<'_, S>
@@ -1003,31 +1024,6 @@ where
         }
 
         Ok(self.offset)
-    }
-}
-
-impl<S> File<'_, S>
-where
-    S: Read + Write + Seek,
-{
-    fn cluster_chain_is_healthy(&mut self) -> Result<bool, S::Error> {
-        let mut current_cluster = self.data_cluster;
-        let mut cluster_count = 0;
-
-        loop {
-            cluster_count += 1;
-
-            if cluster_count * self.fs.cluster_size() >= self.file_size.into() {
-                break;
-            }
-
-            match self.fs.read_nth_FAT_entry(current_cluster)? {
-                FATEntry::Allocated(next_cluster) => current_cluster = next_cluster,
-                _ => return Ok(false),
-            };
-        }
-
-        Ok(true)
     }
 }
 
