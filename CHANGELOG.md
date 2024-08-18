@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Make 2 consts public & document them ([983350d](983350de7aa3248cc2c1ce0d00fd404e8d777da5))
+- Implement basic logging ([c849a6b](c849a6b256ef4848be0b09fe805b0ec262371b5f))
+
+### Fixed
+
+- Fix potential bug when File read stops at the end of a sector ([6eb9226](6eb922610fa5b1c76c61f7e20ff56039e310991b))
 
 ## [0.1.0-alpha.1] - 2024-08-04
 
