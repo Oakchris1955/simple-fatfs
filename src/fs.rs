@@ -718,18 +718,70 @@ where
     type Error = S::Error;
 }
 
+/// Public functions
+impl<S> File<'_, S>
+where
+    S: Read + Write + Seek,
+{
+    /// Truncates the file to a given size, deleting everything past the new EOF
+    ///
+    /// If `size` is greater or equal to the current file size
+    /// till the end of the last cluster allocated, this has no effect
+    ///
+    /// Furthermore, if the cursor point is beyond the new EOF, it will be moved there
+    pub fn truncate(&mut self, size: u32) -> Result<(), <Self as IOBase>::Error> {
+        // looks like the new truncated size would be smaller than the current one, so we just return
+        if size.next_multiple_of(self.fs.props.cluster_size as u32) >= self.file_size {
+            return Ok(());
+        }
+
+        // we store the current offset for later use
+        let previous_offset = cmp::min(self.offset, size.into());
+
+        // we seek back to where the EOF will be
+        self.seek(SeekFrom::Start(size.into()))?;
+
+        // set what the new filesize will be
+        let previous_size = self.file_size;
+        self.file_size = size;
+
+        let mut next_cluster_option = self.fs.get_next_cluster(self.current_cluster)?;
+
+        // we set the new last cluster in the chain to be EOF
+        self.fs
+            .write_nth_FAT_entry(self.current_cluster, FATEntry::EOF)?;
+
+        // then, we set each cluster after the current one to EOF
+        while let Some(next_cluster) = next_cluster_option {
+            next_cluster_option = self.fs.get_next_cluster(next_cluster)?;
+
+            self.fs.write_nth_FAT_entry(next_cluster, FATEntry::Free)?;
+        }
+
+        // don't forget to seek back to where we started
+        self.seek(SeekFrom::Start(previous_offset))?;
+
+        log::debug!(
+            "Successfully truncated file {} from {} to {} bytes",
+            self.path,
+            previous_size,
+            self.file_size
+        );
+
+        Ok(())
+    }
+}
+
 /// Internal functions
 impl<S> File<'_, S>
 where
     S: Read + Write + Seek,
 {
+    #[inline]
     /// Panics if the current cluser doesn't point to another clluster
     fn next_cluster(&mut self) -> Result<(), <Self as IOBase>::Error> {
-        match self.fs.read_nth_FAT_entry(self.current_cluster)? {
-            FATEntry::Allocated(next_cluster) => self.current_cluster = next_cluster,
-            // when a `File` is created, `cluster_chain_is_healthy` is called, if it fails, that File is dropped
-            _ => unreachable!(),
-        };
+        // when a `File` is created, `cluster_chain_is_healthy` is called, if it fails, that File is dropped
+        self.current_cluster = self.fs.get_next_cluster(self.current_cluster)?.unwrap();
 
         Ok(())
     }
@@ -1569,6 +1621,15 @@ where
         Ok(None)
     }
 
+    /// Get the next cluster in a cluster chain, otherwise return [`None`]
+    fn get_next_cluster(&mut self, cluster: u32) -> Result<Option<u32>, S::Error> {
+        Ok(match self.read_nth_FAT_entry(cluster)? {
+            FATEntry::Allocated(next_cluster) => Some(next_cluster),
+            // when a `File` is created, `cluster_chain_is_healthy` is called, if it fails, that File is dropped
+            _ => None,
+        })
+    }
+
     /// Read the nth sector from the partition's beginning and store it in [`self.sector_buffer`](Self::sector_buffer)
     ///
     /// This function also returns an immutable reference to [`self.sector_buffer`](Self::sector_buffer)
@@ -1917,6 +1978,27 @@ mod tests {
 
             assert_vec_is_bee_movie_script(&buf);
         }
+    }
+
+    #[test]
+    fn truncate_file() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT16.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        let mut file = fs.get_file(PathBuf::from("/bee movie script.txt")).unwrap();
+
+        // we are gonna truncate the bee movie script down to 20 000 bytes
+        const NEW_SIZE: u32 = 20_000;
+        file.truncate(NEW_SIZE).unwrap();
+
+        let mut file_string = String::new();
+        file.read_to_string(&mut file_string).unwrap();
+        let mut expected_string = BEE_MOVIE_SCRIPT.to_string();
+        expected_string.truncate(NEW_SIZE as usize);
+
+        assert_eq!(file_string, expected_string);
     }
 
     #[test]
