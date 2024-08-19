@@ -1014,9 +1014,7 @@ where
             }
             Ordering::Equal => (),
             Ordering::Greater => {
-                for _ in (self.offset / self.fs.cluster_size()..offset / self.fs.cluster_size())
-                    .step_by(self.fs.cluster_size() as usize)
-                {
+                for _ in self.offset / self.fs.cluster_size()..offset / self.fs.cluster_size() {
                     self.next_cluster()?;
                 }
                 self.offset = offset;
