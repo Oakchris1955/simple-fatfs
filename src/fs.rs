@@ -78,6 +78,21 @@ impl BootRecord {
             }
         }
     }
+
+    #[allow(non_snake_case)]
+    fn nth_FAT_table_sector(&self, n: u8) -> u32 {
+        match self {
+            BootRecord::FAT(boot_record_fat) => {
+                boot_record_fat.first_fat_sector() as u32
+                    + n as u32 * boot_record_fat.fat_sector_size()
+            }
+            BootRecord::ExFAT(boot_record_exfat) => {
+                // this should work, but ExFAT is not yet implemented, so...
+                todo!("ExFAT not yet implemented");
+                boot_record_exfat.fat_count as u32 + n as u32 * boot_record_exfat.fat_len
+            }
+        }
+    }
 }
 
 const BOOT_SIGNATURE: u8 = 0x29;
@@ -1126,6 +1141,7 @@ struct FSProperties {
     total_clusters: u32,
     /// sector offset of the FAT
     fat_offset: u32,
+    fat_table_count: u8,
     first_data_sector: u32,
 }
 
@@ -1279,6 +1295,11 @@ where
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
 
+        let fat_table_count = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.bpb.table_count,
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
+        };
+
         let total_sectors = match boot_record {
             BootRecord::FAT(boot_record_fat) => boot_record_fat.total_sectors(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
@@ -1293,12 +1314,13 @@ where
             sector_size,
             cluster_size,
             fat_offset,
+            fat_table_count,
             total_sectors,
             total_clusters,
             first_data_sector,
         };
 
-        Ok(Self {
+        let mut fs = Self {
             storage,
             sector_buffer: buffer[..sector_size as usize].to_vec(),
             buffer_modified: false,
@@ -1306,7 +1328,15 @@ where
             boot_record,
             fat_type,
             props,
-        })
+        };
+
+        if !fs.FAT_tables_are_identical()? {
+            return Err(FSError::InternalFSError(
+                InternalFSError::MismatchingFATTables,
+            ));
+        }
+
+        Ok(fs)
     }
 
     /// Read all the entries of a directory ([`PathBuf`]) into [`Vec<DirEntry>`]
@@ -1405,7 +1435,8 @@ where
 
 /// Properties about the position of a [`FATEntry`] inside the FAT region
 struct FATEntryProps {
-    fat_sector: u32,
+    /// Each `n`th element of the vector points at the corrensponding sector at the `n+1`th FAT table
+    fat_sectors: Vec<u32>,
     sector_offset: usize,
 }
 
@@ -1416,11 +1447,16 @@ impl FATEntryProps {
         S: Read + Write + Seek,
     {
         let fat_byte_offset: u32 = n * fs.fat_type.bits_per_entry() as u32 / 8;
-        let fat_sector: u32 = fs.props.fat_offset + fat_byte_offset / fs.props.sector_size;
+        let mut fat_sectors = Vec::new();
+        for nth_table in 0..fs.props.fat_table_count {
+            let table_sector_offset = fs.boot_record.nth_FAT_table_sector(nth_table);
+            let fat_sector = table_sector_offset + fat_byte_offset / fs.props.sector_size;
+            fat_sectors.push(fat_sector);
+        }
         let sector_offset: usize = (fat_byte_offset % fs.props.sector_size) as usize;
 
         FATEntryProps {
-            fat_sector,
+            fat_sectors,
             sector_offset,
         }
     }
@@ -1630,6 +1666,48 @@ where
         })
     }
 
+    #[allow(non_snake_case)]
+    /// Check whether or not the all the FAT tables of the storage medium are identical to each other
+    fn FAT_tables_are_identical(&mut self) -> Result<bool, S::Error> {
+        // we could make it work, but we are only testing regular FAT filesystems (for now)
+        assert_ne!(
+            self.fat_type,
+            FATType::ExFAT,
+            "this function doesn't work with ExFAT"
+        );
+
+        /// How many bytes to probe at max for each FAT per iteration (must be a multiple of [`SECTOR_SIZE_MAX`])
+        const MAX_PROBE_SIZE: u32 = 1 << 20;
+
+        let fat_byte_size = match self.boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.fat_sector_size(),
+            BootRecord::ExFAT(_) => unreachable!(),
+        };
+
+        for nth_iteration in 0..fat_byte_size.div_ceil(MAX_PROBE_SIZE) {
+            let mut tables: Vec<Vec<u8>> = Vec::new();
+
+            for i in 0..self.props.fat_table_count {
+                let fat_start =
+                    self.sector_to_partition_offset(self.boot_record.nth_FAT_table_sector(i));
+                let current_offset = fat_start + nth_iteration * MAX_PROBE_SIZE;
+                let bytes_left = fat_byte_size - nth_iteration * MAX_PROBE_SIZE;
+
+                self.storage.seek(SeekFrom::Start(current_offset.into()))?;
+                let mut buf = vec![0_u8; cmp::min(MAX_PROBE_SIZE, bytes_left) as usize];
+                self.storage.read_exact(buf.as_mut_slice())?;
+                tables.push(buf);
+            }
+
+            // we check each table with the first one (except the first one ofc)
+            if !tables.iter().skip(1).all(|buf| buf == &tables[0]) {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
     /// Read the nth sector from the partition's beginning and store it in [`self.sector_buffer`](Self::sector_buffer)
     ///
     /// This function also returns an immutable reference to [`self.sector_buffer`](Self::sector_buffer)
@@ -1670,7 +1748,7 @@ where
         let entry_size = self.fat_type.entry_size();
         let entry_props = FATEntryProps::new(n, &self);
 
-        self.read_nth_sector(entry_props.fat_sector.into())?;
+        self.read_nth_sector(entry_props.fat_sectors[0].into())?;
 
         let mut value_bytes = [0_u8; 4];
         let bytes_to_read: usize = cmp::min(
@@ -1684,7 +1762,7 @@ where
 
         // in FAT12, FAT entries may be split between two different sectors
         if self.fat_type == FATType::FAT12 && (bytes_to_read as u32) < entry_size {
-            self.read_nth_sector((entry_props.fat_sector + 1).into())?;
+            self.read_nth_sector((entry_props.fat_sectors[0] + 1).into())?;
 
             value_bytes[bytes_to_read..entry_size as usize]
                 .copy_from_slice(&self.sector_buffer[..(entry_size as usize - bytes_to_read)]);
@@ -1783,25 +1861,28 @@ where
             value |= old_value;
         }
 
-        // just in case we aren't in the correct sector
-        self.read_nth_sector(entry_props.fat_sector.into())?;
+        // we update all the FAT copies
+        for fat_sector in entry_props.fat_sectors {
+            self.read_nth_sector(fat_sector.into())?;
 
-        let value_bytes = value.to_le_bytes();
-        let bytes_to_write: usize = cmp::min(
-            entry_props.sector_offset + entry_size as usize,
-            self.sector_size() as usize,
-        ) - entry_props.sector_offset;
-        self.sector_buffer[entry_props.sector_offset..entry_props.sector_offset + bytes_to_write]
-            .copy_from_slice(&value_bytes[..bytes_to_write]); // this shouldn't panic
-        self.buffer_modified = true;
-
-        if self.fat_type == FATType::FAT12 && bytes_to_write < entry_size as usize {
-            // looks like this FAT12 entry spans multiple sectors, we must also update the other one
-            self.read_nth_sector((entry_props.fat_sector + 1).into())?;
-
-            self.sector_buffer[..(entry_size as usize - bytes_to_write)]
-                .copy_from_slice(&value_bytes[bytes_to_write..entry_size as usize]);
+            let value_bytes = value.to_le_bytes();
+            let bytes_to_write: usize = cmp::min(
+                entry_props.sector_offset + entry_size as usize,
+                self.sector_size() as usize,
+            ) - entry_props.sector_offset;
+            self.sector_buffer
+                [entry_props.sector_offset..entry_props.sector_offset + bytes_to_write]
+                .copy_from_slice(&value_bytes[..bytes_to_write]); // this shouldn't panic
             self.buffer_modified = true;
+
+            if self.fat_type == FATType::FAT12 && bytes_to_write < entry_size as usize {
+                // looks like this FAT12 entry spans multiple sectors, we must also update the other one
+                self.read_nth_sector((fat_sector + 1).into())?;
+
+                self.sector_buffer[..(entry_size as usize - bytes_to_write)]
+                    .copy_from_slice(&value_bytes[bytes_to_write..entry_size as usize]);
+                self.buffer_modified = true;
+            }
         }
 
         Ok(())
@@ -1978,6 +2059,33 @@ mod tests {
 
             assert_vec_is_bee_movie_script(&buf);
         }
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn FAT_tables_after_write_are_identical() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT16.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        assert!(
+            fs.FAT_tables_are_identical().unwrap(),
+            concat!(
+                "this should pass. ",
+                "if it doesn't, either the corresponding .img file's FAT tables aren't identical",
+                "or the tables_are_identical function doesn't work correctly"
+            )
+        );
+
+        // let's write the bee movie script to root.txt (why not), check, truncate the file, then check again
+        let mut file = fs.get_file(PathBuf::from("root.txt")).unwrap();
+
+        file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
+        assert!(file.fs.FAT_tables_are_identical().unwrap());
+
+        file.truncate(10_000).unwrap();
+        assert!(file.fs.FAT_tables_are_identical().unwrap());
     }
 
     #[test]

@@ -98,6 +98,13 @@ pub enum InternalFSError {
      Perhaps the FSInfo structure or the FAT32 EBR's fat_info field is malformed?
     */
     InvalidFSInfoSig,
+    /**
+     The FAT and it's copies do not much.
+     This is either the result of some bad FAT library that chose to ignore the FAT copies
+     or perhaps the storage medium has been corrupted (most likely).
+     Either way, we are not handling this FileSystem
+    */
+    MismatchingFATTables,
     /// Encountered a malformed cluster chain
     MalformedClusterChain,
 }
