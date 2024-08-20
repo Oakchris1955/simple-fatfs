@@ -7,6 +7,7 @@ use ::alloc::{
     borrow::ToOwned,
     format,
     string::{FromUtf16Error, String, ToString},
+    vec,
     vec::*,
 };
 
