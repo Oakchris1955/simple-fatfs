@@ -1743,8 +1743,7 @@ where
     }
 
     #[allow(non_snake_case)]
-    /// Returns the bytes occupied by the FAT entry, padded up to 4
-    fn internal_read_nth_FAT_entry_to_bytes(&mut self, n: u32) -> Result<[u8; 4], S::Error> {
+    fn read_nth_FAT_entry(&mut self, n: u32) -> Result<FATEntry, S::Error> {
         // the size of an entry rounded up to bytes
         let entry_size = self.fat_type.entry_size();
         let entry_props = FATEntryProps::new(n, &self);
@@ -1769,12 +1768,6 @@ where
                 .copy_from_slice(&self.sector_buffer[..(entry_size as usize - bytes_to_read)]);
         };
 
-        Ok(value_bytes)
-    }
-
-    #[allow(non_snake_case)]
-    fn read_nth_FAT_entry(&mut self, n: u32) -> Result<FATEntry, S::Error> {
-        let value_bytes = self.internal_read_nth_FAT_entry_to_bytes(n)?;
         let mut value = u32::from_le_bytes(value_bytes);
         match self.fat_type {
             // FAT12 entries are split between different bytes
@@ -1844,47 +1837,78 @@ where
         let entry_size = self.fat_type.entry_size();
         let entry_props = FATEntryProps::new(n, &self);
 
-        let value_bytes = self.internal_read_nth_FAT_entry_to_bytes(n)?;
-        let mut old_value = u32::from_le_bytes(value_bytes);
-
-        let mut mask = (1 << self.fat_type.bits_per_entry()) - 1;
+        let mask = (1 << self.fat_type.bits_per_entry()) - 1;
         let mut value: u32 = u32::from(entry.clone()) & mask;
 
-        if self.fat_type == FATType::FAT12 {
-            if n & 1 != 0 {
-                // FAT12 entries are split between different bytes
-                value <<= 4;
-                mask <<= 4;
+        match self.fat_type {
+            FATType::FAT12 => {
+                let should_shift = n & 1 != 0;
+                if should_shift {
+                    // FAT12 entries are split between different bytes
+                    value <<= 4;
+                }
+
+                // we update all the FAT copies
+                for fat_sector in entry_props.fat_sectors {
+                    self.read_nth_sector(fat_sector.into())?;
+
+                    let value_bytes = value.to_le_bytes();
+
+                    let mut first_byte = value_bytes[0];
+
+                    if should_shift {
+                        let mut old_byte = self.sector_buffer[entry_props.sector_offset];
+                        // ignore the high 4 bytes of the old entry
+                        old_byte &= 0x0F;
+                        // OR it with the new value
+                        first_byte |= old_byte;
+                    }
+
+                    self.sector_buffer[entry_props.sector_offset] = first_byte; // this shouldn't panic
+                    self.buffer_modified = true;
+
+                    let bytes_left_on_sector: usize = cmp::min(
+                        entry_size as usize,
+                        self.sector_size() as usize - entry_props.sector_offset,
+                    );
+
+                    if bytes_left_on_sector < entry_size as usize {
+                        // looks like this FAT12 entry spans multiple sectors, we must also update the other one
+                        self.read_nth_sector((fat_sector + 1).into())?;
+                    }
+
+                    let mut second_byte = value_bytes[1];
+                    let second_byte_index =
+                        (entry_props.sector_offset + 1) % self.sector_size() as usize;
+                    if !should_shift {
+                        let mut old_byte = self.sector_buffer[second_byte_index];
+                        // ignore the low 4 bytes of the old entry
+                        old_byte &= 0xF0;
+                        // OR it with the new value
+                        second_byte |= old_byte;
+                    }
+
+                    self.sector_buffer[second_byte_index] = second_byte; // this shouldn't panic
+                    self.buffer_modified = true;
+                }
             }
+            FATType::FAT16 | FATType::FAT32 => {
+                // we update all the FAT copies
+                for fat_sector in entry_props.fat_sectors {
+                    self.read_nth_sector(fat_sector.into())?;
 
-            // mask the old value and bitwise OR it with the new one
-            old_value &= !mask;
-            value |= old_value;
-        }
+                    let value_bytes = value.to_le_bytes();
 
-        // we update all the FAT copies
-        for fat_sector in entry_props.fat_sectors {
-            self.read_nth_sector(fat_sector.into())?;
-
-            let value_bytes = value.to_le_bytes();
-            let bytes_to_write: usize = cmp::min(
-                entry_props.sector_offset + entry_size as usize,
-                self.sector_size() as usize,
-            ) - entry_props.sector_offset;
-            self.sector_buffer
-                [entry_props.sector_offset..entry_props.sector_offset + bytes_to_write]
-                .copy_from_slice(&value_bytes[..bytes_to_write]); // this shouldn't panic
-            self.buffer_modified = true;
-
-            if self.fat_type == FATType::FAT12 && bytes_to_write < entry_size as usize {
-                // looks like this FAT12 entry spans multiple sectors, we must also update the other one
-                self.read_nth_sector((fat_sector + 1).into())?;
-
-                self.sector_buffer[..(entry_size as usize - bytes_to_write)]
-                    .copy_from_slice(&value_bytes[bytes_to_write..entry_size as usize]);
-                self.buffer_modified = true;
+                    self.sector_buffer[entry_props.sector_offset
+                        ..entry_props.sector_offset + entry_size as usize]
+                        .copy_from_slice(&value_bytes[..entry_size as usize]); // this shouldn't panic
+                    self.buffer_modified = true;
+                }
             }
-        }
+            FATType::ExFAT => todo!("ExFAT not yet implemented"),
+        };
+
+        assert_eq!(entry, self.read_nth_FAT_entry(n)?);
 
         Ok(())
     }
