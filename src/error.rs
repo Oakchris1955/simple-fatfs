@@ -51,6 +51,8 @@ pub trait IOErrorKind: PartialEq + Sized {
     fn new_interrupted() -> Self;
     /// Create a new `InvalidData` [`IOErrorKind`]
     fn new_invalid_data() -> Self;
+    /// Create a new `ReadOnlyFilesystem` [`IOErrorKind`]
+    fn new_readonly_filesystem() -> Self;
 
     #[inline]
     /// Check whether this [`IOErrorKind`] is of kind `UnexpectedEOF`
@@ -67,6 +69,12 @@ pub trait IOErrorKind: PartialEq + Sized {
     fn is_invalid_data(&self) -> bool {
         self == &Self::new_invalid_data()
     }
+    // when the `io_error_more` feature gets merged, uncomment this
+    // /// Check whether this [`IOErrorKind`] is of kind `InvalidData`
+    // #[inline]
+    // fn is_readonly_filesystem(&self) -> bool {
+    //     self == &Self::new_readonly_filesystem()
+    // }
 }
 
 #[cfg(feature = "std")]
@@ -82,6 +90,11 @@ impl IOErrorKind for std::io::ErrorKind {
     #[inline]
     fn new_invalid_data() -> Self {
         std::io::ErrorKind::InvalidData
+    }
+    #[inline]
+    fn new_readonly_filesystem() -> Self {
+        // Unfortunately the ReadOnlyFilesystem ErrorKind is locked behind a feature flag (for now)
+        std::io::ErrorKind::Other
     }
 }
 

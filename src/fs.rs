@@ -694,48 +694,94 @@ impl ops::Deref for DirEntry {
     }
 }
 
-/// A file within the FAT filesystem
 #[derive(Debug)]
-pub struct File<'a, S>
-where
-    S: Read + Write + Seek,
-{
-    fs: &'a mut FileSystem<S>,
+struct FileProps {
     entry: Properties,
     /// the byte offset of the R/W pointer
     offset: u64,
     current_cluster: u32,
 }
 
-impl<S> ops::Deref for File<'_, S>
+/// A read-only file within a FAT filesystem
+#[derive(Debug)]
+pub struct ROFile<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    fs: &'a mut FileSystem<S>,
+    props: FileProps,
+}
+
+impl<S> ops::Deref for ROFile<'_, S>
 where
     S: Read + Write + Seek,
 {
     type Target = Properties;
 
     fn deref(&self) -> &Self::Target {
-        &self.entry
+        &self.props.entry
     }
 }
 
-impl<S> ops::DerefMut for File<'_, S>
+impl<S> ops::DerefMut for ROFile<'_, S>
 where
     S: Read + Write + Seek,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.entry
+        &mut self.props.entry
     }
 }
 
-impl<S> IOBase for File<'_, S>
+impl<S> IOBase for ROFile<'_, S>
 where
     S: Read + Write + Seek,
 {
     type Error = S::Error;
 }
 
-/// Public functions
-impl<S> File<'_, S>
+/// A read-write file within a FAT filesystem
+///
+/// The size of the file will be automatically adjusted
+/// if the cursor goes beyond EOF.
+///
+/// To reduce a file's size, use the [`truncate`](RWFile::truncate) method
+#[derive(Debug)]
+pub struct RWFile<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    ro_file: ROFile<'a, S>,
+}
+
+impl<'a, S> ops::Deref for RWFile<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    type Target = ROFile<'a, S>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.ro_file
+    }
+}
+
+impl<S> ops::DerefMut for RWFile<'_, S>
+where
+    S: Read + Write + Seek,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.ro_file
+    }
+}
+
+impl<S> IOBase for RWFile<'_, S>
+where
+    S: Read + Write + Seek,
+{
+    type Error = S::Error;
+}
+
+// Public functions
+impl<S> RWFile<'_, S>
 where
     S: Read + Write + Seek,
 {
@@ -752,7 +798,7 @@ where
         }
 
         // we store the current offset for later use
-        let previous_offset = cmp::min(self.offset, size.into());
+        let previous_offset = cmp::min(self.props.offset, size.into());
 
         // we seek back to where the EOF will be
         self.seek(SeekFrom::Start(size.into()))?;
@@ -761,11 +807,15 @@ where
         let previous_size = self.file_size;
         self.file_size = size;
 
-        let mut next_cluster_option = self.fs.get_next_cluster(self.current_cluster)?;
+        let mut next_cluster_option = self
+            .ro_file
+            .fs
+            .get_next_cluster(self.ro_file.props.current_cluster)?;
 
         // we set the new last cluster in the chain to be EOF
-        self.fs
-            .write_nth_FAT_entry(self.current_cluster, FATEntry::EOF)?;
+        self.ro_file
+            .fs
+            .write_nth_FAT_entry(self.ro_file.props.current_cluster, FATEntry::EOF)?;
 
         // then, we set each cluster after the current one to EOF
         while let Some(next_cluster) = next_cluster_option {
@@ -788,16 +838,19 @@ where
     }
 }
 
-/// Internal functions
-impl<S> File<'_, S>
+// Internal functions
+impl<S> ROFile<'_, S>
 where
     S: Read + Write + Seek,
 {
     #[inline]
     /// Panics if the current cluser doesn't point to another clluster
     fn next_cluster(&mut self) -> Result<(), <Self as IOBase>::Error> {
-        // when a `File` is created, `cluster_chain_is_healthy` is called, if it fails, that File is dropped
-        self.current_cluster = self.fs.get_next_cluster(self.current_cluster)?.unwrap();
+        // when a `ROFile` is created, `cluster_chain_is_healthy` is called, if it fails, that ROFile is dropped
+        self.props.current_cluster = self
+            .fs
+            .get_next_cluster(self.props.current_cluster)?
+            .unwrap();
 
         Ok(())
     }
@@ -805,7 +858,7 @@ where
     /// Returns that last cluster in the file's cluster chain
     fn last_cluster_in_chain(&mut self) -> Result<u32, <Self as IOBase>::Error> {
         // we begin from the current cluster to save some time
-        let mut current_cluster = self.current_cluster;
+        let mut current_cluster = self.props.current_cluster;
 
         loop {
             match self.fs.read_nth_FAT_entry(current_cluster)? {
@@ -838,24 +891,41 @@ where
 
         Ok(true)
     }
+
+    fn offset_from_seekfrom(&self, seekfrom: SeekFrom) -> u64 {
+        match seekfrom {
+            SeekFrom::Start(offset) => offset,
+            SeekFrom::Current(offset) => {
+                let offset = self.props.offset as i64 + offset;
+                offset.try_into().unwrap_or(u64::MIN)
+            }
+            SeekFrom::End(offset) => {
+                let offset = self.file_size as i64 + offset;
+                offset.try_into().unwrap_or(u64::MIN)
+            }
+        }
+    }
 }
 
-impl<S> Read for File<'_, S>
+impl<S> Read for ROFile<'_, S>
 where
     S: Read + Write + Seek,
 {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         let mut bytes_read = 0;
         // this is the maximum amount of bytes that can be read
-        let read_cap = cmp::min(buf.len(), self.file_size as usize - self.offset as usize);
-        log::debug!("Byte read cap set to {}", read_cap);
+        let read_cap = cmp::min(
+            buf.len(),
+            self.file_size as usize - self.props.offset as usize,
+        );
 
         'outer: loop {
-            let sector_init_offset = u32::try_from(self.offset % self.fs.cluster_size()).unwrap()
+            let sector_init_offset = u32::try_from(self.props.offset % self.fs.cluster_size())
+                .unwrap()
                 / self.fs.sector_size();
             let first_sector_of_cluster = self
                 .fs
-                .data_cluster_to_partition_sector(self.current_cluster)
+                .data_cluster_to_partition_sector(self.props.current_cluster)
                 + sector_init_offset;
             let last_sector_of_cluster = first_sector_of_cluster
                 + self.fs.sectors_per_cluster() as u32
@@ -863,7 +933,7 @@ where
                 - 1;
             log::debug!(
                 "Reading cluster {} from sectors {} to {}",
-                self.current_cluster,
+                self.props.current_cluster,
                 first_sector_of_cluster,
                 last_sector_of_cluster
             );
@@ -871,7 +941,7 @@ where
             for sector in first_sector_of_cluster..=last_sector_of_cluster {
                 self.fs.read_nth_sector(sector.into())?;
 
-                let start_index = self.offset as usize % self.fs.sector_size() as usize;
+                let start_index = self.props.offset as usize % self.fs.sector_size() as usize;
                 let bytes_to_read = cmp::min(
                     read_cap - bytes_read,
                     self.fs.sector_size() as usize - start_index,
@@ -888,14 +958,14 @@ where
                 );
 
                 bytes_read += bytes_to_read;
-                self.offset += bytes_to_read as u64;
+                self.props.offset += bytes_to_read as u64;
 
                 // if we have read as many bytes as we want...
                 if bytes_read >= read_cap {
                     // ...but we must process get the next cluster for future uses,
                     // we do that before breaking
-                    if self.offset % self.fs.cluster_size() == 0
-                        && self.offset < self.file_size.into()
+                    if self.props.offset % self.fs.cluster_size() == 0
+                        && self.props.offset < self.file_size.into()
                     {
                         self.next_cluster()?;
                     }
@@ -912,7 +982,7 @@ where
 
     // the default `read_to_end` implementation isn't efficient enough, so we just do this
     fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize, Self::Error> {
-        let bytes_to_read = self.file_size as usize - self.offset as usize;
+        let bytes_to_read = self.file_size as usize - self.props.offset as usize;
         let init_buf_len = buf.len();
 
         // resize buffer to fit the file contents exactly
@@ -924,8 +994,32 @@ where
         Ok(bytes_to_read)
     }
 }
+impl<S> Read for RWFile<'_, S>
+where
+    S: Read + Write + Seek,
+{
+    #[inline]
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        self.ro_file.read(buf)
+    }
 
-impl<S> Write for File<'_, S>
+    #[inline]
+    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), Self::Error> {
+        self.ro_file.read_exact(buf)
+    }
+
+    #[inline]
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize, Self::Error> {
+        self.ro_file.read_to_end(buf)
+    }
+
+    #[inline]
+    fn read_to_string(&mut self, string: &mut String) -> Result<usize, Self::Error> {
+        self.ro_file.read_to_string(string)
+    }
+}
+
+impl<S> Write for RWFile<'_, S>
 where
     S: Read + Write + Seek,
 {
@@ -938,13 +1032,17 @@ where
         let mut bytes_written = 0;
 
         'outer: loop {
-            log::trace!("writing file data to cluster: {}", self.current_cluster);
+            log::trace!(
+                "writing file data to cluster: {}",
+                self.props.current_cluster
+            );
 
-            let sector_init_offset = u32::try_from(self.offset % self.fs.cluster_size()).unwrap()
+            let sector_init_offset = u32::try_from(self.props.offset % self.fs.cluster_size())
+                .unwrap()
                 / self.fs.sector_size();
             let first_sector_of_cluster = self
                 .fs
-                .data_cluster_to_partition_sector(self.current_cluster)
+                .data_cluster_to_partition_sector(self.props.current_cluster)
                 + sector_init_offset;
             let last_sector_of_cluster = first_sector_of_cluster
                 + self.fs.sectors_per_cluster() as u32
@@ -953,7 +1051,7 @@ where
             for sector in first_sector_of_cluster..=last_sector_of_cluster {
                 self.fs.read_nth_sector(sector.into())?;
 
-                let start_index = self.offset as usize % self.fs.sector_size() as usize;
+                let start_index = self.props.offset as usize % self.fs.sector_size() as usize;
 
                 let bytes_to_write = cmp::min(
                     buf.len() - bytes_written,
@@ -965,13 +1063,13 @@ where
                 self.fs.buffer_modified = true;
 
                 bytes_written += bytes_to_write;
-                self.offset += bytes_to_write as u64;
+                self.props.offset += bytes_to_write as u64;
 
                 // if we have written as many bytes as we want...
                 if bytes_written >= buf.len() {
                     // ...but we must process get the next cluster for future uses,
                     // we do that before breaking
-                    if self.offset % self.fs.cluster_size() == 0 {
+                    if self.props.offset % self.fs.cluster_size() == 0 {
                         self.next_cluster()?;
                     }
 
@@ -991,22 +1089,57 @@ where
     }
 }
 
-impl<S> Seek for File<'_, S>
+impl<S> Seek for ROFile<'_, S>
 where
     S: Read + Write + Seek,
 {
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error> {
-        let offset = match pos {
-            SeekFrom::Start(offset) => offset,
-            SeekFrom::Current(offset) => {
-                let offset = self.offset as i64 + offset;
-                offset.try_into().unwrap_or(u64::MIN)
+        let offset = self.offset_from_seekfrom(pos);
+
+        // in case the cursor goes beyond the EOF, allocate more clusters
+        if offset > (self.file_size as u64).next_multiple_of(self.fs.cluster_size()) {
+            return Err(IOError::new(
+                <Self::Error as IOError>::Kind::new_unexpected_eof(),
+                "moved past eof in a RO file",
+            ));
+        }
+
+        log::trace!(
+            "Previous cursor offset is {}, new cursor offset is {}",
+            self.props.offset,
+            offset
+        );
+
+        use cmp::Ordering;
+        match offset.cmp(&self.props.offset) {
+            Ordering::Less => {
+                // here, we basically "rewind" back to the start of the file and then seek to where we want
+                // this of course has performance issues, so TODO: find a solution that is both memory & time efficient
+                // (perhaps we could follow a similar approach to elm-chan's FATFS, by using a cluster link map table, perhaps as an optional feature)
+                self.props.offset = 0;
+                self.props.current_cluster = self.data_cluster;
+                self.seek(SeekFrom::Start(offset))?;
             }
-            SeekFrom::End(offset) => {
-                let offset = self.file_size as i64 + offset;
-                offset.try_into().unwrap_or(u64::MIN)
+            Ordering::Equal => (),
+            Ordering::Greater => {
+                for _ in self.props.offset / self.fs.cluster_size()..offset / self.fs.cluster_size()
+                {
+                    self.next_cluster()?;
+                }
+                self.props.offset = offset;
             }
-        };
+        }
+
+        Ok(self.props.offset)
+    }
+}
+
+impl<S> Seek for RWFile<'_, S>
+where
+    S: Read + Write + Seek,
+{
+    fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error> {
+        let offset = self.offset_from_seekfrom(pos);
 
         // in case the cursor goes beyond the EOF, allocate more clusters
         if offset > (self.file_size as u64).next_multiple_of(self.fs.cluster_size()) {
@@ -1046,9 +1179,9 @@ where
                             - offset)
                             + clusters_allocated * self.fs.cluster_size())
                             as u32;
-                        self.offset = self.file_size.into();
+                        self.props.offset = self.file_size.into();
 
-                        log::error!("storage medium full while attempting to allocated more clusters for a File");
+                        log::error!("storage medium full while attempting to allocate more clusters for a ROFile");
                         return Err(IOError::new(
                             <Self::Error as IOError>::Kind::new_unexpected_eof(),
                             "the storage medium is full, can't increase size of file",
@@ -1064,32 +1197,7 @@ where
             );
         }
 
-        log::debug!(
-            "Previous cursor offset is {}, new cursor offset is {}",
-            self.offset,
-            offset
-        );
-
-        use cmp::Ordering;
-        match offset.cmp(&self.offset) {
-            Ordering::Less => {
-                // here, we basically "rewind" back to the start of the file and then seek to where we want
-                // this of course has performance issues, so TODO: find a solution that is both memory & time efficient
-                // (perhaps we could follow a similar approach to elm-chan's FATFS, by using a cluster link map table, perhaps as an optional feature)
-                self.offset = 0;
-                self.current_cluster = self.data_cluster;
-                self.seek(SeekFrom::Start(offset))?;
-            }
-            Ordering::Equal => (),
-            Ordering::Greater => {
-                for _ in self.offset / self.fs.cluster_size()..offset / self.fs.cluster_size() {
-                    self.next_cluster()?;
-                }
-                self.offset = offset;
-            }
-        }
-
-        Ok(self.offset)
+        self.ro_file.seek(pos)
     }
 }
 
@@ -1141,7 +1249,6 @@ struct FSProperties {
     total_sectors: u32,
     total_clusters: u32,
     /// sector offset of the FAT
-    fat_offset: u32,
     fat_table_count: u8,
     first_data_sector: u32,
 }
@@ -1208,7 +1315,7 @@ where
     }
 }
 
-/// Public functions
+/// Constructors
 impl<S> FileSystem<S>
 where
     S: Read + Write + Seek,
@@ -1291,11 +1398,6 @@ where
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
 
-        let fat_offset = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_fat_sector().into(),
-            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
-        };
-
         let fat_table_count = match boot_record {
             BootRecord::FAT(boot_record_fat) => boot_record_fat.bpb.table_count,
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
@@ -1314,7 +1416,6 @@ where
         let props = FSProperties {
             sector_size,
             cluster_size,
-            fat_offset,
             fat_table_count,
             total_sectors,
             total_clusters,
@@ -1339,131 +1440,9 @@ where
 
         Ok(fs)
     }
-
-    /// Read all the entries of a directory ([`PathBuf`]) into [`Vec<DirEntry>`]
-    ///
-    /// Fails if `path` doesn't represent a directory, or if that directory doesn't exist
-    pub fn read_dir(&mut self, path: PathBuf) -> FSResult<Vec<DirEntry>, S::Error> {
-        if path.is_malformed() {
-            return Err(FSError::MalformedPath);
-        }
-        if !path.is_dir() {
-            log::error!("Not a directory");
-            return Err(FSError::NotADirectory);
-        }
-
-        let mut entries = self.process_root_dir()?;
-
-        for dir_name in path.clone().into_iter() {
-            let dir_cluster = match entries.iter().find(|entry| {
-                entry.name == dir_name && entry.attributes.contains(Attributes::DIRECTORY)
-            }) {
-                Some(entry) => entry.data_cluster,
-                None => {
-                    log::error!("Directory {} not found", path);
-                    return Err(FSError::NotFound);
-                }
-            };
-
-            entries = unsafe { self.process_normal_dir(dir_cluster)? };
-        }
-
-        // if we haven't returned by now, that means that the entries vector
-        // contains what we want, let's map it to DirEntries and return
-        Ok(entries
-            .into_iter()
-            .map(|rawentry| {
-                let mut entry_path = path.clone();
-
-                entry_path.push(format!(
-                    "{}{}",
-                    rawentry.name,
-                    if rawentry.is_dir { "/" } else { "" }
-                ));
-                DirEntry {
-                    entry: Properties::from_raw(rawentry, entry_path),
-                }
-            })
-            .collect())
-    }
-
-    /// Get a corresponding [`File`] object from a [`PathBuf`]
-    ///
-    /// Borrows `&mut self` until that [`File`] object is dropped, effectively locking `self` until that file closed
-    ///
-    /// Fails if `path` doesn't represent a file, or if that file doesn't exist
-    pub fn get_file(&mut self, path: PathBuf) -> FSResult<File<'_, S>, S::Error> {
-        if path.is_malformed() {
-            return Err(FSError::MalformedPath);
-        }
-
-        if let Some(file_name) = path.file_name() {
-            let parent_dir = self.read_dir(path.parent())?;
-            match parent_dir.into_iter().find(|direntry| {
-                direntry
-                    .path()
-                    .file_name()
-                    .is_some_and(|entry_name| entry_name == file_name)
-            }) {
-                Some(direntry) => {
-                    let mut file = File {
-                        fs: self,
-                        offset: 0,
-                        current_cluster: direntry.entry.data_cluster,
-                        entry: direntry.entry,
-                    };
-
-                    if file.cluster_chain_is_healthy()? {
-                        Ok(file)
-                    } else {
-                        log::error!("The cluster chain of a file is malformed");
-                        Err(FSError::InternalFSError(
-                            InternalFSError::MalformedClusterChain,
-                        ))
-                    }
-                }
-                None => {
-                    log::error!("File {} not found", path);
-                    Err(FSError::NotFound)
-                }
-            }
-        } else {
-            log::error!("Is a directory (not a file)");
-            Err(FSError::IsADirectory)
-        }
-    }
 }
 
-/// Properties about the position of a [`FATEntry`] inside the FAT region
-struct FATEntryProps {
-    /// Each `n`th element of the vector points at the corrensponding sector at the `n+1`th FAT table
-    fat_sectors: Vec<u32>,
-    sector_offset: usize,
-}
-
-impl FATEntryProps {
-    /// Get the [`FATEntryProps`] of the `n`-th [`FATEntry`] of a [`FileSystem`] (`fs`)
-    pub fn new<S>(n: u32, fs: &FileSystem<S>) -> Self
-    where
-        S: Read + Write + Seek,
-    {
-        let fat_byte_offset: u32 = n * fs.fat_type.bits_per_entry() as u32 / 8;
-        let mut fat_sectors = Vec::new();
-        for nth_table in 0..fs.props.fat_table_count {
-            let table_sector_offset = fs.boot_record.nth_FAT_table_sector(nth_table);
-            let fat_sector = table_sector_offset + fat_byte_offset / fs.props.sector_size;
-            fat_sectors.push(fat_sector);
-        }
-        let sector_offset: usize = (fat_byte_offset % fs.props.sector_size) as usize;
-
-        FATEntryProps {
-            fat_sectors,
-            sector_offset,
-        }
-    }
-}
-
-/// Internal low-level functions
+/// Internal [`Read`]-related low-level functions
 impl<S> FileSystem<S>
 where
     S: Read + Write + Seek,
@@ -1662,7 +1641,7 @@ where
     fn get_next_cluster(&mut self, cluster: u32) -> Result<Option<u32>, S::Error> {
         Ok(match self.read_nth_FAT_entry(cluster)? {
             FATEntry::Allocated(next_cluster) => Some(next_cluster),
-            // when a `File` is created, `cluster_chain_is_healthy` is called, if it fails, that File is dropped
+            // when a `ROFile` is created, `cluster_chain_is_healthy` is called, if it fails, that ROFile is dropped
             _ => None,
         })
     }
@@ -1728,18 +1707,6 @@ where
         }
 
         Ok(&self.sector_buffer)
-    }
-
-    fn sync_sector_buffer(&mut self) -> Result<(), S::Error> {
-        if self.buffer_modified {
-            log::trace!("syncing sector {:?}", self.stored_sector);
-            self.storage.write_all(&self.sector_buffer)?;
-            self.storage
-                .seek(SeekFrom::Current(-i64::from(self.props.sector_size)))?;
-        }
-        self.buffer_modified = false;
-
-        Ok(())
     }
 
     #[allow(non_snake_case)]
@@ -1830,7 +1797,13 @@ where
             FATType::ExFAT => todo!("ExFAT not yet implemented"),
         })
     }
+    }
 
+/// Internal [`Write`]-related low-level functions
+impl<S> FileSystem<S>
+where
+    S: Read + Write + Seek,
+{
     #[allow(non_snake_case)]
     fn write_nth_FAT_entry(&mut self, n: u32, entry: FATEntry) -> Result<(), S::Error> {
         // the size of an entry rounded up to bytes
@@ -1908,9 +1881,169 @@ where
             FATType::ExFAT => todo!("ExFAT not yet implemented"),
         };
 
-        assert_eq!(entry, self.read_nth_FAT_entry(n)?);
+        Ok(())
+    }
+
+    fn sync_sector_buffer(&mut self) -> Result<(), S::Error> {
+        if self.buffer_modified {
+            log::trace!("syncing sector {:?}", self.stored_sector);
+            self.storage.write_all(&self.sector_buffer)?;
+            self.storage
+                .seek(SeekFrom::Current(-i64::from(self.props.sector_size)))?;
+        }
+        self.buffer_modified = false;
 
         Ok(())
+    }
+}
+
+/// Public [`Read`]-related functions
+impl<S> FileSystem<S>
+where
+    S: Read + Write + Seek,
+{
+    /// Read all the entries of a directory ([`PathBuf`]) into [`Vec<DirEntry>`]
+    ///
+    /// Fails if `path` doesn't represent a directory, or if that directory doesn't exist
+    pub fn read_dir(&mut self, path: PathBuf) -> FSResult<Vec<DirEntry>, S::Error> {
+        if path.is_malformed() {
+            return Err(FSError::MalformedPath);
+        }
+        if !path.is_dir() {
+            log::error!("Not a directory");
+            return Err(FSError::NotADirectory);
+        }
+
+        let mut entries = self.process_root_dir()?;
+
+        for dir_name in path.clone().into_iter() {
+            let dir_cluster = match entries.iter().find(|entry| {
+                entry.name == dir_name && entry.attributes.contains(Attributes::DIRECTORY)
+            }) {
+                Some(entry) => entry.data_cluster,
+                None => {
+                    log::error!("Directory {} not found", path);
+                    return Err(FSError::NotFound);
+                }
+            };
+
+            entries = unsafe { self.process_normal_dir(dir_cluster)? };
+        }
+
+        // if we haven't returned by now, that means that the entries vector
+        // contains what we want, let's map it to DirEntries and return
+        Ok(entries
+            .into_iter()
+            .map(|rawentry| {
+                let mut entry_path = path.clone();
+
+                entry_path.push(format!(
+                    "{}{}",
+                    rawentry.name,
+                    if rawentry.is_dir { "/" } else { "" }
+                ));
+                DirEntry {
+                    entry: Properties::from_raw(rawentry, entry_path),
+                }
+            })
+            .collect())
+    }
+
+    /// Get a corresponding [`ROFile`] object from a [`PathBuf`]
+    ///
+    /// Borrows `&mut self` until that [`ROFile`] object is dropped, effectively locking `self` until that file closed
+    ///
+    /// Fails if `path` doesn't represent a file, or if that file doesn't exist
+    pub fn get_ro_file(&mut self, path: PathBuf) -> FSResult<ROFile<'_, S>, S::Error> {
+        if path.is_malformed() {
+            return Err(FSError::MalformedPath);
+        }
+
+        if let Some(file_name) = path.file_name() {
+            let parent_dir = self.read_dir(path.parent())?;
+            match parent_dir.into_iter().find(|direntry| {
+                direntry
+                    .path()
+                    .file_name()
+                    .is_some_and(|entry_name| entry_name == file_name)
+            }) {
+                Some(direntry) => {
+                    let mut file = ROFile {
+                        fs: self,
+                        props: FileProps {
+                            offset: 0,
+                            current_cluster: direntry.entry.data_cluster,
+                            entry: direntry.entry,
+                        },
+                    };
+
+                    if file.cluster_chain_is_healthy()? {
+                        Ok(file)
+                    } else {
+                        log::error!("The cluster chain of a file is malformed");
+                        Err(FSError::InternalFSError(
+                            InternalFSError::MalformedClusterChain,
+                        ))
+                    }
+                }
+                None => {
+                    log::error!("ROFile {} not found", path);
+                    Err(FSError::NotFound)
+                }
+            }
+        } else {
+            log::error!("Is a directory (not a file)");
+            Err(FSError::IsADirectory)
+        }
+    }
+}
+
+/// [`Write`]-related functions
+impl<S> FileSystem<S>
+where
+    S: Read + Write + Seek,
+{
+    /// Get a corresponding [`RWFile`] object from a [`PathBuf`]
+    ///
+    /// Borrows `&mut self` until that [`RWFile`] object is dropped, effectively locking `self` until that file closed
+    ///
+    /// Fails if `path` doesn't represent a file, or if that file doesn't exist
+    pub fn get_rw_file(&mut self, path: PathBuf) -> FSResult<RWFile<'_, S>, S::Error> {
+        // we first write an empty array to the storage medium
+        // if the storage has Write functionality, this shouldn't error,
+        // otherwise it should return an error.
+        self.storage.write_all(&[])?;
+
+        self.get_ro_file(path).map(|ro_file| RWFile { ro_file })
+    }
+}
+
+/// Properties about the position of a [`FATEntry`] inside the FAT region
+struct FATEntryProps {
+    /// Each `n`th element of the vector points at the corrensponding sector at the `n+1`th FAT table
+    fat_sectors: Vec<u32>,
+    sector_offset: usize,
+}
+
+impl FATEntryProps {
+    /// Get the [`FATEntryProps`] of the `n`-th [`FATEntry`] of a [`ROFileSystem`] (`fs`)
+    pub fn new<S>(n: u32, fs: &FileSystem<S>) -> Self
+    where
+        S: Read + Write + Seek,
+    {
+        let fat_byte_offset: u32 = n * fs.fat_type.bits_per_entry() as u32 / 8;
+        let mut fat_sectors = Vec::new();
+        for nth_table in 0..fs.props.fat_table_count {
+            let table_sector_offset = fs.boot_record.nth_FAT_table_sector(nth_table);
+            let fat_sector = table_sector_offset + fat_byte_offset / fs.props.sector_size;
+            fat_sectors.push(fat_sector);
+        }
+        let sector_offset: usize = (fat_byte_offset % fs.props.sector_size) as usize;
+
+        FATEntryProps {
+            fat_sectors,
+            sector_offset,
+        }
     }
 }
 
@@ -1944,8 +2077,13 @@ mod tests {
         let mut storage = Cursor::new(FAT16.to_owned());
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
+        let fat_offset = match fs.boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_fat_sector(),
+            BootRecord::ExFAT(_boot_record_exfat) => unreachable!(),
+        };
+
         // we manually read the first and second entry of the FAT table
-        fs.read_nth_sector(fs.props.fat_offset.into()).unwrap();
+        fs.read_nth_sector(fat_offset.into()).unwrap();
 
         let first_entry = u16::from_le_bytes(fs.sector_buffer[0..2].try_into().unwrap());
         let media_type = if let BootRecord::FAT(boot_record_fat) = fs.boot_record {
@@ -1966,7 +2104,7 @@ mod tests {
         let mut storage = Cursor::new(FAT16.to_owned());
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
-        let mut file = fs.get_file(PathBuf::from("/root.txt")).unwrap();
+        let mut file = fs.get_ro_file(PathBuf::from("/root.txt")).unwrap();
 
         let mut file_string = String::new();
         file.read_to_string(&mut file_string).unwrap();
@@ -1982,7 +2120,7 @@ mod tests {
 
         assert_eq!(string, BEE_MOVIE_SCRIPT);
     }
-    fn assert_file_is_bee_movie_script<S>(file: &mut File<'_, S>)
+    fn assert_file_is_bee_movie_script<S>(file: &mut ROFile<'_, S>)
     where
         S: Read + Write + Seek,
     {
@@ -1999,7 +2137,9 @@ mod tests {
         let mut storage = Cursor::new(FAT16.to_owned());
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
-        let mut file = fs.get_file(PathBuf::from("/bee movie script.txt")).unwrap();
+        let mut file = fs
+            .get_ro_file(PathBuf::from("/bee movie script.txt"))
+            .unwrap();
         assert_file_is_bee_movie_script(&mut file);
     }
 
@@ -2014,7 +2154,7 @@ mod tests {
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
         let mut file = fs
-            .get_file(PathBuf::from("/GNU ⁄ Linux copypasta.txt"))
+            .get_ro_file(PathBuf::from("/GNU ⁄ Linux copypasta.txt"))
             .unwrap();
         let mut file_bytes = [0_u8; 4096];
 
@@ -2047,7 +2187,7 @@ mod tests {
         let mut storage = Cursor::new(FAT12.to_owned());
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
-        let mut file = fs.get_file(PathBuf::from("/root.txt")).unwrap();
+        let mut file = fs.get_rw_file(PathBuf::from("/root.txt")).unwrap();
 
         file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
         file.rewind().unwrap();
@@ -2104,7 +2244,7 @@ mod tests {
         );
 
         // let's write the bee movie script to root.txt (why not), check, truncate the file, then check again
-        let mut file = fs.get_file(PathBuf::from("root.txt")).unwrap();
+        let mut file = fs.get_rw_file(PathBuf::from("root.txt")).unwrap();
 
         file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
         assert!(file.fs.FAT_tables_are_identical().unwrap());
@@ -2120,7 +2260,9 @@ mod tests {
         let mut storage = Cursor::new(FAT16.to_owned());
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
-        let mut file = fs.get_file(PathBuf::from("/bee movie script.txt")).unwrap();
+        let mut file = fs
+            .get_rw_file(PathBuf::from("/bee movie script.txt"))
+            .unwrap();
 
         // we are gonna truncate the bee movie script down to 20 000 bytes
         const NEW_SIZE: u32 = 20_000;
@@ -2141,7 +2283,9 @@ mod tests {
         let mut storage = Cursor::new(FAT16.to_owned());
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
-        let mut file = fs.get_file(PathBuf::from("/rootdir/example.txt")).unwrap();
+        let mut file = fs
+            .get_ro_file(PathBuf::from("/rootdir/example.txt"))
+            .unwrap();
 
         let mut file_string = String::new();
         file.read_to_string(&mut file_string).unwrap();
@@ -2156,11 +2300,13 @@ mod tests {
         let mut storage = Cursor::new(FAT16.to_owned());
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
-        let file = fs.get_file(PathBuf::from("/rootdir/example.txt")).unwrap();
+        let file = fs
+            .get_ro_file(PathBuf::from("/rootdir/example.txt"))
+            .unwrap();
 
-        assert_eq!(datetime!(2024-07-11 13:02:38.15), file.entry.created);
-        assert_eq!(datetime!(2024-07-11 13:02:38.0), file.entry.modified);
-        assert_eq!(date!(2024 - 07 - 11), file.entry.accessed);
+        assert_eq!(datetime!(2024-07-11 13:02:38.15), file.created);
+        assert_eq!(datetime!(2024-07-11 13:02:38.0), file.modified);
+        assert_eq!(date!(2024 - 07 - 11), file.accessed);
     }
 
     #[test]
@@ -2170,7 +2316,7 @@ mod tests {
         let mut storage = Cursor::new(FAT12.to_owned());
         let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
-        let mut file = fs.get_file(PathBuf::from("/foo/bar.txt")).unwrap();
+        let mut file = fs.get_ro_file(PathBuf::from("/foo/bar.txt")).unwrap();
         let mut file_string = String::new();
         file.read_to_string(&mut file_string).unwrap();
         const EXPECTED_STR: &str = "Hello, World!\n";
@@ -2180,7 +2326,7 @@ mod tests {
         // one FAT entry of the file we are reading is split between different sectors
         // this way, we also test for this case
         let mut file = fs
-            .get_file(PathBuf::from("/test/bee movie script.txt"))
+            .get_ro_file(PathBuf::from("/test/bee movie script.txt"))
             .unwrap();
         assert_file_is_bee_movie_script(&mut file);
     }
@@ -2200,7 +2346,7 @@ mod tests {
             let mut storage = Cursor::new(case.0.to_owned());
             let fs = FileSystem::from_storage(&mut storage).unwrap();
 
-            assert_eq!(fs.fat_type, case.1)
+            assert_eq!(fs.fat_type(), case.1)
         }
     }
 }
