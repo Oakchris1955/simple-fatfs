@@ -411,13 +411,13 @@ impl fmt::Display for SFN {
 }
 
 bitflags! {
-    /// A list of the various attributes specified for a file/directory
+    /// A list of the various (raw) attributes specified for a file/directory
     ///
     /// To check whether a given [`Attributes`] struct contains a flag, use the [`contains()`](Attributes::contains()) method
     ///
     /// Generated using [bitflags](https://docs.rs/bitflags/2.6.0/bitflags/)
     #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
-    pub struct Attributes: u8 {
+    struct RawAttributes: u8 {
         /// This entry is read-only
         const READ_ONLY = 0x01;
         /// This entry is normally hidden
@@ -437,6 +437,35 @@ bitflags! {
                     Self::HIDDEN.bits() |
                     Self::SYSTEM.bits() |
                     Self::VOLUME_ID.bits();
+    }
+}
+
+/// A list of the various attributes specified for a file/directory
+#[derive(Debug, Clone, Copy)]
+pub struct Attributes {
+    /// This is a read-only file
+    pub read_only: bool,
+    /// This file is to be hidden unless a request is issued
+    /// explicitly requesting inclusion of “hidden files”
+    pub hidden: bool,
+    /// This is a system file and shouldn't be listed unless a request
+    /// is issued explicitly requesting inclusion of system files”
+    pub system: bool,
+    /// This file has been modified since last archival
+    /// or has never been archived.
+    ///
+    /// This field should only concern archival software
+    pub archive: bool,
+}
+
+impl From<RawAttributes> for Attributes {
+    fn from(value: RawAttributes) -> Self {
+        Attributes {
+            read_only: value.contains(RawAttributes::READ_ONLY),
+            hidden: value.contains(RawAttributes::HIDDEN),
+            system: value.contains(RawAttributes::SYSTEM),
+            archive: value.contains(RawAttributes::ARCHIVE),
+        }
     }
 }
 
@@ -540,7 +569,7 @@ impl TryFrom<EntryModificationTime> for PrimitiveDateTime {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 struct FATDirEntry {
     sfn: SFN,
-    attributes: Attributes,
+    attributes: RawAttributes,
     _reserved: [u8; 1],
     created: EntryCreationTime,
     accessed: DateAttribute,
@@ -596,7 +625,7 @@ impl LFNEntry {
 struct RawProperties {
     name: String,
     is_dir: bool,
-    attributes: Attributes,
+    attributes: RawAttributes,
     created: PrimitiveDateTime,
     modified: PrimitiveDateTime,
     accessed: Date,
@@ -669,7 +698,7 @@ impl Properties {
     fn from_raw(raw: RawProperties, path: PathBuf) -> Self {
         Properties {
             path,
-            attributes: raw.attributes,
+            attributes: raw.attributes.into(),
             created: raw.created,
             modified: raw.modified,
             accessed: raw.accessed,
@@ -1263,6 +1292,34 @@ fn bincode_config() -> impl bincode::Options + Copy {
         .with_little_endian()
 }
 
+/// Filter (or not) things like hidden files/directories
+/// for FileSystem operations
+#[derive(Debug)]
+struct FileFilter {
+    show_hidden: bool,
+    show_systen: bool,
+}
+
+impl FileFilter {
+    fn filter(&self, item: &RawProperties) -> bool {
+        let is_hidden = item.attributes.contains(RawAttributes::HIDDEN);
+        let is_system = item.attributes.contains(RawAttributes::SYSTEM);
+        let should_filter = !self.show_hidden && is_hidden || !self.show_systen && is_system;
+
+        !should_filter
+    }
+}
+
+impl Default for FileFilter {
+    fn default() -> Self {
+        // The FAT spec says to filter everything by default
+        FileFilter {
+            show_hidden: false,
+            show_systen: false,
+        }
+    }
+}
+
 /// An API to process a FAT filesystem
 #[derive(Debug)]
 pub struct FileSystem<S>
@@ -1282,6 +1339,8 @@ where
     // since `self.fat_type()` calls like 5 nested functions, we keep this cached and expose it as a public field
     fat_type: FATType,
     props: FSProperties,
+
+    filter: FileFilter,
 }
 
 impl<S> OffsetConversions for FileSystem<S>
@@ -1312,6 +1371,28 @@ where
     /// What is the [`FATType`] of the filesystem
     pub fn fat_type(&self) -> FATType {
         self.fat_type
+    }
+}
+
+/// Setter functions
+impl<S> FileSystem<S>
+where
+    S: Read + Write + Seek,
+{
+    /// Whether or not to list hidden files
+    ///
+    /// Off by default
+    #[inline]
+    pub fn show_hidden(&mut self, show: bool) {
+        self.filter.show_hidden = show;
+    }
+
+    /// Whether or not to list system files
+    ///
+    /// Off by default
+    #[inline]
+    pub fn show_system(&mut self, show: bool) {
+        self.filter.show_systen = show;
     }
 }
 
@@ -1430,6 +1511,7 @@ where
             boot_record,
             fat_type,
             props,
+            filter: FileFilter::default(),
         };
 
         if !fs.FAT_tables_are_identical()? {
@@ -1472,7 +1554,7 @@ where
                     continue;
                 };
 
-                if entry.attributes.contains(Attributes::LFN) {
+                if entry.attributes.contains(RawAttributes::LFN) {
                     // TODO: perhaps there is a way to utilize the `order` field?
                     let Ok(lfn_entry) = bincode_config().deserialize::<LFNEntry>(&chunk) else {
                         continue;
@@ -1521,7 +1603,7 @@ where
                 ) {
                     entries.push(RawProperties {
                         name: filename,
-                        is_dir: entry.attributes.contains(Attributes::DIRECTORY),
+                        is_dir: entry.attributes.contains(RawAttributes::DIRECTORY),
                         attributes: entry.attributes,
                         created,
                         modified,
@@ -1797,7 +1879,7 @@ where
             FATType::ExFAT => todo!("ExFAT not yet implemented"),
         })
     }
-    }
+}
 
 /// Internal [`Write`]-related low-level functions
 impl<S> FileSystem<S>
@@ -1918,7 +2000,7 @@ where
 
         for dir_name in path.clone().into_iter() {
             let dir_cluster = match entries.iter().find(|entry| {
-                entry.name == dir_name && entry.attributes.contains(Attributes::DIRECTORY)
+                entry.name == dir_name && entry.attributes.contains(RawAttributes::DIRECTORY)
             }) {
                 Some(entry) => entry.data_cluster,
                 None => {
@@ -1934,6 +2016,7 @@ where
         // contains what we want, let's map it to DirEntries and return
         Ok(entries
             .into_iter()
+            .filter(|x| self.filter.filter(x))
             .map(|rawentry| {
                 let mut entry_path = path.clone();
 
@@ -2014,7 +2097,12 @@ where
         // otherwise it should return an error.
         self.storage.write_all(&[])?;
 
-        self.get_ro_file(path).map(|ro_file| RWFile { ro_file })
+        let ro_file = self.get_ro_file(path)?;
+        if ro_file.attributes.read_only {
+            return Err(FSError::ReadOnlyFile);
+        };
+
+        Ok(RWFile { ro_file })
     }
 }
 
@@ -2274,6 +2362,47 @@ mod tests {
         expected_string.truncate(NEW_SIZE as usize);
 
         assert_eq!(file_string, expected_string);
+    }
+
+    #[test]
+    fn read_only_file() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT16.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        let file_result = fs.get_rw_file(PathBuf::from("/rootdir/example.txt"));
+
+        match file_result {
+            Err(err) => match err {
+                FSError::ReadOnlyFile => (),
+                _ => panic!("unexpected IOError"),
+            },
+            _ => panic!("file is marked read-only, yet somehow we got a RWFile for it"),
+        }
+    }
+
+    #[test]
+    fn get_hidden_file() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT12.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        let file_path = PathBuf::from("/hidden");
+        let file_result = fs.get_ro_file(file_path.clone());
+        match file_result {
+            Err(err) => match err {
+                FSError::NotFound => (),
+                _ => panic!("unexpected IOError"),
+            },
+            _ => panic!("file should be hidden by default"),
+        }
+
+        // let's now allow the filesystem to list hidden files
+        fs.show_hidden(true);
+        let file = fs.get_ro_file(file_path).unwrap();
+        assert!(file.attributes.hidden);
     }
 
     #[test]
