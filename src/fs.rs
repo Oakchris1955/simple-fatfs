@@ -1524,141 +1524,168 @@ where
     }
 }
 
+#[derive(Debug)]
+struct EntryParser {
+    entries: Vec<RawProperties>,
+    lfn_buf: Vec<String>,
+    lfn_checksum: Option<u8>,
+}
+
+impl Default for EntryParser {
+    fn default() -> Self {
+        EntryParser {
+            entries: Vec::new(),
+            lfn_buf: Vec::new(),
+            lfn_checksum: None,
+        }
+    }
+}
+
+const UNUSED_ENTRY: u8 = 0xE5;
+const LAST_AND_UNUSED_ENTRY: u8 = 0x00;
+
+impl EntryParser {
+    /// Parses a sector of 8.3 & LFN entries
+    ///
+    /// Returns a [`Result<bool>`] indicating whether or not
+    /// this sector was the last one in the chain containing entries
+    fn parse_sector<S>(
+        &mut self,
+        sector: u32,
+        fs: &mut FileSystem<S>,
+    ) -> Result<bool, <S as IOBase>::Error>
+    where
+        S: Read + Write + Seek,
+    {
+        for chunk in fs.read_nth_sector(sector.into())?.chunks(32) {
+            match chunk[0] {
+                LAST_AND_UNUSED_ENTRY => return Ok(true),
+                UNUSED_ENTRY => continue,
+                _ => (),
+            };
+
+            let Ok(entry) = bincode_config().deserialize::<FATDirEntry>(&chunk) else {
+                continue;
+            };
+
+            if entry.attributes.contains(RawAttributes::LFN) {
+                // TODO: perhaps there is a way to utilize the `order` field?
+                let Ok(lfn_entry) = bincode_config().deserialize::<LFNEntry>(&chunk) else {
+                    continue;
+                };
+
+                // If the signature verification fails, consider this entry corrupted
+                if !lfn_entry.verify_signature() {
+                    continue;
+                }
+
+                match self.lfn_checksum {
+                    Some(checksum) => {
+                        if checksum != lfn_entry.checksum {
+                            self.lfn_checksum = None;
+                            self.lfn_buf.clear();
+                            continue;
+                        }
+                    }
+                    None => self.lfn_checksum = Some(lfn_entry.checksum),
+                }
+
+                let char_arr = lfn_entry.get_byte_slice().to_vec();
+                if let Ok(temp_str) = string_from_lfn(&char_arr) {
+                    self.lfn_buf.push(temp_str);
+                }
+
+                continue;
+            }
+
+            let filename = if !self.lfn_buf.is_empty()
+                && self
+                    .lfn_checksum
+                    .is_some_and(|checksum| checksum == entry.sfn.gen_checksum())
+            {
+                // for efficiency reasons, we store the LFN string sequences as we read them
+                let parsed_str: String = self.lfn_buf.iter().cloned().rev().collect();
+                self.lfn_buf.clear();
+                self.lfn_checksum = None;
+                parsed_str
+            } else {
+                entry.sfn.to_string()
+            };
+
+            if let (Ok(created), Ok(modified), Ok(accessed)) = (
+                entry.created.try_into(),
+                entry.modified.try_into(),
+                entry.accessed.try_into(),
+            ) {
+                self.entries.push(RawProperties {
+                    name: filename,
+                    is_dir: entry.attributes.contains(RawAttributes::DIRECTORY),
+                    attributes: entry.attributes,
+                    created,
+                    modified,
+                    accessed,
+                    file_size: entry.file_size,
+                    data_cluster: ((entry.cluster_high as u32) << 16) + entry.cluster_low as u32,
+                })
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Consumes [`Self`](EntryParser) & returns a `Vec` of [`RawProperties`]
+    /// of the parsed entries
+    fn finish(self) -> Vec<RawProperties> {
+        self.entries
+    }
+}
+
 /// Internal [`Read`]-related low-level functions
 impl<S> FileSystem<S>
 where
     S: Read + Write + Seek,
 {
-    /// Unsafe because the sector number must point to an area with directory entries
-    ///
-    /// Also the sector number starts from the beginning of the partition
-    unsafe fn process_entry_sector(
-        &mut self,
-        sector: u32,
-    ) -> FSResult<Vec<RawProperties>, S::Error> {
-        let mut entries = Vec::new();
-        let mut lfn_buf: Vec<String> = Vec::new();
-        let mut lfn_checksum: Option<u8> = None;
-
-        'outer: loop {
-            for chunk in self.read_nth_sector(sector.into())?.chunks(32) {
-                match chunk[0] {
-                    // nothing else to read
-                    0 => break 'outer,
-                    // unused entry
-                    0xE5 => continue,
-                    _ => (),
-                };
-
-                let Ok(entry) = bincode_config().deserialize::<FATDirEntry>(&chunk) else {
-                    continue;
-                };
-
-                if entry.attributes.contains(RawAttributes::LFN) {
-                    // TODO: perhaps there is a way to utilize the `order` field?
-                    let Ok(lfn_entry) = bincode_config().deserialize::<LFNEntry>(&chunk) else {
-                        continue;
-                    };
-
-                    // If the signature verification fails, consider this entry corrupted
-                    if !lfn_entry.verify_signature() {
-                        continue;
-                    }
-
-                    match lfn_checksum {
-                        Some(checksum) => {
-                            if checksum != lfn_entry.checksum {
-                                lfn_checksum = None;
-                                lfn_buf.clear();
-                                continue;
-                            }
-                        }
-                        None => lfn_checksum = Some(lfn_entry.checksum),
-                    }
-
-                    let char_arr = lfn_entry.get_byte_slice().to_vec();
-                    if let Ok(temp_str) = string_from_lfn(&char_arr) {
-                        lfn_buf.push(temp_str);
-                    }
-
-                    continue;
-                }
-
-                let filename = if !lfn_buf.is_empty()
-                    && lfn_checksum.is_some_and(|checksum| checksum == entry.sfn.gen_checksum())
-                {
-                    // for efficiency reasons, we store the LFN string sequences as we read them
-                    let parsed_str: String = lfn_buf.iter().cloned().rev().collect();
-                    lfn_buf.clear();
-                    lfn_checksum = None;
-                    parsed_str
-                } else {
-                    entry.sfn.to_string()
-                };
-
-                if let (Ok(created), Ok(modified), Ok(accessed)) = (
-                    entry.created.try_into(),
-                    entry.modified.try_into(),
-                    entry.accessed.try_into(),
-                ) {
-                    entries.push(RawProperties {
-                        name: filename,
-                        is_dir: entry.attributes.contains(RawAttributes::DIRECTORY),
-                        attributes: entry.attributes,
-                        created,
-                        modified,
-                        accessed,
-                        file_size: entry.file_size,
-                        data_cluster: ((entry.cluster_high as u32) << 16)
-                            + entry.cluster_low as u32,
-                    })
-                }
-            }
-        }
-
-        Ok(entries)
-    }
-
     fn process_root_dir(&mut self) -> FSResult<Vec<RawProperties>, S::Error> {
         match self.boot_record {
             BootRecord::FAT(boot_record_fat) => match boot_record_fat.ebr {
                 EBR::FAT12_16(_ebr_fat12_16) => {
-                    let mut entries = Vec::new();
+                    let mut entry_parser = EntryParser::default();
 
                     let root_dir_sector = boot_record_fat.first_root_dir_sector();
                     let sector_count = boot_record_fat.root_dir_sectors();
 
                     for sector in root_dir_sector..(root_dir_sector + sector_count) {
-                        let mut new_entries = unsafe { self.process_entry_sector(sector.into())? };
-                        entries.append(&mut new_entries);
+                        if entry_parser.parse_sector(sector.into(), self)? {
+                            break;
+                        }
                     }
 
-                    Ok(entries)
+                    Ok(entry_parser.finish())
                 }
                 EBR::FAT32(ebr_fat32, _) => {
                     let cluster = ebr_fat32.root_cluster;
-                    unsafe { self.process_normal_dir(cluster) }
+                    self.process_normal_dir(cluster)
                 }
             },
             BootRecord::ExFAT(_boot_record_exfat) => todo!(),
         }
     }
 
-    /// Unsafe for the same reason as [`process_entry_sector`]
-    unsafe fn process_normal_dir(
+    fn process_normal_dir(
         &mut self,
         mut data_cluster: u32,
     ) -> FSResult<Vec<RawProperties>, S::Error> {
-        let mut entries = Vec::new();
+        let mut entry_parser = EntryParser::default();
 
-        loop {
+        'outer: loop {
             // FAT specification, section 6.7
             let first_sector_of_cluster = self.data_cluster_to_partition_sector(data_cluster);
             for sector in first_sector_of_cluster
                 ..(first_sector_of_cluster + self.sectors_per_cluster() as u32)
             {
-                let mut new_entries = unsafe { self.process_entry_sector(sector.into())? };
-                entries.append(&mut new_entries);
+                if entry_parser.parse_sector(sector.into(), self)? {
+                    break 'outer;
+                }
             }
 
             // Read corresponding FAT entry
@@ -1679,7 +1706,7 @@ where
             }
         }
 
-        Ok(entries)
+        Ok(entry_parser.finish())
     }
 
     /// Gets the next free cluster. Returns an IO [`Result`]
@@ -2009,7 +2036,7 @@ where
                 }
             };
 
-            entries = unsafe { self.process_normal_dir(dir_cluster)? };
+            entries = self.process_normal_dir(dir_cluster)?;
         }
 
         // if we haven't returned by now, that means that the entries vector
