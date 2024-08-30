@@ -146,8 +146,7 @@ impl BootRecordFAT {
     /// The size of the root directory (unless we have FAT32, in which case the size will be 0)
     /// This calculation will round up
     pub(crate) fn root_dir_sectors(&self) -> u16 {
-        // 32 is the size of a directory entry in bytes
-        ((self.bpb.root_entry_count * 32) + (self.bpb.bytes_per_sector - 1))
+        ((self.bpb.root_entry_count * DIRENTRY_SIZE as u16) + (self.bpb.bytes_per_sector - 1))
             / self.bpb.bytes_per_sector
     }
 
@@ -331,6 +330,9 @@ impl FATType {
         self.bits_per_entry().next_power_of_two() as u32 / 8
     }
 }
+
+// the first 2 entries are reserved
+const RESERVED_FAT_ENTRIES: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 enum FATEntry {
@@ -566,6 +568,9 @@ impl TryFrom<EntryModificationTime> for PrimitiveDateTime {
     }
 }
 
+// a directory entry occupies 32 bytes
+const DIRENTRY_SIZE: usize = 32;
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 struct FATDirEntry {
     sfn: SFN,
@@ -620,6 +625,40 @@ impl LFNEntry {
     }
 }
 
+/// The location of a [`FATDirEntry`] within a root directory sector
+/// or a data region cluster
+#[derive(Debug, Clone)]
+enum EntryLocation {
+    /// Sector offset from the start of the root directory region
+    RootDirSector(u16),
+    /// Cluster offset from the start of the data region
+    DataCluster(u32),
+}
+
+impl EntryLocation {
+    fn from_partition_sector<S>(sector: u32, fs: &mut FileSystem<S>) -> Self
+    where
+        S: Read + Write + Seek,
+    {
+        if sector < fs.first_data_sector() {
+            EntryLocation::RootDirSector((sector - fs.props.first_root_dir_sector as u32) as u16)
+        } else {
+            EntryLocation::DataCluster(fs.partition_sector_to_data_cluster(sector))
+        }
+    }
+}
+
+/// The location of a chain of [`FATDirEntry`]
+#[derive(Debug)]
+struct DirEntryChain {
+    /// the location of the first corresponding entry
+    location: EntryLocation,
+    /// the first entry's index/offset from the start of the sector
+    index: u32,
+    /// how many (contiguous) entries this entry chain has
+    len: u32,
+}
+
 /// A resolved file/directory entry (for internal usage only)
 #[derive(Debug)]
 struct RawProperties {
@@ -631,6 +670,8 @@ struct RawProperties {
     accessed: Date,
     file_size: u32,
     data_cluster: u32,
+
+    chain_props: DirEntryChain,
 }
 
 /// A container for file/directory properties
@@ -643,6 +684,9 @@ pub struct Properties {
     accessed: Date,
     file_size: u32,
     data_cluster: u32,
+
+    // internal fields
+    chain_props: DirEntryChain,
 }
 
 /// Getter methods
@@ -704,6 +748,7 @@ impl Properties {
             accessed: raw.accessed,
             file_size: raw.file_size,
             data_cluster: raw.data_cluster,
+            chain_props: raw.chain_props,
         }
     }
 }
@@ -836,10 +881,7 @@ where
         let previous_size = self.file_size;
         self.file_size = size;
 
-        let mut next_cluster_option = self
-            .ro_file
-            .fs
-            .get_next_cluster(self.ro_file.props.current_cluster)?;
+        let mut next_cluster_option = self.get_next_cluster()?;
 
         // we set the new last cluster in the chain to be EOF
         self.ro_file
@@ -865,6 +907,90 @@ where
 
         Ok(())
     }
+
+    /// Remove the current file from the [`FileSystem`]
+    pub fn remove(mut self) -> Result<(), <Self as IOBase>::Error> {
+        // we begin by removing the corresponding entries...
+        let mut entries_freed = 0;
+        let mut current_offset = self.props.entry.chain_props.index;
+
+        // current_cluster_option is `None` if we are dealing with a root directory entry
+        let (mut current_sector, current_cluster_option): (u32, Option<u32>) =
+            match self.props.entry.chain_props.location {
+                EntryLocation::RootDirSector(root_dir_sector) => (
+                    (root_dir_sector + self.fs.props.first_root_dir_sector).into(),
+                    None,
+                ),
+                EntryLocation::DataCluster(data_cluster) => (
+                    self.fs.data_cluster_to_partition_sector(data_cluster),
+                    Some(data_cluster),
+                ),
+            };
+
+        while entries_freed < self.props.entry.chain_props.len {
+            if current_sector as u64 != self.fs.stored_sector {
+                self.fs.read_nth_sector(current_sector.into())?;
+            }
+
+            // we won't even bother zeroing the entire thing, just the first byte
+            let byte_offset = current_offset as usize * DIRENTRY_SIZE;
+            self.fs.sector_buffer[byte_offset] = UNUSED_ENTRY;
+            self.fs.buffer_modified = true;
+
+            log::trace!(
+                "freed entry at sector {} with byte offset {}",
+                current_sector,
+                byte_offset
+            );
+
+            if current_offset + 1 >= (self.fs.sector_size() / DIRENTRY_SIZE as u32) {
+                // we have moved to a new sector
+                current_sector += 1;
+
+                match current_cluster_option {
+                    // data region
+                    Some(mut current_cluster) => {
+                        if self.fs.partition_sector_to_data_cluster(current_sector)
+                            != current_cluster
+                        {
+                            current_cluster = self.fs.get_next_cluster(current_cluster)?.unwrap();
+                            current_sector =
+                                self.fs.data_cluster_to_partition_sector(current_cluster);
+                        }
+                    }
+                    None => (),
+                }
+
+                current_offset = 0;
+            } else {
+                current_offset += 1
+            }
+
+            entries_freed += 1;
+        }
+
+        // ... and then we free the data clusters
+
+        // rewind back to the start of the file
+        self.rewind()?;
+
+        loop {
+            let current_cluster = self.props.current_cluster;
+            let next_cluster_option = self.get_next_cluster()?;
+
+            // free the current cluster
+            self.fs
+                .write_nth_FAT_entry(current_cluster, FATEntry::Free)?;
+
+            // proceed to the next one, otherwise break
+            match next_cluster_option {
+                Some(next_cluster) => self.props.current_cluster = next_cluster,
+                None => break,
+            }
+        }
+
+        Ok(())
+    }
 }
 
 // Internal functions
@@ -876,12 +1002,15 @@ where
     /// Panics if the current cluser doesn't point to another clluster
     fn next_cluster(&mut self) -> Result<(), <Self as IOBase>::Error> {
         // when a `ROFile` is created, `cluster_chain_is_healthy` is called, if it fails, that ROFile is dropped
-        self.props.current_cluster = self
-            .fs
-            .get_next_cluster(self.props.current_cluster)?
-            .unwrap();
+        self.props.current_cluster = self.get_next_cluster()?.unwrap();
 
         Ok(())
+    }
+
+    #[inline]
+    /// Non-[`panic`]king version of [`next_cluster()`](ROFile::next_cluster)
+    fn get_next_cluster(&mut self) -> Result<Option<u32>, <Self as IOBase>::Error> {
+        Ok(self.fs.get_next_cluster(self.props.current_cluster)?)
     }
 
     /// Returns that last cluster in the file's cluster chain
@@ -1257,16 +1386,20 @@ trait OffsetConversions {
         self.cluster_size() / self.sector_size() as u64
     }
 
-    // this function assumes that the first sector is also the first sector of the partition
     #[inline]
     fn sector_to_partition_offset(&self, sector: u32) -> u32 {
         sector * self.sector_size()
     }
 
-    // these three functions assume that the first sector (or cluster) is the first sector (or cluster) of the data area
     #[inline]
     fn data_cluster_to_partition_sector(&self, cluster: u32) -> u32 {
-        self.cluster_to_sector((cluster - 2).into()) + self.first_data_sector()
+        self.cluster_to_sector((cluster - RESERVED_FAT_ENTRIES).into()) + self.first_data_sector()
+    }
+
+    #[inline]
+    fn partition_sector_to_data_cluster(&self, sector: u32) -> u32 {
+        (sector - self.first_data_sector()) / self.sectors_per_cluster() as u32
+            + RESERVED_FAT_ENTRIES
     }
 }
 
@@ -1279,6 +1412,7 @@ struct FSProperties {
     total_clusters: u32,
     /// sector offset of the FAT
     fat_table_count: u8,
+    first_root_dir_sector: u16,
     first_data_sector: u32,
 }
 
@@ -1474,6 +1608,11 @@ where
             }
         };
 
+        let first_root_dir_sector = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_root_dir_sector().into(),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
+        };
+
         let first_data_sector = match boot_record {
             BootRecord::FAT(boot_record_fat) => boot_record_fat.first_data_sector().into(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
@@ -1500,6 +1639,7 @@ where
             fat_table_count,
             total_sectors,
             total_clusters,
+            first_root_dir_sector,
             first_data_sector,
         };
 
@@ -1529,6 +1669,7 @@ struct EntryParser {
     entries: Vec<RawProperties>,
     lfn_buf: Vec<String>,
     lfn_checksum: Option<u8>,
+    current_chain: Option<DirEntryChain>,
 }
 
 impl Default for EntryParser {
@@ -1537,6 +1678,7 @@ impl Default for EntryParser {
             entries: Vec::new(),
             lfn_buf: Vec::new(),
             lfn_checksum: None,
+            current_chain: None,
         }
     }
 }
@@ -1545,6 +1687,13 @@ const UNUSED_ENTRY: u8 = 0xE5;
 const LAST_AND_UNUSED_ENTRY: u8 = 0x00;
 
 impl EntryParser {
+    #[inline]
+    fn _decrement_parsed_entries_counter(&mut self) {
+        if let Some(current_chain) = &mut self.current_chain {
+            current_chain.len -= 1
+        }
+    }
+
     /// Parses a sector of 8.3 & LFN entries
     ///
     /// Returns a [`Result<bool>`] indicating whether or not
@@ -1557,7 +1706,13 @@ impl EntryParser {
     where
         S: Read + Write + Seek,
     {
-        for chunk in fs.read_nth_sector(sector.into())?.chunks(32) {
+        let entry_location = EntryLocation::from_partition_sector(sector, fs);
+
+        for (index, chunk) in fs
+            .read_nth_sector(sector.into())?
+            .chunks(DIRENTRY_SIZE)
+            .enumerate()
+        {
             match chunk[0] {
                 LAST_AND_UNUSED_ENTRY => return Ok(true),
                 UNUSED_ENTRY => continue,
@@ -1568,14 +1723,28 @@ impl EntryParser {
                 continue;
             };
 
+            // update current entry chain data
+            match &mut self.current_chain {
+                Some(current_chain) => current_chain.len += 1,
+                None => {
+                    self.current_chain = Some(DirEntryChain {
+                        location: entry_location.clone(),
+                        index: index as u32,
+                        len: 1,
+                    })
+                }
+            }
+
             if entry.attributes.contains(RawAttributes::LFN) {
                 // TODO: perhaps there is a way to utilize the `order` field?
                 let Ok(lfn_entry) = bincode_config().deserialize::<LFNEntry>(&chunk) else {
+                    self._decrement_parsed_entries_counter();
                     continue;
                 };
 
                 // If the signature verification fails, consider this entry corrupted
                 if !lfn_entry.verify_signature() {
+                    self._decrement_parsed_entries_counter();
                     continue;
                 }
 
@@ -1584,6 +1753,7 @@ impl EntryParser {
                         if checksum != lfn_entry.checksum {
                             self.lfn_checksum = None;
                             self.lfn_buf.clear();
+                            self.current_chain = None;
                             continue;
                         }
                     }
@@ -1626,6 +1796,10 @@ impl EntryParser {
                     accessed,
                     file_size: entry.file_size,
                     data_cluster: ((entry.cluster_high as u32) << 16) + entry.cluster_low as u32,
+                    chain_props: self
+                        .current_chain
+                        .take()
+                        .expect("at this point, this shouldn't be None"),
                 })
             }
         }
@@ -1714,8 +1888,7 @@ where
     fn next_free_cluster(&mut self) -> Result<Option<u32>, S::Error> {
         let start_cluster = match self.boot_record {
             BootRecord::FAT(boot_record_fat) => {
-                // the first 2 entries are reserved
-                let mut first_free_cluster = 2;
+                let mut first_free_cluster = RESERVED_FAT_ENTRIES;
 
                 if let EBR::FAT32(_, fsinfo) = boot_record_fat.ebr {
                     // a value of u32::MAX denotes unawareness of the first free cluster
@@ -2338,6 +2511,52 @@ mod tests {
             file.read_exact(buf.as_mut_slice()).unwrap();
 
             assert_vec_is_bee_movie_script(&buf);
+        }
+    }
+
+    #[test]
+    fn remove_root_dir_file() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT16.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        // the bee movie script (here) is in the root directory region
+        let file_path = PathBuf::from("/bee movie script.txt");
+        let file = fs.get_rw_file(file_path.clone()).unwrap();
+        file.remove().unwrap();
+
+        // the file should now be gone
+        let file_result = fs.get_ro_file(file_path);
+        match file_result {
+            Err(err) => match err {
+                FSError::NotFound => (),
+                _ => panic!("unexpected IOError: {:?}", err),
+            },
+            _ => panic!("file should have been deleted by now"),
+        }
+    }
+
+    #[test]
+    fn remove_data_region_file() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT12.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        // the bee movie script (here) is in the data region
+        let file_path = PathBuf::from("/test/bee movie script.txt");
+        let file = fs.get_rw_file(file_path.clone()).unwrap();
+        file.remove().unwrap();
+
+        // the file should now be gone
+        let file_result = fs.get_ro_file(file_path);
+        match file_result {
+            Err(err) => match err {
+                FSError::NotFound => (),
+                _ => panic!("unexpected IOError: {:?}", err),
+            },
+            _ => panic!("file should have been deleted by now"),
         }
     }
 
