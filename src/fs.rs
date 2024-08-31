@@ -2718,6 +2718,111 @@ mod tests {
     }
 
     #[test]
+    fn read_file_fat32() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT32.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        let mut file = fs
+            .get_ro_file(PathBuf::from("/secret/bee movie script.txt"))
+            .unwrap();
+
+        assert_file_is_bee_movie_script(&mut file);
+    }
+
+    #[test]
+    fn seek_n_read_fat32() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT32.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        let mut file = fs.get_ro_file(PathBuf::from("/hello.txt")).unwrap();
+        file.seek(SeekFrom::Start(13)).unwrap();
+
+        let mut string = String::new();
+        file.read_to_string(&mut string).unwrap();
+        const EXPECTED_STR: &str = "FAT32 filesystem!!!\n";
+
+        assert_eq!(string, EXPECTED_STR);
+    }
+
+    #[test]
+    fn write_to_fat32_file() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT32.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        let mut file = fs.get_rw_file(PathBuf::from("/hello.txt")).unwrap();
+        // an arbitrary offset to seek to
+        const START_OFFSET: u64 = 1436;
+        file.seek(SeekFrom::Start(START_OFFSET)).unwrap();
+
+        file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
+
+        // seek back
+        file.seek(SeekFrom::Current(-(BEE_MOVIE_SCRIPT.len() as i64)))
+            .unwrap();
+
+        // read back what we wrote
+        let mut string = String::new();
+        file.read_to_string(&mut string).unwrap();
+        assert_eq!(string, BEE_MOVIE_SCRIPT);
+
+        // let's also read back what was (and hopefully still is)
+        // at the start of the file
+        const EXPECTED_STR: &str = "Hello from a FAT32 filesystem!!!\n";
+        file.rewind().unwrap();
+        let mut buf = [0_u8; EXPECTED_STR.len()];
+        file.read_exact(&mut buf).unwrap();
+
+        let stored_text = str::from_utf8(&buf).unwrap();
+        assert_eq!(stored_text, EXPECTED_STR)
+    }
+
+    #[test]
+    fn truncate_fat32_file() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT32.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        const EXPECTED_STR: &str = "Hello fr";
+
+        let mut file = fs.get_rw_file(PathBuf::from("/hello.txt")).unwrap();
+        file.truncate(EXPECTED_STR.len() as u32).unwrap();
+
+        let mut string = String::new();
+        file.read_to_string(&mut string).unwrap();
+        assert_eq!(string, EXPECTED_STR);
+    }
+
+    #[test]
+    fn remove_fat32_file() {
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(FAT32.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+        let file_path = PathBuf::from("/secret/bee movie script.txt");
+
+        let file = fs.get_rw_file(file_path.clone()).unwrap();
+        file.remove().unwrap();
+
+        // the file should now be gone
+        let file_result = fs.get_ro_file(file_path);
+        match file_result {
+            Err(err) => match err {
+                FSError::NotFound => (),
+                _ => panic!("unexpected IOError: {:?}", err),
+            },
+            _ => panic!("file should have been deleted by now"),
+        }
+    }
+
+    #[test]
     fn assert_img_fat_type() {
         static TEST_CASES: &[(&[u8], FATType)] = &[
             (MINFS, FATType::FAT12),
