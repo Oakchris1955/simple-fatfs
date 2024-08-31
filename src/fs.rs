@@ -868,6 +868,10 @@ where
     pub fn truncate(&mut self, size: u32) -> Result<(), <Self as IOBase>::Error> {
         // looks like the new truncated size would be smaller than the current one, so we just return
         if size.next_multiple_of(self.fs.props.cluster_size as u32) >= self.file_size {
+            if size < self.file_size {
+                self.file_size = size;
+            }
+
             return Ok(());
         }
 
