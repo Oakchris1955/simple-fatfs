@@ -21,7 +21,7 @@ use serde_big_array::BigArray;
 use ::time;
 use time::{Date, PrimitiveDateTime, Time};
 
-use crate::{error::*, io::prelude::*, path::PathBuf};
+use crate::{error::*, io::prelude::*, path::PathBuf, utils};
 
 /// The minimum size (in bytes) a sector is allowed to have
 pub const SECTOR_SIZE_MIN: usize = 512;
@@ -157,7 +157,7 @@ impl BootRecordFAT {
     }
 
     #[inline]
-    /// The first sector of the root directory
+    /// The first sector of the root directory (returns the first data sector on FAT32)
     pub(crate) fn first_root_dir_sector(&self) -> u16 {
         self.first_fat_sector() + self.bpb.table_count as u16 * self.fat_sector_size() as u16
     }
@@ -319,7 +319,8 @@ impl FATType {
         match self {
             FATType::FAT12 => 12,
             FATType::FAT16 => 16,
-            FATType::FAT32 => 28,
+            // the high 4 bits are ignored, but are still part of the entry
+            FATType::FAT32 => 32,
             FATType::ExFAT => 32,
         }
     }
@@ -629,7 +630,7 @@ impl LFNEntry {
 /// or a data region cluster
 #[derive(Debug, Clone)]
 enum EntryLocation {
-    /// Sector offset from the start of the root directory region
+    /// Sector offset from the start of the root directory region (FAT12/16)
     RootDirSector(u16),
     /// Cluster offset from the start of the data region
     DataCluster(u32),
@@ -2070,8 +2071,8 @@ where
             },
             FATType::FAT32 => match value {
                 0x00000000 => FATEntry::Free,
-                0xFFFFFFF7 => FATEntry::Bad,
-                0xFFFFFFF8..=0xFFFFFFFE | 0xFFFFFFFF => FATEntry::EOF,
+                0x0FFFFFF7 => FATEntry::Bad,
+                0x0FFFFFF8..=0xFFFFFFE | 0x0FFFFFFF => FATEntry::EOF,
                 _ => {
                     if (0x00000002..(self.props.total_clusters + 1)).contains(&value.into()) {
                         FATEntry::Allocated(value.into())
@@ -2096,8 +2097,14 @@ where
         let entry_size = self.fat_type.entry_size();
         let entry_props = FATEntryProps::new(n, &self);
 
-        let mask = (1 << self.fat_type.bits_per_entry()) - 1;
+        // the previous solution would overflow, here's a correct implementation
+        let mask = utils::bits::setbits_u32(self.fat_type.bits_per_entry());
         let mut value: u32 = u32::from(entry.clone()) & mask;
+
+        if self.fat_type == FATType::FAT32 {
+            // in FAT32, the high 4 bits are unused
+            value &= 0x0FFFFFFF;
+        }
 
         match self.fat_type {
             FATType::FAT12 => {

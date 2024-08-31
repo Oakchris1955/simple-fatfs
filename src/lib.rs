@@ -99,6 +99,7 @@ mod error;
 mod fs;
 pub mod io;
 mod path;
+mod utils;
 
 pub use error::*;
 pub use fs::*;
