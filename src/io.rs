@@ -12,12 +12,10 @@
 //! - [`Write`] allows for writing bytes to a sink.
 //! - [`Seek`] provides a cursor which can be moved within a stream of bytes
 
-#[cfg(not(feature = "std"))]
-use core::*;
-#[cfg(feature = "std")]
-use std::*;
+use core::str;
 
-use ::alloc::{string::String, vec::Vec};
+#[cfg(not(feature = "std"))]
+use alloc::{string::String, vec::Vec};
 
 use crate::error::{IOError, IOErrorKind};
 

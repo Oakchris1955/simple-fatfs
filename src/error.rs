@@ -1,7 +1,4 @@
-#[cfg(not(feature = "std"))]
-use core::*;
-#[cfg(feature = "std")]
-use std::*;
+use core::fmt;
 
 /// Base error type
 ///

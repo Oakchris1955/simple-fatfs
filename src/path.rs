@@ -5,13 +5,10 @@
 //! return a [`MalformedPath`](crate::error::FSError::MalformedPath) error
 //!
 
-#[cfg(not(feature = "std"))]
-use core::*;
-#[cfg(feature = "std")]
-use std::*;
+use core::{fmt, iter};
 
 #[cfg(not(feature = "std"))]
-use ::alloc::{
+use alloc::{
     borrow::ToOwned,
     collections::vec_deque::VecDeque,
     string::{String, ToString},
@@ -218,7 +215,7 @@ mod tests {
     #[test]
     fn catch_invalid_path() {
         #[cfg(not(feature = "std"))]
-        use ::alloc::format;
+        use alloc::format;
 
         let mut pathbuf = PathBuf::new();
 
@@ -239,7 +236,7 @@ mod tests {
     #[test]
     fn catch_non_control_forbidden_chars() {
         #[cfg(not(feature = "std"))]
-        use ::alloc::format;
+        use alloc::format;
 
         let mut pathbuf = PathBuf::new();
 

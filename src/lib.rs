@@ -87,6 +87,8 @@
 #![deny(missing_debug_implementations)]
 #![deny(missing_docs)]
 #![deny(non_ascii_idents)]
+#![deny(private_bounds)]
+#![deny(private_interfaces)]
 #![deny(trivial_numeric_casts)]
 #![deny(single_use_lifetimes)]
 #![deny(unsafe_op_in_unsafe_fn)]
