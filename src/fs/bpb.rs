@@ -5,26 +5,6 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
-pub(crate) const BPBFAT_SIZE: usize = 36;
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub(crate) struct BPBFAT {
-    pub _jmpboot: [u8; 3],
-    pub _oem_identifier: [u8; 8],
-    pub bytes_per_sector: u16,
-    pub sectors_per_cluster: u8,
-    pub reserved_sector_count: u16,
-    pub table_count: u8,
-    pub root_entry_count: u16,
-    // If this is 0, check `total_sectors_32`
-    pub total_sectors_16: u16,
-    pub _media_type: u8,
-    pub table_size_16: u16,
-    pub _sectors_per_track: u16,
-    pub _head_side_count: u16,
-    pub hidden_sector_count: u32,
-    pub total_sectors_32: u32,
-}
-
 #[derive(Debug)]
 pub(crate) enum BootRecord {
     FAT(BootRecordFAT),
@@ -36,16 +16,7 @@ impl BootRecord {
     /// The FAT type of this file system
     pub(crate) fn fat_type(&self) -> FATType {
         match self {
-            BootRecord::FAT(boot_record_fat) => {
-                let total_clusters = boot_record_fat.total_clusters();
-                if total_clusters < 4085 {
-                    FATType::FAT12
-                } else if total_clusters < 65525 {
-                    FATType::FAT16
-                } else {
-                    FATType::FAT32
-                }
-            }
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.fat_type(),
             BootRecord::ExFAT(_boot_record_exfat) => {
                 todo!("ExFAT not yet implemented");
                 FATType::ExFAT
@@ -197,7 +168,27 @@ pub(crate) struct BootRecordExFAT {
     pub _reserved: [u8; 7],
 }
 
-pub(crate) const EBR_SIZE: usize = 512 - BPBFAT_SIZE;
+pub(crate) const BPBFAT_SIZE: usize = 36;
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub(crate) struct BPBFAT {
+    pub _jmpboot: [u8; 3],
+    pub _oem_identifier: [u8; 8],
+    pub bytes_per_sector: u16,
+    pub sectors_per_cluster: u8,
+    pub reserved_sector_count: u16,
+    pub table_count: u8,
+    pub root_entry_count: u16,
+    // If this is 0, check `total_sectors_32`
+    pub total_sectors_16: u16,
+    pub _media_type: u8,
+    pub table_size_16: u16,
+    pub _sectors_per_track: u16,
+    pub _head_side_count: u16,
+    pub hidden_sector_count: u32,
+    pub total_sectors_32: u32,
+}
+
+pub(crate) const EBR_SIZE: usize = MIN_SECTOR_SIZE - BPBFAT_SIZE;
 #[derive(Clone, Copy)]
 pub(crate) enum EBR {
     FAT12_16(EBRFAT12_16),

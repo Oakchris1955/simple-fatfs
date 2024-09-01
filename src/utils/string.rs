@@ -10,5 +10,5 @@ pub(crate) fn string_from_lfn(utf16_src: &[u16]) -> Result<String, FromUtf16Erro
         .position(|c| *c == 0x0000)
         .unwrap_or(utf16_src.len()); // default to length if no `\0` present
 
-    String::from_utf16(&utf16_src[0..nul_range_end])
+    String::from_utf16(&utf16_src[..nul_range_end])
 }

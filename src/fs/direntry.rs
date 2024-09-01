@@ -2,7 +2,7 @@ use super::*;
 
 use crate::io::prelude::*;
 
-use core::{fmt, mem, num, ops};
+use core::{fmt, mem, num};
 
 #[cfg(not(feature = "std"))]
 use alloc::{borrow::ToOwned, string::String};
@@ -11,52 +11,6 @@ use bitfield_struct::bitfield;
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 use time::{Date, PrimitiveDateTime, Time};
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub(crate) struct SFN {
-    name: [u8; 8],
-    ext: [u8; 3],
-}
-
-impl SFN {
-    fn get_byte_slice(&self) -> [u8; 11] {
-        let mut slice = [0; 11];
-
-        slice[..8].copy_from_slice(&self.name);
-        slice[8..].copy_from_slice(&self.ext);
-
-        slice
-    }
-
-    pub(crate) fn gen_checksum(&self) -> u8 {
-        let mut sum = 0;
-
-        for c in self.get_byte_slice() {
-            sum = (if (sum & 1) != 0 { 0x80_u8 } else { 0_u8 })
-                .wrapping_add(sum >> 1)
-                .wrapping_add(c)
-        }
-
-        log::debug!("SFN checksum: {:X}", sum);
-
-        sum
-    }
-}
-
-impl fmt::Display for SFN {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // we begin by writing the name (even if it is padded with spaces, they will be trimmed, so we don't care)
-        write!(f, "{}", String::from_utf8_lossy(&self.name).trim())?;
-
-        // then, if the extension isn't empty (padded with zeroes), we write it too
-        let ext = String::from_utf8_lossy(&self.ext).trim().to_owned();
-        if !ext.is_empty() {
-            write!(f, ".{}", ext)?;
-        };
-
-        Ok(())
-    }
-}
 
 bitflags! {
     /// A list of the various (raw) attributes specified for a file/directory
@@ -230,6 +184,52 @@ pub(crate) struct FATDirEntry {
     pub(crate) file_size: u32,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub(crate) struct SFN {
+    name: [u8; 8],
+    ext: [u8; 3],
+}
+
+impl SFN {
+    fn get_byte_slice(&self) -> [u8; 11] {
+        let mut slice = [0; 11];
+
+        slice[..8].copy_from_slice(&self.name);
+        slice[8..].copy_from_slice(&self.ext);
+
+        slice
+    }
+
+    pub(crate) fn gen_checksum(&self) -> u8 {
+        let mut sum = 0;
+
+        for c in self.get_byte_slice() {
+            sum = (if (sum & 1) != 0 { 0x80_u8 } else { 0_u8 })
+                .wrapping_add(sum >> 1)
+                .wrapping_add(c)
+        }
+
+        log::debug!("SFN checksum: {:X}", sum);
+
+        sum
+    }
+}
+
+impl fmt::Display for SFN {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // we begin by writing the name (even if it is padded with spaces, they will be trimmed, so we don't care)
+        write!(f, "{}", String::from_utf8_lossy(&self.name).trim())?;
+
+        // then, if the extension isn't empty (padded with zeroes), we write it too
+        let ext = String::from_utf8_lossy(&self.ext).trim().to_owned();
+        if !ext.is_empty() {
+            write!(f, ".{}", ext)?;
+        };
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct LFNEntry {
     /// masked with 0x40 if this is the last entry
@@ -303,34 +303,4 @@ pub(crate) struct DirEntryChain {
     pub(crate) index: u32,
     /// how many (contiguous) entries this entry chain has
     pub(crate) len: u32,
-}
-
-/// A resolved file/directory entry (for internal usage only)
-#[derive(Debug)]
-pub(crate) struct RawProperties {
-    pub(crate) name: String,
-    pub(crate) is_dir: bool,
-    pub(crate) attributes: RawAttributes,
-    pub(crate) created: PrimitiveDateTime,
-    pub(crate) modified: PrimitiveDateTime,
-    pub(crate) accessed: Date,
-    pub(crate) file_size: u32,
-    pub(crate) data_cluster: u32,
-
-    pub(crate) chain_props: DirEntryChain,
-}
-
-/// A thin wrapper for [`Properties`] represing a directory entry
-#[derive(Debug)]
-pub struct DirEntry {
-    pub(crate) entry: Properties,
-}
-
-impl ops::Deref for DirEntry {
-    type Target = Properties;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.entry
-    }
 }

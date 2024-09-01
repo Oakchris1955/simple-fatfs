@@ -83,6 +83,50 @@ impl From<&FATEntry> for u32 {
     }
 }
 
+/// Properties about the position of a [`FATEntry`] inside the FAT region
+struct FATEntryProps {
+    /// Each `n`th element of the vector points at the corrensponding sector at the `n+1`th FAT table
+    fat_sectors: Vec<u32>,
+    sector_offset: usize,
+}
+
+impl FATEntryProps {
+    /// Get the [`FATEntryProps`] of the `n`-th [`FATEntry`] of a [`ROFileSystem`] (`fs`)
+    pub fn new<S>(n: u32, fs: &FileSystem<S>) -> Self
+    where
+        S: Read + Write + Seek,
+    {
+        let fat_byte_offset: u32 = n * fs.fat_type.bits_per_entry() as u32 / 8;
+        let mut fat_sectors = Vec::new();
+        for nth_table in 0..fs.props.fat_table_count {
+            let table_sector_offset = fs.boot_record.nth_FAT_table_sector(nth_table);
+            let fat_sector = table_sector_offset + fat_byte_offset / fs.props.sector_size;
+            fat_sectors.push(fat_sector);
+        }
+        let sector_offset: usize = (fat_byte_offset % fs.props.sector_size) as usize;
+
+        FATEntryProps {
+            fat_sectors,
+            sector_offset,
+        }
+    }
+}
+
+/// A resolved file/directory entry (for internal usage only)
+#[derive(Debug)]
+pub(crate) struct RawProperties {
+    pub(crate) name: String,
+    pub(crate) is_dir: bool,
+    pub(crate) attributes: RawAttributes,
+    pub(crate) created: PrimitiveDateTime,
+    pub(crate) modified: PrimitiveDateTime,
+    pub(crate) accessed: Date,
+    pub(crate) file_size: u32,
+    pub(crate) data_cluster: u32,
+
+    pub(crate) chain_props: DirEntryChain,
+}
+
 /// A container for file/directory properties
 #[derive(Debug)]
 pub struct Properties {
@@ -162,6 +206,173 @@ impl Properties {
     }
 }
 
+/// A thin wrapper for [`Properties`] represing a directory entry
+#[derive(Debug)]
+pub struct DirEntry {
+    pub(crate) entry: Properties,
+}
+
+impl ops::Deref for DirEntry {
+    type Target = Properties;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.entry
+    }
+}
+
+pub(crate) const UNUSED_ENTRY: u8 = 0xE5;
+pub(crate) const LAST_AND_UNUSED_ENTRY: u8 = 0x00;
+
+#[derive(Debug)]
+struct EntryParser {
+    entries: Vec<RawProperties>,
+    lfn_buf: Vec<String>,
+    lfn_checksum: Option<u8>,
+    current_chain: Option<DirEntryChain>,
+}
+
+impl Default for EntryParser {
+    fn default() -> Self {
+        EntryParser {
+            entries: Vec::new(),
+            lfn_buf: Vec::new(),
+            lfn_checksum: None,
+            current_chain: None,
+        }
+    }
+}
+
+impl EntryParser {
+    #[inline]
+    fn _decrement_parsed_entries_counter(&mut self) {
+        if let Some(current_chain) = &mut self.current_chain {
+            current_chain.len -= 1
+        }
+    }
+
+    /// Parses a sector of 8.3 & LFN entries
+    ///
+    /// Returns a [`Result<bool>`] indicating whether or not
+    /// this sector was the last one in the chain containing entries
+    fn parse_sector<S>(
+        &mut self,
+        sector: u32,
+        fs: &mut FileSystem<S>,
+    ) -> Result<bool, <S as IOBase>::Error>
+    where
+        S: Read + Write + Seek,
+    {
+        use utils::bincode::bincode_config;
+
+        let entry_location = EntryLocation::from_partition_sector(sector, fs);
+
+        for (index, chunk) in fs
+            .read_nth_sector(sector.into())?
+            .chunks(DIRENTRY_SIZE)
+            .enumerate()
+        {
+            match chunk[0] {
+                LAST_AND_UNUSED_ENTRY => return Ok(true),
+                UNUSED_ENTRY => continue,
+                _ => (),
+            };
+
+            let Ok(entry) = bincode_config().deserialize::<FATDirEntry>(&chunk) else {
+                continue;
+            };
+
+            // update current entry chain data
+            match &mut self.current_chain {
+                Some(current_chain) => current_chain.len += 1,
+                None => {
+                    self.current_chain = Some(DirEntryChain {
+                        location: entry_location.clone(),
+                        index: index as u32,
+                        len: 1,
+                    })
+                }
+            }
+
+            if entry.attributes.contains(RawAttributes::LFN) {
+                // TODO: perhaps there is a way to utilize the `order` field?
+                let Ok(lfn_entry) = bincode_config().deserialize::<LFNEntry>(&chunk) else {
+                    self._decrement_parsed_entries_counter();
+                    continue;
+                };
+
+                // If the signature verification fails, consider this entry corrupted
+                if !lfn_entry.verify_signature() {
+                    self._decrement_parsed_entries_counter();
+                    continue;
+                }
+
+                match self.lfn_checksum {
+                    Some(checksum) => {
+                        if checksum != lfn_entry.checksum {
+                            self.lfn_checksum = None;
+                            self.lfn_buf.clear();
+                            self.current_chain = None;
+                            continue;
+                        }
+                    }
+                    None => self.lfn_checksum = Some(lfn_entry.checksum),
+                }
+
+                let char_arr = lfn_entry.get_byte_slice();
+                if let Ok(temp_str) = utils::string::string_from_lfn(&char_arr) {
+                    self.lfn_buf.push(temp_str);
+                }
+
+                continue;
+            }
+
+            let filename = if !self.lfn_buf.is_empty()
+                && self
+                    .lfn_checksum
+                    .is_some_and(|checksum| checksum == entry.sfn.gen_checksum())
+            {
+                // for efficiency reasons, we store the LFN string sequences as we read them
+                let parsed_str: String = self.lfn_buf.iter().cloned().rev().collect();
+                self.lfn_buf.clear();
+                self.lfn_checksum = None;
+                parsed_str
+            } else {
+                entry.sfn.to_string()
+            };
+
+            if let (Ok(created), Ok(modified), Ok(accessed)) = (
+                entry.created.try_into(),
+                entry.modified.try_into(),
+                entry.accessed.try_into(),
+            ) {
+                self.entries.push(RawProperties {
+                    name: filename,
+                    is_dir: entry.attributes.contains(RawAttributes::DIRECTORY),
+                    attributes: entry.attributes,
+                    created,
+                    modified,
+                    accessed,
+                    file_size: entry.file_size,
+                    data_cluster: ((entry.cluster_high as u32) << 16) + entry.cluster_low as u32,
+                    chain_props: self
+                        .current_chain
+                        .take()
+                        .expect("at this point, this shouldn't be None"),
+                })
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Consumes [`Self`](EntryParser) & returns a `Vec` of [`RawProperties`]
+    /// of the parsed entries
+    fn finish(self) -> Vec<RawProperties> {
+        self.entries
+    }
+}
+
 pub(crate) trait OffsetConversions {
     fn sector_size(&self) -> u32;
     fn cluster_size(&self) -> u64;
@@ -193,6 +404,26 @@ pub(crate) trait OffsetConversions {
     fn partition_sector_to_data_cluster(&self, sector: u32) -> u32 {
         (sector - self.first_data_sector()) / self.sectors_per_cluster() as u32
             + RESERVED_FAT_ENTRIES
+    }
+}
+
+impl<S> OffsetConversions for FileSystem<S>
+where
+    S: Read + Write + Seek,
+{
+    #[inline]
+    fn sector_size(&self) -> u32 {
+        self.props.sector_size
+    }
+
+    #[inline]
+    fn cluster_size(&self) -> u64 {
+        self.props.cluster_size
+    }
+
+    #[inline]
+    fn first_data_sector(&self) -> u32 {
+        self.props.first_data_sector
     }
 }
 
@@ -260,26 +491,6 @@ where
     filter: FileFilter,
 }
 
-impl<S> OffsetConversions for FileSystem<S>
-where
-    S: Read + Write + Seek,
-{
-    #[inline]
-    fn sector_size(&self) -> u32 {
-        self.props.sector_size
-    }
-
-    #[inline]
-    fn cluster_size(&self) -> u64 {
-        self.props.cluster_size
-    }
-
-    #[inline]
-    fn first_data_sector(&self) -> u32 {
-        self.props.first_data_sector
-    }
-}
-
 /// Getter functions
 impl<S> FileSystem<S>
 where
@@ -327,12 +538,12 @@ where
 
         // Begin by reading the boot record
         // We don't know the sector size yet, so we just go with the biggest possible one for now
-        let mut buffer = [0u8; SECTOR_SIZE_MAX];
+        let mut buffer = [0u8; MAX_SECTOR_SIZE];
 
         let bytes_read = storage.read(&mut buffer)?;
         let mut stored_sector = 0;
 
-        if bytes_read < 512 {
+        if bytes_read < MIN_SECTOR_SIZE {
             return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));
         }
 
@@ -446,158 +657,6 @@ where
         }
 
         Ok(fs)
-    }
-}
-
-#[derive(Debug)]
-struct EntryParser {
-    entries: Vec<RawProperties>,
-    lfn_buf: Vec<String>,
-    lfn_checksum: Option<u8>,
-    current_chain: Option<DirEntryChain>,
-}
-
-impl Default for EntryParser {
-    fn default() -> Self {
-        EntryParser {
-            entries: Vec::new(),
-            lfn_buf: Vec::new(),
-            lfn_checksum: None,
-            current_chain: None,
-        }
-    }
-}
-
-pub(crate) const UNUSED_ENTRY: u8 = 0xE5;
-pub(crate) const LAST_AND_UNUSED_ENTRY: u8 = 0x00;
-
-impl EntryParser {
-    #[inline]
-    fn _decrement_parsed_entries_counter(&mut self) {
-        if let Some(current_chain) = &mut self.current_chain {
-            current_chain.len -= 1
-        }
-    }
-
-    /// Parses a sector of 8.3 & LFN entries
-    ///
-    /// Returns a [`Result<bool>`] indicating whether or not
-    /// this sector was the last one in the chain containing entries
-    fn parse_sector<S>(
-        &mut self,
-        sector: u32,
-        fs: &mut FileSystem<S>,
-    ) -> Result<bool, <S as IOBase>::Error>
-    where
-        S: Read + Write + Seek,
-    {
-        use utils::bincode::bincode_config;
-
-        let entry_location = EntryLocation::from_partition_sector(sector, fs);
-
-        for (index, chunk) in fs
-            .read_nth_sector(sector.into())?
-            .chunks(DIRENTRY_SIZE)
-            .enumerate()
-        {
-            match chunk[0] {
-                LAST_AND_UNUSED_ENTRY => return Ok(true),
-                UNUSED_ENTRY => continue,
-                _ => (),
-            };
-
-            let Ok(entry) = bincode_config().deserialize::<FATDirEntry>(&chunk) else {
-                continue;
-            };
-
-            // update current entry chain data
-            match &mut self.current_chain {
-                Some(current_chain) => current_chain.len += 1,
-                None => {
-                    self.current_chain = Some(DirEntryChain {
-                        location: entry_location.clone(),
-                        index: index as u32,
-                        len: 1,
-                    })
-                }
-            }
-
-            if entry.attributes.contains(RawAttributes::LFN) {
-                // TODO: perhaps there is a way to utilize the `order` field?
-                let Ok(lfn_entry) = bincode_config().deserialize::<LFNEntry>(&chunk) else {
-                    self._decrement_parsed_entries_counter();
-                    continue;
-                };
-
-                // If the signature verification fails, consider this entry corrupted
-                if !lfn_entry.verify_signature() {
-                    self._decrement_parsed_entries_counter();
-                    continue;
-                }
-
-                match self.lfn_checksum {
-                    Some(checksum) => {
-                        if checksum != lfn_entry.checksum {
-                            self.lfn_checksum = None;
-                            self.lfn_buf.clear();
-                            self.current_chain = None;
-                            continue;
-                        }
-                    }
-                    None => self.lfn_checksum = Some(lfn_entry.checksum),
-                }
-
-                let char_arr = lfn_entry.get_byte_slice().to_vec();
-                if let Ok(temp_str) = utils::string::string_from_lfn(&char_arr) {
-                    self.lfn_buf.push(temp_str);
-                }
-
-                continue;
-            }
-
-            let filename = if !self.lfn_buf.is_empty()
-                && self
-                    .lfn_checksum
-                    .is_some_and(|checksum| checksum == entry.sfn.gen_checksum())
-            {
-                // for efficiency reasons, we store the LFN string sequences as we read them
-                let parsed_str: String = self.lfn_buf.iter().cloned().rev().collect();
-                self.lfn_buf.clear();
-                self.lfn_checksum = None;
-                parsed_str
-            } else {
-                entry.sfn.to_string()
-            };
-
-            if let (Ok(created), Ok(modified), Ok(accessed)) = (
-                entry.created.try_into(),
-                entry.modified.try_into(),
-                entry.accessed.try_into(),
-            ) {
-                self.entries.push(RawProperties {
-                    name: filename,
-                    is_dir: entry.attributes.contains(RawAttributes::DIRECTORY),
-                    attributes: entry.attributes,
-                    created,
-                    modified,
-                    accessed,
-                    file_size: entry.file_size,
-                    data_cluster: ((entry.cluster_high as u32) << 16) + entry.cluster_low as u32,
-                    chain_props: self
-                        .current_chain
-                        .take()
-                        .expect("at this point, this shouldn't be None"),
-                })
-            }
-        }
-
-        Ok(false)
-    }
-
-    /// Consumes [`Self`](EntryParser) & returns a `Vec` of [`RawProperties`]
-    /// of the parsed entries
-    fn finish(self) -> Vec<RawProperties> {
-        self.entries
     }
 }
 
@@ -725,7 +784,7 @@ where
             "this function doesn't work with ExFAT"
         );
 
-        /// How many bytes to probe at max for each FAT per iteration (must be a multiple of [`SECTOR_SIZE_MAX`])
+        /// How many bytes to probe at max for each FAT per iteration (must be a multiple of [`MAX_SECTOR_SIZE`])
         const MAX_PROBE_SIZE: u32 = 1 << 20;
 
         let fat_byte_size = match self.boot_record {
@@ -1096,35 +1155,6 @@ where
         };
 
         Ok(RWFile { ro_file })
-    }
-}
-
-/// Properties about the position of a [`FATEntry`] inside the FAT region
-struct FATEntryProps {
-    /// Each `n`th element of the vector points at the corrensponding sector at the `n+1`th FAT table
-    fat_sectors: Vec<u32>,
-    sector_offset: usize,
-}
-
-impl FATEntryProps {
-    /// Get the [`FATEntryProps`] of the `n`-th [`FATEntry`] of a [`ROFileSystem`] (`fs`)
-    pub fn new<S>(n: u32, fs: &FileSystem<S>) -> Self
-    where
-        S: Read + Write + Seek,
-    {
-        let fat_byte_offset: u32 = n * fs.fat_type.bits_per_entry() as u32 / 8;
-        let mut fat_sectors = Vec::new();
-        for nth_table in 0..fs.props.fat_table_count {
-            let table_sector_offset = fs.boot_record.nth_FAT_table_sector(nth_table);
-            let fat_sector = table_sector_offset + fat_byte_offset / fs.props.sector_size;
-            fat_sectors.push(fat_sector);
-        }
-        let sector_offset: usize = (fat_byte_offset % fs.props.sector_size) as usize;
-
-        FATEntryProps {
-            fat_sectors,
-            sector_offset,
-        }
     }
 }
 
