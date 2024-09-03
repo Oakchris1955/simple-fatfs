@@ -560,6 +560,11 @@ where
             for clusters_allocated in 0..clusters_to_allocate {
                 match self.fs.next_free_cluster()? {
                     Some(next_free_cluster) => {
+                        // FIXME: in FAT12 filesystems, this can cause a sector
+                        // to be updated up to 4 times for seeminly no reason
+                        // Similar behavour is observed in FAT16/32, with 2 sync operations
+                        // THis number should be halved for both cases
+
                         // we set the last allocated cluster to point to the next free one
                         self.fs.write_nth_FAT_entry(
                             last_cluster_in_chain,

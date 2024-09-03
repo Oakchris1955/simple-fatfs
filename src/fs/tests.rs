@@ -467,6 +467,46 @@ fn remove_fat32_file() {
 }
 
 #[test]
+#[allow(non_snake_case)]
+fn FAT_tables_after_fat32_write_are_identical() {
+    use crate::fs::{BootRecord, EBR};
+
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT32.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    match fs.boot_record {
+        BootRecord::FAT(boot_record_fat) => match boot_record_fat.ebr {
+            EBR::FAT32(ebr_fat32, _) => assert!(
+                !ebr_fat32.extended_flags.mirroring_disabled(),
+                "mirroring should be enabled for this .img file"
+            ),
+            _ => unreachable!(),
+        },
+        _ => unreachable!(),
+    }
+
+    assert!(
+        fs.FAT_tables_are_identical().unwrap(),
+        concat!(
+            "this should pass. ",
+            "if it doesn't, either the corresponding .img file's FAT tables aren't identical",
+            "or the tables_are_identical function doesn't work correctly"
+        )
+    );
+
+    // let's write the bee movie script to root.txt (why not), check, truncate the file, then check again
+    let mut file = fs.get_rw_file(PathBuf::from("hello.txt")).unwrap();
+
+    file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
+    assert!(file.fs.FAT_tables_are_identical().unwrap());
+
+    file.truncate(10_000).unwrap();
+    assert!(file.fs.FAT_tables_are_identical().unwrap());
+}
+
+#[test]
 fn assert_img_fat_type() {
     static TEST_CASES: &[(&[u8], FATType)] = &[
         (MINFS, FATType::FAT12),

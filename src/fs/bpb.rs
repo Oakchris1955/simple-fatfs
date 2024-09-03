@@ -2,6 +2,7 @@ use super::*;
 
 use core::fmt;
 
+use bitfield_struct::bitfield;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
@@ -215,6 +216,20 @@ pub(crate) struct EBRFAT12_16 {
     pub signature: u16,
 }
 
+#[bitfield(u16, order = Lsb)]
+#[derive(Deserialize, Serialize)]
+pub(crate) struct FAT32ExtendedFlags {
+    #[bits(4)]
+    #[allow(non_snake_case)]
+    pub(crate) active_FAT: u8,
+    #[bits(3)]
+    _reserved: _,
+    #[bits(1)]
+    pub(crate) mirroring_disabled: bool,
+    #[bits(8)]
+    _reserved: _,
+}
+
 // FIXME: these might be the other way around
 #[derive(Deserialize, Serialize, Debug, Clone, Copy)]
 pub(crate) struct FATVersion {
@@ -225,7 +240,7 @@ pub(crate) struct FATVersion {
 #[derive(Deserialize, Serialize, Clone, Copy)]
 pub(crate) struct EBRFAT32 {
     pub table_size_32: u32,
-    pub _extended_flags: u16,
+    pub extended_flags: FAT32ExtendedFlags,
     pub fat_version: FATVersion,
     pub root_cluster: u32,
     pub fat_info: u16,

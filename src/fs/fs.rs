@@ -85,8 +85,8 @@ impl From<&FATEntry> for u32 {
 
 /// Properties about the position of a [`FATEntry`] inside the FAT region
 struct FATEntryProps {
-    /// Each `n`th element of the vector points at the corrensponding sector at the `n+1`th FAT table
-    fat_sectors: Vec<u32>,
+    /// Each `n`th element of the vector points at the corrensponding sector at the (first) active FAT table
+    fat_sector: u32,
     sector_offset: usize,
 }
 
@@ -97,18 +97,64 @@ impl FATEntryProps {
         S: Read + Write + Seek,
     {
         let fat_byte_offset: u32 = n * fs.fat_type.bits_per_entry() as u32 / 8;
-        let mut fat_sectors = Vec::new();
-        for nth_table in 0..fs.props.fat_table_count {
-            let table_sector_offset = fs.boot_record.nth_FAT_table_sector(nth_table);
-            let fat_sector = table_sector_offset + fat_byte_offset / fs.props.sector_size;
-            fat_sectors.push(fat_sector);
-        }
+        let fat_sector =
+            u32::from(fs.props.first_fat_sector) + fat_byte_offset / fs.props.sector_size;
         let sector_offset: usize = (fat_byte_offset % fs.props.sector_size) as usize;
 
         FATEntryProps {
-            fat_sectors,
+            fat_sector,
             sector_offset,
         }
+    }
+}
+
+/// Properties about the position of a sector within the FAT
+struct FATSectorProps {
+    /// the sector belongs to this FAT copy
+    #[allow(unused)]
+    fat_offset: u8,
+    /// the sector is that many away from the start of the FAT copy
+    sector_offset: u32,
+}
+
+impl FATSectorProps {
+    /// Returns [`None`] if this sector doesn't belong to a FAT table
+    pub fn new<S>(sector: u64, fs: &FileSystem<S>) -> Option<Self>
+    where
+        S: Read + Write + Seek,
+    {
+        if !fs.sector_belongs_to_FAT(sector) {
+            return None;
+        }
+
+        let sector_offset_from_first_fat: u64 = sector - u64::from(fs.props.first_fat_sector);
+        let fat_offset = (sector_offset_from_first_fat / u64::from(fs.props.fat_sector_size)) as u8;
+        let sector_offset =
+            (sector_offset_from_first_fat % u64::from(fs.props.fat_sector_size)) as u32;
+
+        Some(FATSectorProps {
+            fat_offset,
+            sector_offset,
+        })
+    }
+
+    #[allow(non_snake_case)]
+    pub fn get_corresponding_FAT_sectors<S>(&self, fs: &FileSystem<S>) -> Vec<u64>
+    where
+        S: Read + Write + Seek,
+    {
+        let mut vec = Vec::new();
+
+        for i in 0..fs.props.fat_table_count {
+            vec.push(
+                (u32::from(fs.props.first_fat_sector)
+                    + u32::from(i) * fs.props.fat_sector_size
+                    + self.sector_offset)
+                    .into(),
+            )
+        }
+
+        vec
     }
 }
 
@@ -436,6 +482,8 @@ pub(crate) struct FSProperties {
     pub(crate) total_clusters: u32,
     /// sector offset of the FAT
     pub(crate) fat_table_count: u8,
+    pub(crate) fat_sector_size: u32,
+    pub(crate) first_fat_sector: u16,
     pub(crate) first_root_dir_sector: u16,
     pub(crate) first_data_sector: u32,
 }
@@ -487,6 +535,9 @@ where
     // since `self.boot_record.fat_type()` calls like 5 nested functions, we keep this cached and expose it with a public getter function
     fat_type: FATType,
     pub(crate) props: FSProperties,
+    // this doesn't mean that this is the first free cluster, it just means
+    // that if we want to figure that out, we should start from this cluster
+    first_free_cluster: u32,
 
     filter: FileFilter,
 }
@@ -604,6 +655,16 @@ where
             }
         };
 
+        let first_fat_sector = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_fat_sector().into(),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
+        };
+
+        let fat_sector_size = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.fat_sector_size().into(),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
+        };
+
         let first_root_dir_sector = match boot_record {
             BootRecord::FAT(boot_record_fat) => boot_record_fat.first_root_dir_sector().into(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
@@ -633,6 +694,8 @@ where
             sector_size,
             cluster_size,
             fat_table_count,
+            fat_sector_size,
+            first_fat_sector,
             total_sectors,
             total_clusters,
             first_root_dir_sector,
@@ -647,6 +710,7 @@ where
             boot_record,
             fat_type,
             props,
+            first_free_cluster: RESERVED_FAT_ENTRIES,
             filter: FileFilter::default(),
         };
 
@@ -734,7 +798,7 @@ where
     pub(crate) fn next_free_cluster(&mut self) -> Result<Option<u32>, S::Error> {
         let start_cluster = match self.boot_record {
             BootRecord::FAT(boot_record_fat) => {
-                let mut first_free_cluster = RESERVED_FAT_ENTRIES;
+                let mut first_free_cluster = self.first_free_cluster;
 
                 if let EBR::FAT32(_, fsinfo) = boot_record_fat.ebr {
                     // a value of u32::MAX denotes unawareness of the first free cluster
@@ -743,7 +807,8 @@ where
                     if fsinfo.first_free_cluster != u32::MAX
                         && fsinfo.first_free_cluster <= self.props.total_sectors
                     {
-                        first_free_cluster = fsinfo.first_free_cluster
+                        first_free_cluster =
+                            cmp::min(self.first_free_cluster, fsinfo.first_free_cluster);
                     }
                 }
 
@@ -756,12 +821,26 @@ where
 
         while current_cluster < self.props.total_clusters {
             match self.read_nth_FAT_entry(current_cluster)? {
-                FATEntry::Free => return Ok(Some(current_cluster)),
+                FATEntry::Free => {
+                    self.first_free_cluster = current_cluster;
+
+                    match &mut self.boot_record {
+                        BootRecord::FAT(boot_record_fat) => {
+                            if let EBR::FAT32(_, fsinfo) = &mut boot_record_fat.ebr {
+                                fsinfo.first_free_cluster = current_cluster;
+                            }
+                        }
+                        BootRecord::ExFAT(_) => todo!("ExFAT not yet implemented"),
+                    }
+
+                    return Ok(Some(current_cluster));
+                }
                 _ => (),
             }
             current_cluster += 1;
         }
 
+        self.first_free_cluster = self.props.total_clusters - 1;
         Ok(None)
     }
 
@@ -816,6 +895,16 @@ where
         Ok(true)
     }
 
+    #[allow(non_snake_case)]
+    pub(crate) fn sector_belongs_to_FAT(&self, sector: u64) -> bool {
+        match self.boot_record {
+            BootRecord::FAT(boot_record_fat) => (boot_record_fat.first_fat_sector().into()
+                ..boot_record_fat.first_root_dir_sector().into())
+                .contains(&sector),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
+        }
+    }
+
     /// Read the nth sector from the partition's beginning and store it in [`self.sector_buffer`](Self::sector_buffer)
     ///
     /// This function also returns an immutable reference to [`self.sector_buffer`](Self::sector_buffer)
@@ -843,7 +932,7 @@ where
         let entry_size = self.fat_type.entry_size();
         let entry_props = FATEntryProps::new(n, &self);
 
-        self.read_nth_sector(entry_props.fat_sectors[0].into())?;
+        self.read_nth_sector(entry_props.fat_sector.into())?;
 
         let mut value_bytes = [0_u8; 4];
         let bytes_to_read: usize = cmp::min(
@@ -857,7 +946,7 @@ where
 
         // in FAT12, FAT entries may be split between two different sectors
         if self.fat_type == FATType::FAT12 && (bytes_to_read as u32) < entry_size {
-            self.read_nth_sector((entry_props.fat_sectors[0] + 1).into())?;
+            self.read_nth_sector((entry_props.fat_sector + 1).into())?;
 
             value_bytes[bytes_to_read..entry_size as usize]
                 .copy_from_slice(&self.sector_buffer[..(entry_size as usize - bytes_to_read)]);
@@ -955,75 +1044,134 @@ where
                     value <<= 4;
                 }
 
-                // we update all the FAT copies
-                for fat_sector in entry_props.fat_sectors {
-                    self.read_nth_sector(fat_sector.into())?;
+                self.read_nth_sector(entry_props.fat_sector.into())?;
 
-                    let value_bytes = value.to_le_bytes();
+                let value_bytes = value.to_le_bytes();
 
-                    let mut first_byte = value_bytes[0];
+                let mut first_byte = value_bytes[0];
 
-                    if should_shift {
-                        let mut old_byte = self.sector_buffer[entry_props.sector_offset];
-                        // ignore the high 4 bytes of the old entry
-                        old_byte &= 0x0F;
-                        // OR it with the new value
-                        first_byte |= old_byte;
-                    }
-
-                    self.sector_buffer[entry_props.sector_offset] = first_byte; // this shouldn't panic
-                    self.buffer_modified = true;
-
-                    let bytes_left_on_sector: usize = cmp::min(
-                        entry_size as usize,
-                        self.sector_size() as usize - entry_props.sector_offset,
-                    );
-
-                    if bytes_left_on_sector < entry_size as usize {
-                        // looks like this FAT12 entry spans multiple sectors, we must also update the other one
-                        self.read_nth_sector((fat_sector + 1).into())?;
-                    }
-
-                    let mut second_byte = value_bytes[1];
-                    let second_byte_index =
-                        (entry_props.sector_offset + 1) % self.sector_size() as usize;
-                    if !should_shift {
-                        let mut old_byte = self.sector_buffer[second_byte_index];
-                        // ignore the low 4 bytes of the old entry
-                        old_byte &= 0xF0;
-                        // OR it with the new value
-                        second_byte |= old_byte;
-                    }
-
-                    self.sector_buffer[second_byte_index] = second_byte; // this shouldn't panic
-                    self.buffer_modified = true;
+                if should_shift {
+                    let mut old_byte = self.sector_buffer[entry_props.sector_offset];
+                    // ignore the high 4 bytes of the old entry
+                    old_byte &= 0x0F;
+                    // OR it with the new value
+                    first_byte |= old_byte;
                 }
+
+                self.sector_buffer[entry_props.sector_offset] = first_byte; // this shouldn't panic
+                self.buffer_modified = true;
+
+                let bytes_left_on_sector: usize = cmp::min(
+                    entry_size as usize,
+                    self.sector_size() as usize - entry_props.sector_offset,
+                );
+
+                if bytes_left_on_sector < entry_size as usize {
+                    // looks like this FAT12 entry spans multiple sectors, we must also update the other one
+                    self.read_nth_sector((entry_props.fat_sector + 1).into())?;
+                }
+
+                let mut second_byte = value_bytes[1];
+                let second_byte_index =
+                    (entry_props.sector_offset + 1) % self.sector_size() as usize;
+                if !should_shift {
+                    let mut old_byte = self.sector_buffer[second_byte_index];
+                    // ignore the low 4 bytes of the old entry
+                    old_byte &= 0xF0;
+                    // OR it with the new value
+                    second_byte |= old_byte;
+                }
+
+                self.sector_buffer[second_byte_index] = second_byte; // this shouldn't panic
+                self.buffer_modified = true;
             }
             FATType::FAT16 | FATType::FAT32 => {
-                // we update all the FAT copies
-                for fat_sector in entry_props.fat_sectors {
-                    self.read_nth_sector(fat_sector.into())?;
+                self.read_nth_sector(entry_props.fat_sector.into())?;
 
-                    let value_bytes = value.to_le_bytes();
+                let value_bytes = value.to_le_bytes();
 
-                    self.sector_buffer[entry_props.sector_offset
-                        ..entry_props.sector_offset + entry_size as usize]
-                        .copy_from_slice(&value_bytes[..entry_size as usize]); // this shouldn't panic
-                    self.buffer_modified = true;
-                }
+                self.sector_buffer
+                    [entry_props.sector_offset..entry_props.sector_offset + entry_size as usize]
+                    .copy_from_slice(&value_bytes[..entry_size as usize]); // this shouldn't panic
+                self.buffer_modified = true;
             }
             FATType::ExFAT => todo!("ExFAT not yet implemented"),
         };
+
+        if entry == FATEntry::Free && n < self.first_free_cluster {
+            self.first_free_cluster = n;
+        }
+
+        // lastly, update the FSInfoFAT32 structure is it is available
+        match &mut self.boot_record {
+            BootRecord::FAT(boot_record_fat) => match &mut boot_record_fat.ebr {
+                EBR::FAT32(_, fsinfo) => {
+                    match entry {
+                        FATEntry::Free => {
+                            fsinfo.free_cluster_count += 1;
+                            if n < fsinfo.first_free_cluster {
+                                fsinfo.first_free_cluster = n;
+                            }
+                        }
+                        _ => fsinfo.free_cluster_count -= 1,
+                    };
+                }
+                _ => (),
+            },
+            _ => (),
+        }
+
+        Ok(())
+    }
+
+    /// Syncs `self.sector_buffer` back to the storage
+    fn _sync_current_sector(&mut self) -> Result<(), S::Error> {
+        self.storage.write_all(&self.sector_buffer)?;
+        self.storage
+            .seek(SeekFrom::Current(-i64::from(self.props.sector_size)))?;
+
+        Ok(())
+    }
+
+    /// Syncs a FAT sector to ALL OTHER FAT COPIES on the device medium
+    #[allow(non_snake_case)]
+    fn _sync_FAT_sector(&mut self, fat_sector_props: &FATSectorProps) -> Result<(), S::Error> {
+        let current_offset = self.storage.stream_position()?;
+
+        for sector in fat_sector_props.get_corresponding_FAT_sectors(self) {
+            self.storage
+                .seek(SeekFrom::Start(sector * u64::from(self.props.sector_size)))?;
+            self.storage.write_all(&self.sector_buffer)?;
+        }
+
+        self.storage.seek(SeekFrom::Start(current_offset))?;
 
         Ok(())
     }
 
     pub(crate) fn sync_sector_buffer(&mut self) -> Result<(), S::Error> {
         if self.buffer_modified {
-            log::trace!("syncing sector {:?}", self.stored_sector);
-            self.storage.write_all(&self.sector_buffer)?;
-            self.storage
-                .seek(SeekFrom::Current(-i64::from(self.props.sector_size)))?;
+            if let Some(fat_sector_props) = FATSectorProps::new(self.stored_sector, self) {
+                log::trace!("syncing FAT sector {}", fat_sector_props.sector_offset,);
+                match self.boot_record {
+                    BootRecord::FAT(boot_record_fat) => match boot_record_fat.ebr {
+                        EBR::FAT12_16(_) => {
+                            self._sync_FAT_sector(&fat_sector_props)?;
+                        }
+                        EBR::FAT32(ebr_fat32, _) => {
+                            if ebr_fat32.extended_flags.mirroring_disabled() {
+                                self._sync_current_sector()?;
+                            } else {
+                                self._sync_FAT_sector(&fat_sector_props)?;
+                            }
+                        }
+                    },
+                    BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
+                }
+            } else {
+                log::trace!("syncing sector {}", self.stored_sector);
+                self._sync_current_sector()?;
+            }
         }
         self.buffer_modified = false;
 
