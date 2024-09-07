@@ -488,6 +488,63 @@ pub(crate) struct FSProperties {
     pub(crate) first_data_sector: u32,
 }
 
+impl FSProperties {
+    fn from_boot_record(boot_record: &BootRecord) -> Self {
+        let sector_size = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.bpb.bytes_per_sector.into(),
+            BootRecord::ExFAT(boot_record_exfat) => 1 << boot_record_exfat.sector_shift,
+        };
+        let cluster_size = match boot_record {
+            BootRecord::FAT(boot_record_fat) => {
+                (boot_record_fat.bpb.sectors_per_cluster as u32 * sector_size).into()
+            }
+            BootRecord::ExFAT(boot_record_exfat) => {
+                1 << (boot_record_exfat.sector_shift + boot_record_exfat.cluster_shift)
+            }
+        };
+        let total_sectors = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.total_sectors(),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
+        };
+        let total_clusters = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.total_clusters(),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
+        };
+        let fat_table_count = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.bpb.table_count,
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
+        };
+        let fat_sector_size = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.fat_sector_size().into(),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
+        };
+        let first_fat_sector = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_fat_sector().into(),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
+        };
+        let first_root_dir_sector = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_root_dir_sector().into(),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
+        };
+        let first_data_sector = match boot_record {
+            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_data_sector().into(),
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
+        };
+
+        FSProperties {
+            sector_size,
+            cluster_size,
+            fat_table_count,
+            fat_sector_size,
+            first_fat_sector,
+            total_sectors,
+            total_clusters,
+            first_root_dir_sector,
+            first_data_sector,
+        }
+    }
+}
+
 /// Filter (or not) things like hidden files/directories
 /// for FileSystem operations
 #[derive(Debug)]
@@ -642,69 +699,11 @@ where
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
         };
 
-        let sector_size: u32 = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.bpb.bytes_per_sector.into(),
-            BootRecord::ExFAT(boot_record_exfat) => 1 << boot_record_exfat.sector_shift,
-        };
-        let cluster_size: u64 = match boot_record {
-            BootRecord::FAT(boot_record_fat) => {
-                (boot_record_fat.bpb.sectors_per_cluster as u32 * sector_size).into()
-            }
-            BootRecord::ExFAT(boot_record_exfat) => {
-                1 << (boot_record_exfat.sector_shift + boot_record_exfat.cluster_shift)
-            }
-        };
-
-        let first_fat_sector = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_fat_sector().into(),
-            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
-        };
-
-        let fat_sector_size = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.fat_sector_size().into(),
-            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
-        };
-
-        let first_root_dir_sector = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_root_dir_sector().into(),
-            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
-        };
-
-        let first_data_sector = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_data_sector().into(),
-            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
-        };
-
-        let fat_table_count = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.bpb.table_count,
-            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
-        };
-
-        let total_sectors = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.total_sectors(),
-            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
-        };
-
-        let total_clusters = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.total_clusters(),
-            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
-        };
-
-        let props = FSProperties {
-            sector_size,
-            cluster_size,
-            fat_table_count,
-            fat_sector_size,
-            first_fat_sector,
-            total_sectors,
-            total_clusters,
-            first_root_dir_sector,
-            first_data_sector,
-        };
+        let props = FSProperties::from_boot_record(&boot_record);
 
         let mut fs = Self {
             storage,
-            sector_buffer: buffer[..sector_size as usize].to_vec(),
+            sector_buffer: buffer[..props.sector_size as usize].to_vec(),
             buffer_modified: false,
             stored_sector,
             boot_record,
