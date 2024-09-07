@@ -98,11 +98,11 @@
 extern crate alloc;
 
 mod error;
-mod fs;
+mod fat;
 pub mod io;
 mod path;
 mod utils;
 
 pub use error::*;
-pub use fs::*;
+pub use fat::*;
 pub use path::*;

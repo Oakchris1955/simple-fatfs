@@ -11,7 +11,7 @@ static FAT32: &[u8] = include_bytes!("../../imgs/fat32.img");
 #[test]
 #[allow(non_snake_case)]
 fn check_FAT_offset() {
-    use crate::fs::BootRecord;
+    use crate::fat::BootRecord;
 
     use std::io::Cursor;
 
@@ -469,7 +469,7 @@ fn remove_fat32_file() {
 #[test]
 #[allow(non_snake_case)]
 fn FAT_tables_after_fat32_write_are_identical() {
-    use crate::fs::{BootRecord, EBR};
+    use crate::fat::{BootRecord, EBR};
 
     use std::io::Cursor;
 
