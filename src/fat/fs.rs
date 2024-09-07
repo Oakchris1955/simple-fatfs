@@ -1150,6 +1150,8 @@ where
     }
 
     pub(crate) fn sync_sector_buffer(&mut self) -> Result<(), S::Error> {
+        self._raise_io_rw_result()?;
+
         if self.buffer_modified {
             if let Some(fat_sector_props) = FATSectorProps::new(self.stored_sector, self) {
                 log::trace!("syncing FAT sector {}", fat_sector_props.sector_offset,);
@@ -1174,6 +1176,19 @@ where
             }
         }
         self.buffer_modified = false;
+
+        Ok(())
+    }
+
+    /// Returns an `Err` of `Unexpected [`IOErrorKind`]
+    /// if the device medium is read-only
+    fn _raise_io_rw_result(&mut self) -> Result<(), S::Error> {
+        if !utils::io::storage_medium_is_rw(&mut self.storage)? {
+            return Err(S::Error::new(
+                <S::Error as IOError>::Kind::new_unsupported(),
+                "the storage medium is read-only",
+            ));
+        }
 
         Ok(())
     }
@@ -1292,10 +1307,7 @@ where
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
     pub fn get_rw_file(&mut self, path: PathBuf) -> FSResult<RWFile<'_, S>, S::Error> {
-        // we first write an empty array to the storage medium
-        // if the storage has Write functionality, this shouldn't error,
-        // otherwise it should return an error.
-        self.storage.write_all(&[])?;
+        self._raise_io_rw_result()?;
 
         let ro_file = self.get_ro_file(path)?;
         if ro_file.attributes.read_only {

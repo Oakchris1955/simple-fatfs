@@ -141,7 +141,7 @@ pub trait Read: IOBase {
 /// A simplified version of [`std::io::Write`] for use within a `no_std` context
 ///
 /// Even if the storage medium doesn't have [`Write`] functionality, it should implement
-/// this trait and return an [`IOErrorKind`] of type `ReadOnlyFilesystem` for all methods.
+/// this trait and return an [`IOErrorKind`] of type `Unsupported` for all methods.
 /// This way, in case a [`Write`]-related method is called for a [`FileSystem`](crate::FileSystem),
 /// it will return that error.
 pub trait Write: IOBase {
