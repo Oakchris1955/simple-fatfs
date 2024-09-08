@@ -19,7 +19,7 @@ time = { version = "0.3.36", default-features = false, features = [ "alloc", "pa
 
 [features]
 default = ["std"]
-std = []
+std = ["time/std", "time/local-offset"]
 
 [dev-dependencies]
 test-log = "0.2.16"

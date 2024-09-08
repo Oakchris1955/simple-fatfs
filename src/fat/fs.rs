@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::{error::*, io::prelude::*, path::PathBuf, utils};
+use crate::{error::*, io::prelude::*, path::PathBuf, time::*, utils};
 
 use core::{cmp, ops};
 
@@ -455,7 +455,7 @@ pub(crate) trait OffsetConversions {
     }
 }
 
-impl<S> OffsetConversions for FileSystem<S>
+impl<S> OffsetConversions for FileSystem<'_, S>
 where
     S: Read + Write + Seek,
 {
@@ -577,7 +577,7 @@ impl Default for FileFilter {
 
 /// An API to process a FAT filesystem
 #[derive(Debug)]
-pub struct FileSystem<S>
+pub struct FileSystem<'a, S>
 where
     S: Read + Write + Seek,
 {
@@ -589,6 +589,8 @@ where
     /// ANY CHANGES TO THE SECTOR BUFFER SHOULD ALSO SET THIS TO TRUE
     pub(crate) buffer_modified: bool,
     pub(crate) stored_sector: u64,
+
+    clock: &'a dyn Clock,
 
     pub(crate) boot_record: BootRecord,
     // since `self.boot_record.fat_type()` calls like 5 nested functions, we keep this cached and expose it with a public getter function
@@ -602,7 +604,7 @@ where
 }
 
 /// Getter functions
-impl<S> FileSystem<S>
+impl<S> FileSystem<'_, S>
 where
     S: Read + Write + Seek,
 {
@@ -613,7 +615,20 @@ where
 }
 
 /// Setter functions
-impl<S> FileSystem<S>
+impl<'a, S> FileSystem<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    /// Replace the internal [`Clock`] with a different one
+    ///
+    /// Use this in `no-std` contexts to replace the [`DefaultClock`] used
+    pub fn with_clock(&mut self, clock: &'a dyn Clock) {
+        self.clock = clock;
+    }
+}
+
+/// Setter functions
+impl<S> FileSystem<'_, S>
 where
     S: Read + Write + Seek,
 {
@@ -635,7 +650,7 @@ where
 }
 
 /// Constructors
-impl<S> FileSystem<S>
+impl<S> FileSystem<'_, S>
 where
     S: Read + Write + Seek,
 {
@@ -708,6 +723,7 @@ where
             sector_buffer: buffer[..props.sector_size as usize].to_vec(),
             buffer_modified: false,
             stored_sector,
+            clock: &STATIC_DEFAULT_CLOCK,
             boot_record,
             fat_type,
             props,
@@ -726,7 +742,7 @@ where
 }
 
 /// Internal [`Read`]-related low-level functions
-impl<S> FileSystem<S>
+impl<S> FileSystem<'_, S>
 where
     S: Read + Write + Seek,
 {
@@ -1018,7 +1034,7 @@ where
 }
 
 /// Internal [`Write`]-related low-level functions
-impl<S> FileSystem<S>
+impl<S> FileSystem<'_, S>
 where
     S: Read + Write + Seek,
 {
@@ -1280,7 +1296,7 @@ where
 }
 
 /// Public [`Read`]-related functions
-impl<S> FileSystem<S>
+impl<'a, S> FileSystem<'a, S>
 where
     S: Read + Write + Seek,
 {
@@ -1337,7 +1353,7 @@ where
     /// Borrows `&mut self` until that [`ROFile`] object is dropped, effectively locking `self` until that file closed
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
-    pub fn get_ro_file(&mut self, path: PathBuf) -> FSResult<ROFile<'_, S>, S::Error> {
+    pub fn get_ro_file(&mut self, path: PathBuf) -> FSResult<ROFile<'_, 'a, S>, S::Error> {
         if path.is_malformed() {
             return Err(FSError::MalformedPath);
         }
@@ -1382,7 +1398,7 @@ where
 }
 
 /// [`Write`]-related functions
-impl<S> FileSystem<S>
+impl<'a, S> FileSystem<'a, S>
 where
     S: Read + Write + Seek,
 {
@@ -1391,7 +1407,7 @@ where
     /// Borrows `&mut self` until that [`RWFile`] object is dropped, effectively locking `self` until that file closed
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
-    pub fn get_rw_file(&mut self, path: PathBuf) -> FSResult<RWFile<'_, S>, S::Error> {
+    pub fn get_rw_file(&mut self, path: PathBuf) -> FSResult<RWFile<'_, 'a, S>, S::Error> {
         self._raise_io_rw_result()?;
 
         let ro_file = self.get_ro_file(path)?;
@@ -1403,7 +1419,7 @@ where
     }
 }
 
-impl<S> ops::Drop for FileSystem<S>
+impl<S> ops::Drop for FileSystem<'_, S>
 where
     S: Read + Write + Seek,
 {

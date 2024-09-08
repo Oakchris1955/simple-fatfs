@@ -61,7 +61,7 @@ fn assert_vec_is_bee_movie_script(buf: &Vec<u8>) {
 
     assert_eq!(string, BEE_MOVIE_SCRIPT);
 }
-fn assert_file_is_bee_movie_script<S>(file: &mut ROFile<'_, S>)
+fn assert_file_is_bee_movie_script<S>(file: &mut ROFile<'_, '_, S>)
 where
     S: Read + Write + Seek,
 {
@@ -323,7 +323,7 @@ fn read_file_in_subdir() {
 
 #[test]
 fn check_file_timestamps() {
-    use time::macros::*;
+    use ::time::macros::*;
 
     use std::io::Cursor;
 

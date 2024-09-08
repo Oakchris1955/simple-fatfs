@@ -18,15 +18,15 @@ pub(crate) struct FileProps {
 
 /// A read-only file within a FAT filesystem
 #[derive(Debug)]
-pub struct ROFile<'a, S>
+pub struct ROFile<'a, 'b: 'a, S>
 where
     S: Read + Write + Seek,
 {
-    pub(crate) fs: &'a mut FileSystem<S>,
+    pub(crate) fs: &'a mut FileSystem<'b, S>,
     pub(crate) props: FileProps,
 }
 
-impl<S> ops::Deref for ROFile<'_, S>
+impl<S> ops::Deref for ROFile<'_, '_, S>
 where
     S: Read + Write + Seek,
 {
@@ -37,7 +37,7 @@ where
     }
 }
 
-impl<S> ops::DerefMut for ROFile<'_, S>
+impl<S> ops::DerefMut for ROFile<'_, '_, S>
 where
     S: Read + Write + Seek,
 {
@@ -47,7 +47,7 @@ where
 }
 
 // Internal functions
-impl<S> ROFile<'_, S>
+impl<S> ROFile<'_, '_, S>
 where
     S: Read + Write + Seek,
 {
@@ -118,14 +118,14 @@ where
     }
 }
 
-impl<S> IOBase for ROFile<'_, S>
+impl<S> IOBase for ROFile<'_, '_, S>
 where
     S: Read + Write + Seek,
 {
     type Error = S::Error;
 }
 
-impl<S> Read for ROFile<'_, S>
+impl<S> Read for ROFile<'_, '_, S>
 where
     S: Read + Write + Seek,
 {
@@ -213,7 +213,7 @@ where
     }
 }
 
-impl<S> Seek for ROFile<'_, S>
+impl<S> Seek for ROFile<'_, '_, S>
 where
     S: Read + Write + Seek,
 {
@@ -265,25 +265,25 @@ where
 ///
 /// To reduce a file's size, use the [`truncate`](RWFile::truncate) method
 #[derive(Debug)]
-pub struct RWFile<'a, S>
+pub struct RWFile<'a, 'b, S>
 where
     S: Read + Write + Seek,
 {
-    pub(crate) ro_file: ROFile<'a, S>,
+    pub(crate) ro_file: ROFile<'a, 'b, S>,
 }
 
-impl<'a, S> ops::Deref for RWFile<'a, S>
+impl<'a, 'b, S> ops::Deref for RWFile<'a, 'b, S>
 where
     S: Read + Write + Seek,
 {
-    type Target = ROFile<'a, S>;
+    type Target = ROFile<'a, 'b, S>;
 
     fn deref(&self) -> &Self::Target {
         &self.ro_file
     }
 }
 
-impl<S> ops::DerefMut for RWFile<'_, S>
+impl<S> ops::DerefMut for RWFile<'_, '_, S>
 where
     S: Read + Write + Seek,
 {
@@ -293,7 +293,7 @@ where
 }
 
 // Public functions
-impl<S> RWFile<'_, S>
+impl<S> RWFile<'_, '_, S>
 where
     S: Read + Write + Seek,
 {
@@ -370,14 +370,14 @@ where
     }
 }
 
-impl<S> IOBase for RWFile<'_, S>
+impl<S> IOBase for RWFile<'_, '_, S>
 where
     S: Read + Write + Seek,
 {
     type Error = S::Error;
 }
 
-impl<S> Read for RWFile<'_, S>
+impl<S> Read for RWFile<'_, '_, S>
 where
     S: Read + Write + Seek,
 {
@@ -402,7 +402,7 @@ where
     }
 }
 
-impl<S> Write for RWFile<'_, S>
+impl<S> Write for RWFile<'_, '_, S>
 where
     S: Read + Write + Seek,
 {
@@ -472,7 +472,7 @@ where
     }
 }
 
-impl<S> Seek for RWFile<'_, S>
+impl<S> Seek for RWFile<'_, '_, S>
 where
     S: Read + Write + Seek,
 {

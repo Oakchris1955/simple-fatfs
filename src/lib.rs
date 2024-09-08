@@ -81,7 +81,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 // Even inside unsafe functions, we must acknowlegde the usage of unsafe code
 #![deny(deprecated)]
-#![deny(elided_lifetimes_in_paths)]
 #![deny(macro_use_extern_crate)]
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
@@ -101,8 +100,10 @@ mod error;
 mod fat;
 pub mod io;
 mod path;
+mod time;
 mod utils;
 
 pub use error::*;
 pub use fat::*;
 pub use path::*;
+pub use time::*;

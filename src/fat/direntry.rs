@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::io::prelude::*;
+use crate::time::EPOCH;
 
 use core::{fmt, mem, num};
 
@@ -71,8 +72,6 @@ impl From<RawAttributes> for Attributes {
     }
 }
 
-const START_YEAR: i32 = 1980;
-
 #[bitfield(u16)]
 #[derive(Serialize, Deserialize)]
 pub(crate) struct TimeAttribute {
@@ -115,7 +114,7 @@ impl TryFrom<DateAttribute> for Date {
 
     fn try_from(value: DateAttribute) -> Result<Self, Self::Error> {
         time::parsing::Parsed::new()
-            .with_year(i32::from(value.year()) + START_YEAR)
+            .with_year(i32::from(value.year()) + EPOCH.year())
             .and_then(|parsed| parsed.with_month(value.month().try_into().ok()?))
             .and_then(|parsed| parsed.with_day(num::NonZeroU8::new(value.day())?))
             .map(|parsed| parsed.try_into().ok())
