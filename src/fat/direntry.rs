@@ -271,27 +271,37 @@ impl LFNEntry {
     }
 }
 
-/// The location of a [`FATDirEntry`] within a root directory sector
-/// or a data region cluster
-#[derive(Debug, Clone)]
-pub(crate) enum EntryLocation {
+/// The root directory sector or data cluster a [`FATDirEntry`] belongs too
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum EntryLocationUnit {
     /// Sector offset from the start of the root directory region (FAT12/16)
     RootDirSector(u16),
     /// Cluster offset from the start of the data region
     DataCluster(u32),
 }
 
-impl EntryLocation {
+impl EntryLocationUnit {
     pub(crate) fn from_partition_sector<S>(sector: u32, fs: &mut FileSystem<S>) -> Self
     where
         S: Read + Write + Seek,
     {
         if sector < fs.first_data_sector() {
-            EntryLocation::RootDirSector((sector - fs.props.first_root_dir_sector as u32) as u16)
+            EntryLocationUnit::RootDirSector(
+                (sector - fs.props.first_root_dir_sector as u32) as u16,
+            )
         } else {
-            EntryLocation::DataCluster(fs.partition_sector_to_data_cluster(sector))
+            EntryLocationUnit::DataCluster(fs.partition_sector_to_data_cluster(sector))
         }
     }
+}
+
+/// The location of a [`FATDirEntry`]
+#[derive(Debug)]
+pub(crate) struct EntryLocation {
+    /// the location of the first corresponding entry's data unit
+    pub(crate) unit: EntryLocationUnit,
+    /// the first entry's index/offset from the start of the data unit
+    pub(crate) index: u32,
 }
 
 /// The location of a chain of [`FATDirEntry`]
@@ -299,8 +309,6 @@ impl EntryLocation {
 pub(crate) struct DirEntryChain {
     /// the location of the first corresponding entry
     pub(crate) location: EntryLocation,
-    /// the first entry's index/offset from the start of the sector
-    pub(crate) index: u32,
     /// how many (contiguous) entries this entry chain has
     pub(crate) len: u32,
 }

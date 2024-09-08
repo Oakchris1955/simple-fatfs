@@ -354,22 +354,22 @@ where
     pub fn remove(mut self) -> Result<(), <Self as IOBase>::Error> {
         // we begin by removing the corresponding entries...
         let mut entries_freed = 0;
-        let mut current_offset = self.props.entry.chain_props.index;
+        let mut current_offset = self.props.entry.chain.location.index;
 
         // current_cluster_option is `None` if we are dealing with a root directory entry
         let (mut current_sector, current_cluster_option): (u32, Option<u32>) =
-            match self.props.entry.chain_props.location {
-                EntryLocation::RootDirSector(root_dir_sector) => (
+            match self.props.entry.chain.location.unit {
+                EntryLocationUnit::RootDirSector(root_dir_sector) => (
                     (root_dir_sector + self.fs.props.first_root_dir_sector).into(),
                     None,
                 ),
-                EntryLocation::DataCluster(data_cluster) => (
+                EntryLocationUnit::DataCluster(data_cluster) => (
                     self.fs.data_cluster_to_partition_sector(data_cluster),
                     Some(data_cluster),
                 ),
             };
 
-        while entries_freed < self.props.entry.chain_props.len {
+        while entries_freed < self.props.entry.chain.len {
             if current_sector as u64 != self.fs.stored_sector {
                 self.fs.read_nth_sector(current_sector.into())?;
             }

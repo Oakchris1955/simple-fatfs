@@ -170,7 +170,7 @@ pub(crate) struct RawProperties {
     pub(crate) file_size: u32,
     pub(crate) data_cluster: u32,
 
-    pub(crate) chain_props: DirEntryChain,
+    pub(crate) chain: DirEntryChain,
 }
 
 /// A container for file/directory properties
@@ -185,7 +185,7 @@ pub struct Properties {
     pub(crate) data_cluster: u32,
 
     // internal fields
-    pub(crate) chain_props: DirEntryChain,
+    pub(crate) chain: DirEntryChain,
 }
 
 /// Getter methods
@@ -247,7 +247,7 @@ impl Properties {
             accessed: raw.accessed,
             file_size: raw.file_size,
             data_cluster: raw.data_cluster,
-            chain_props: raw.chain_props,
+            chain: raw.chain,
         }
     }
 }
@@ -311,7 +311,7 @@ impl EntryParser {
     {
         use utils::bincode::bincode_config;
 
-        let entry_location = EntryLocation::from_partition_sector(sector, fs);
+        let entry_location_unit = EntryLocationUnit::from_partition_sector(sector, fs);
 
         for (index, chunk) in fs
             .read_nth_sector(sector.into())?
@@ -333,8 +333,10 @@ impl EntryParser {
                 Some(current_chain) => current_chain.len += 1,
                 None => {
                     self.current_chain = Some(DirEntryChain {
-                        location: entry_location.clone(),
-                        index: index as u32,
+                        location: EntryLocation {
+                            index: index as u32,
+                            unit: entry_location_unit,
+                        },
                         len: 1,
                     })
                 }
@@ -401,7 +403,7 @@ impl EntryParser {
                     accessed,
                     file_size: entry.file_size,
                     data_cluster: ((entry.cluster_high as u32) << 16) + entry.cluster_low as u32,
-                    chain_props: self
+                    chain: self
                         .current_chain
                         .take()
                         .expect("at this point, this shouldn't be None"),
