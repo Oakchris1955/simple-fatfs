@@ -353,83 +353,18 @@ where
     /// Remove the current file from the [`FileSystem`]
     pub fn remove(mut self) -> Result<(), <Self as IOBase>::Error> {
         // we begin by removing the corresponding entries...
-        let mut entries_freed = 0;
-        let mut current_offset = self.props.entry.chain.location.index;
-
-        // current_cluster_option is `None` if we are dealing with a root directory entry
-        let (mut current_sector, current_cluster_option): (u32, Option<u32>) =
-            match self.props.entry.chain.location.unit {
-                EntryLocationUnit::RootDirSector(root_dir_sector) => (
-                    (root_dir_sector + self.fs.props.first_root_dir_sector).into(),
-                    None,
-                ),
-                EntryLocationUnit::DataCluster(data_cluster) => (
-                    self.fs.data_cluster_to_partition_sector(data_cluster),
-                    Some(data_cluster),
-                ),
-            };
-
-        while entries_freed < self.props.entry.chain.len {
-            if current_sector as u64 != self.fs.stored_sector {
-                self.fs.read_nth_sector(current_sector.into())?;
-            }
-
-            // we won't even bother zeroing the entire thing, just the first byte
-            let byte_offset = current_offset as usize * DIRENTRY_SIZE;
-            self.fs.sector_buffer[byte_offset] = UNUSED_ENTRY;
-            self.fs.buffer_modified = true;
-
-            log::trace!(
-                "freed entry at sector {} with byte offset {}",
-                current_sector,
-                byte_offset
-            );
-
-            if current_offset + 1 >= (self.fs.sector_size() / DIRENTRY_SIZE as u32) {
-                // we have moved to a new sector
-                current_sector += 1;
-
-                match current_cluster_option {
-                    // data region
-                    Some(mut current_cluster) => {
-                        if self.fs.partition_sector_to_data_cluster(current_sector)
-                            != current_cluster
-                        {
-                            current_cluster = self.fs.get_next_cluster(current_cluster)?.unwrap();
-                            current_sector =
-                                self.fs.data_cluster_to_partition_sector(current_cluster);
-                        }
-                    }
-                    None => (),
-                }
-
-                current_offset = 0;
-            } else {
-                current_offset += 1
-            }
-
-            entries_freed += 1;
-        }
+        self.ro_file
+            .fs
+            .remove_entry_chain(&self.ro_file.props.entry.chain)?;
 
         // ... and then we free the data clusters
 
         // rewind back to the start of the file
         self.rewind()?;
 
-        loop {
-            let current_cluster = self.props.current_cluster;
-            let next_cluster_option = self.get_next_cluster()?;
-
-            // free the current cluster
-            self.fs
-                .write_nth_FAT_entry(current_cluster, FATEntry::Free)?;
-
-            // proceed to the next one, otherwise break
-            match next_cluster_option {
-                Some(next_cluster) => self.props.current_cluster = next_cluster,
-                None => break,
-            }
-        }
+        self.ro_file
+            .fs
+            .free_cluster_chain(self.props.current_cluster)?;
 
         Ok(())
     }

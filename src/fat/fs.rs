@@ -1125,6 +1125,90 @@ where
         Ok(())
     }
 
+    /// Mark the individual entries of a contiguous FAT entry chain as unused
+    ///
+    /// Note: No validation is done to check whether or not the chain is valid
+    pub(crate) fn remove_entry_chain(&mut self, chain: &DirEntryChain) -> Result<(), S::Error> {
+        // we begin by removing the corresponding entries...
+        let mut entries_freed = 0;
+        let mut current_offset = chain.location.index;
+
+        // current_cluster_option is `None` if we are dealing with a root directory entry
+        let (mut current_sector, current_cluster_option): (u32, Option<u32>) =
+            match chain.location.unit {
+                EntryLocationUnit::RootDirSector(root_dir_sector) => (
+                    (root_dir_sector + self.props.first_root_dir_sector).into(),
+                    None,
+                ),
+                EntryLocationUnit::DataCluster(data_cluster) => (
+                    self.data_cluster_to_partition_sector(data_cluster),
+                    Some(data_cluster),
+                ),
+            };
+
+        while entries_freed < chain.len {
+            if current_sector as u64 != self.stored_sector {
+                self.read_nth_sector(current_sector.into())?;
+            }
+
+            // we won't even bother zeroing the entire thing, just the first byte
+            let byte_offset = current_offset as usize * DIRENTRY_SIZE;
+            self.sector_buffer[byte_offset] = UNUSED_ENTRY;
+            self.buffer_modified = true;
+
+            log::trace!(
+                "freed entry at sector {} with byte offset {}",
+                current_sector,
+                byte_offset
+            );
+
+            if current_offset + 1 >= (self.sector_size() / DIRENTRY_SIZE as u32) {
+                // we have moved to a new sector
+                current_sector += 1;
+
+                match current_cluster_option {
+                    // data region
+                    Some(mut current_cluster) => {
+                        if self.partition_sector_to_data_cluster(current_sector) != current_cluster
+                        {
+                            current_cluster = self.get_next_cluster(current_cluster)?.unwrap();
+                            current_sector = self.data_cluster_to_partition_sector(current_cluster);
+                        }
+                    }
+                    None => (),
+                }
+
+                current_offset = 0;
+            } else {
+                current_offset += 1
+            }
+
+            entries_freed += 1;
+        }
+
+        Ok(())
+    }
+
+    /// Frees all the cluster in a cluster chain starting with `first_cluster`
+    pub(crate) fn free_cluster_chain(&mut self, first_cluster: u32) -> Result<(), S::Error> {
+        let mut current_cluster = first_cluster;
+
+        loop {
+            let next_cluster_option = self.get_next_cluster(current_cluster)?;
+
+            // free the current cluster
+            self.write_nth_FAT_entry(current_cluster, FATEntry::Free)?;
+
+            // proceed to the next one, otherwise break
+            match next_cluster_option {
+                Some(next_cluster) => current_cluster = next_cluster,
+                None => break,
+            }
+        }
+
+        Ok(())
+    }
+
     /// Syncs `self.sector_buffer` back to the storage
     fn _sync_current_sector(&mut self) -> Result<(), S::Error> {
         self.storage.write_all(&self.sector_buffer)?;
