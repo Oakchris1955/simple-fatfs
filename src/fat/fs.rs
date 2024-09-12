@@ -1402,6 +1402,16 @@ impl<'a, S> FileSystem<'a, S>
 where
     S: Read + Write + Seek,
 {
+    /// Remove a [`RWFile`] from the filesystem
+    ///
+    /// This is an alias to `self.get_rw_file(path)?.remove()?`
+    #[inline]
+    pub fn remove_file(&mut self, path: PathBuf) -> FSResult<(), S::Error> {
+        self.get_rw_file(path)?.remove()?;
+
+        Ok(())
+    }
+
     /// Get a corresponding [`RWFile`] object from a [`PathBuf`]
     ///
     /// Borrows `&mut self` until that [`RWFile`] object is dropped, effectively locking `self` until that file closed
