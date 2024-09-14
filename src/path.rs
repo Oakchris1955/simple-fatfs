@@ -29,6 +29,9 @@ pub const RESERVED_FILENAMES: &[&str] = &[
     "COM8", "COM9", "COM¹", "COM²", "COM³", "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6",
     "LPT7", "LPT8", "LPT9", "LPT¹", "LPT²", "LPT³",
 ];
+/// Except for the root directory, each directory must contain
+/// the following (two) entries at the beginning of the directory
+pub(crate) const SPECIAL_ENTRIES: &[&str] = &[".", ".."];
 
 /// Check whether a [`PathBuf`] is forbidden for use in filenames or directory names
 fn is_forbidden(pathbuf: &PathBuf) -> bool {

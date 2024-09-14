@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::{error::*, io::prelude::*, path::PathBuf, time::*, utils};
+use crate::{error::*, io::prelude::*, path::PathBuf, time::*, utils, SPECIAL_ENTRIES};
 
 use core::{cmp, ops};
 
@@ -1315,6 +1315,8 @@ where
         Ok(entries
             .into_iter()
             .filter(|x| self.filter.filter(x))
+            // we shouldn't expose the special entries to the user
+            .filter(|x| !SPECIAL_ENTRIES.contains(&x.name.as_str()))
             .map(|rawentry| {
                 let mut entry_path = path.clone();
 
