@@ -1412,6 +1412,52 @@ where
         Ok(())
     }
 
+    /// Remove an empty directory from the filesystem
+    ///
+    /// Errors if the path provided points to the root directory
+    pub fn remove_empty_dir(&mut self, path: PathBuf) -> FSResult<(), S::Error> {
+        if path.is_malformed() {
+            return Err(FSError::MalformedPath);
+        }
+
+        if !path.is_dir() {
+            log::error!("Not a directory");
+            return Err(FSError::NotADirectory);
+        }
+
+        if path == PathBuf::new() {
+            // we are in the root directory, we can't remove it
+            return Err(S::Error::new(
+                <S::Error as IOError>::Kind::new_unsupported(),
+                "We can't remove the root directory",
+            )
+            .into());
+        }
+
+        let dir_entries = self.read_dir(path.clone())?;
+
+        if dir_entries.len() > NONROOT_MIN_DIRENTRIES {
+            return Err(FSError::DirectoryNotEmpty);
+        }
+
+        let parent_path = path.parent();
+
+        let parent_dir_entries = self.read_dir(parent_path)?;
+
+        let entry = parent_dir_entries
+            .iter()
+            .find(|entry| entry.path == path)
+            .ok_or(FSError::NotFound)?;
+
+        // we first clear the corresponding entry chain in the parent directory
+        self.remove_entry_chain(&entry.chain)?;
+
+        // then we remove the allocated cluster chain
+        self.free_cluster_chain(entry.data_cluster)?;
+
+        Ok(())
+    }
+
     /// Get a corresponding [`RWFile`] object from a [`PathBuf`]
     ///
     /// Borrows `&mut self` until that [`RWFile`] object is dropped, effectively locking `self` until that file closed

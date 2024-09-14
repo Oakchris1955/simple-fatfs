@@ -58,7 +58,7 @@ fn is_forbidden(pathbuf: &PathBuf) -> bool {
 // TODO: pushing an absolute path should replace a pathbuf
 
 /// Represents an owned, mutable path
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathBuf {
     inner: VecDeque<String>,
 }

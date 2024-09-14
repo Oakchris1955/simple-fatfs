@@ -214,6 +214,28 @@ fn remove_data_region_file() {
 }
 
 #[test]
+fn remove_empty_dir() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT16.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    let dir_path = PathBuf::from("/another root directory/");
+
+    fs.remove_empty_dir(dir_path.clone()).unwrap();
+
+    // the directory should now be gone
+    let dir_result = fs.read_dir(dir_path);
+    match dir_result {
+        Err(err) => match err {
+            FSError::NotFound => (),
+            _ => panic!("unexpected IOError: {:?}", err),
+        },
+        _ => panic!("the directory should have been deleted by now"),
+    }
+}
+
+#[test]
 #[allow(non_snake_case)]
 fn FAT_tables_after_write_are_identical() {
     use std::io::Cursor;
@@ -463,6 +485,28 @@ fn remove_fat32_file() {
             _ => panic!("unexpected IOError: {:?}", err),
         },
         _ => panic!("file should have been deleted by now"),
+    }
+}
+
+#[test]
+fn remove_fat32_dir() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT32.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    let dir_path = PathBuf::from("/emptydir/");
+
+    fs.remove_empty_dir(dir_path.clone()).unwrap();
+
+    // the directory should now be gone
+    let dir_result = fs.read_dir(dir_path);
+    match dir_result {
+        Err(err) => match err {
+            FSError::NotFound => (),
+            _ => panic!("unexpected IOError: {:?}", err),
+        },
+        _ => panic!("the directory should have been deleted by now"),
     }
 }
 

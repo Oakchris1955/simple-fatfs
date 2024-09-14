@@ -144,6 +144,8 @@ where
     NotADirectory,
     /// Found a directory when we expected a file
     IsADirectory,
+    /// Expected an empty directory
+    DirectoryNotEmpty,
     /// This file cannot be modified, as it is read-only
     ReadOnlyFile,
     /// A file or directory wasn't found

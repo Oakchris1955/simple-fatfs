@@ -170,6 +170,11 @@ impl TryFrom<EntryModificationTime> for PrimitiveDateTime {
 // a directory entry occupies 32 bytes
 pub(crate) const DIRENTRY_SIZE: usize = 32;
 
+// each directory other than the root directory must have
+// at least the `.` and `..` entries
+// TODO: actually check this on runtime
+pub(crate) const NONROOT_MIN_DIRENTRIES: usize = 2;
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub(crate) struct FATDirEntry {
     pub(crate) sfn: SFN,
