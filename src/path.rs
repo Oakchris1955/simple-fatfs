@@ -125,7 +125,12 @@ impl PathBuf {
     pub fn parent(&self) -> PathBuf {
         if self.inner.len() > 1 {
             let mut pathbuf = self.clone();
+
+            if pathbuf.is_dir() {
+                pathbuf.inner.pop_back();
+            }
             pathbuf.inner.back_mut().unwrap().clear();
+
             pathbuf
         } else {
             PathBuf::new()
