@@ -62,7 +62,7 @@ pub(crate) enum FATEntry {
     /// This is a bad (defective) cluster
     Bad,
     /// This cluster is allocated and is the final cluster of the file
-    EOF,
+    Eof,
 }
 
 impl From<FATEntry> for u32 {
@@ -78,7 +78,7 @@ impl From<&FATEntry> for u32 {
             FATEntry::Allocated(cluster) => *cluster,
             FATEntry::Reserved => 0xFFFFFF6,
             FATEntry::Bad => 0xFFFFFF7,
-            FATEntry::EOF => u32::MAX,
+            FATEntry::Eof => u32::MAX,
         }
     }
 }
@@ -270,23 +270,12 @@ impl ops::Deref for DirEntry {
 pub(crate) const UNUSED_ENTRY: u8 = 0xE5;
 pub(crate) const LAST_AND_UNUSED_ENTRY: u8 = 0x00;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct EntryParser {
     entries: Vec<RawProperties>,
     lfn_buf: Vec<String>,
     lfn_checksum: Option<u8>,
     current_chain: Option<DirEntryChain>,
-}
-
-impl Default for EntryParser {
-    fn default() -> Self {
-        EntryParser {
-            entries: Vec::new(),
-            lfn_buf: Vec::new(),
-            lfn_checksum: None,
-            current_chain: None,
-        }
-    }
 }
 
 impl EntryParser {
@@ -324,7 +313,7 @@ impl EntryParser {
                 _ => (),
             };
 
-            let Ok(entry) = bincode_config().deserialize::<FATDirEntry>(&chunk) else {
+            let Ok(entry) = bincode_config().deserialize::<FATDirEntry>(chunk) else {
                 continue;
             };
 
@@ -344,7 +333,7 @@ impl EntryParser {
 
             if entry.attributes.contains(RawAttributes::LFN) {
                 // TODO: perhaps there is a way to utilize the `order` field?
-                let Ok(lfn_entry) = bincode_config().deserialize::<LFNEntry>(&chunk) else {
+                let Ok(lfn_entry) = bincode_config().deserialize::<LFNEntry>(chunk) else {
                     self._decrement_parsed_entries_counter();
                     continue;
                 };
@@ -493,11 +482,11 @@ pub(crate) struct FSProperties {
 impl FSProperties {
     fn from_boot_record(boot_record: &BootRecord) -> Self {
         let sector_size = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.bpb.bytes_per_sector.into(),
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.bpb.bytes_per_sector.into(),
             BootRecord::ExFAT(boot_record_exfat) => 1 << boot_record_exfat.sector_shift,
         };
         let cluster_size = match boot_record {
-            BootRecord::FAT(boot_record_fat) => {
+            BootRecord::Fat(boot_record_fat) => {
                 (boot_record_fat.bpb.sectors_per_cluster as u32 * sector_size).into()
             }
             BootRecord::ExFAT(boot_record_exfat) => {
@@ -505,31 +494,31 @@ impl FSProperties {
             }
         };
         let total_sectors = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.total_sectors(),
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.total_sectors(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
         let total_clusters = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.total_clusters(),
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.total_clusters(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
         let fat_table_count = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.bpb.table_count,
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.bpb.table_count,
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
         let fat_sector_size = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.fat_sector_size().into(),
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.fat_sector_size(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
         };
         let first_fat_sector = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_fat_sector().into(),
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.first_fat_sector(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
         };
         let first_root_dir_sector = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_root_dir_sector().into(),
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.first_root_dir_sector(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
         let first_data_sector = match boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.first_data_sector().into(),
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.first_data_sector().into(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
 
@@ -565,6 +554,7 @@ impl FileFilter {
     }
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for FileFilter {
     fn default() -> Self {
         // The FAT spec says to filter everything by default
@@ -672,7 +662,7 @@ where
             return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));
         }
 
-        let bpb: BPBFAT = bincode_config().deserialize(&buffer[..BPBFAT_SIZE])?;
+        let bpb: BpbFat = bincode_config().deserialize(&buffer[..BPBFAT_SIZE])?;
 
         let ebr = if bpb.table_size_16 == 0 {
             let ebr_fat32 = bincode_config()
@@ -691,23 +681,23 @@ where
                 return Err(FSError::InternalFSError(InternalFSError::InvalidFSInfoSig));
             }
 
-            EBR::FAT32(ebr_fat32, fsinfo)
+            Ebr::FAT32(ebr_fat32, fsinfo)
         } else {
-            EBR::FAT12_16(
+            Ebr::FAT12_16(
                 bincode_config()
                     .deserialize::<EBRFAT12_16>(&buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE])?,
             )
         };
 
         // TODO: see how we will handle this for exfat
-        let boot_record = BootRecord::FAT(BootRecordFAT { bpb, ebr });
+        let boot_record = BootRecord::Fat(BootRecordFAT { bpb, ebr });
 
         // verify boot record signature
         let fat_type = boot_record.fat_type();
         log::info!("The FAT type of the filesystem is {:?}", fat_type);
 
         match boot_record {
-            BootRecord::FAT(boot_record_fat) => {
+            BootRecord::Fat(boot_record_fat) => {
                 if boot_record_fat.verify_signature() {
                     log::error!("FAT boot record has invalid signature(s)");
                     return Err(FSError::InternalFSError(InternalFSError::InvalidBPBSig));
@@ -748,8 +738,8 @@ where
 {
     fn process_root_dir(&mut self) -> FSResult<Vec<RawProperties>, S::Error> {
         match self.boot_record {
-            BootRecord::FAT(boot_record_fat) => match boot_record_fat.ebr {
-                EBR::FAT12_16(_ebr_fat12_16) => {
+            BootRecord::Fat(boot_record_fat) => match boot_record_fat.ebr {
+                Ebr::FAT12_16(_ebr_fat12_16) => {
                     let mut entry_parser = EntryParser::default();
 
                     let root_dir_sector = boot_record_fat.first_root_dir_sector();
@@ -763,7 +753,7 @@ where
 
                     Ok(entry_parser.finish())
                 }
-                EBR::FAT32(ebr_fat32, _) => {
+                Ebr::FAT32(ebr_fat32, _) => {
                     let cluster = ebr_fat32.root_cluster;
                     self.process_normal_dir(cluster)
                 }
@@ -784,7 +774,7 @@ where
             for sector in first_sector_of_cluster
                 ..(first_sector_of_cluster + self.sectors_per_cluster() as u32)
             {
-                if entry_parser.parse_sector(sector.into(), self)? {
+                if entry_parser.parse_sector(sector, self)? {
                     break 'outer;
                 }
             }
@@ -794,7 +784,7 @@ where
 
             match current_fat_entry {
                 // we are done here, break the loop
-                FATEntry::EOF => break,
+                FATEntry::Eof => break,
                 // this cluster chain goes on, follow it
                 FATEntry::Allocated(next_cluster) => data_cluster = next_cluster,
                 // any other case (whether a bad, reserved or free cluster) is invalid, consider this cluster chain malformed
@@ -814,10 +804,10 @@ where
     /// If the [`Result`] returns [`Ok`] that contains a [`None`], the drive is full
     pub(crate) fn next_free_cluster(&mut self) -> Result<Option<u32>, S::Error> {
         let start_cluster = match self.boot_record {
-            BootRecord::FAT(boot_record_fat) => {
+            BootRecord::Fat(boot_record_fat) => {
                 let mut first_free_cluster = self.first_free_cluster;
 
-                if let EBR::FAT32(_, fsinfo) = boot_record_fat.ebr {
+                if let Ebr::FAT32(_, fsinfo) = boot_record_fat.ebr {
                     // a value of u32::MAX denotes unawareness of the first free cluster
                     // we also do a bit of range checking
                     // TODO: if this is unknown, figure it out and write it to the FSInfo structure
@@ -837,22 +827,19 @@ where
         let mut current_cluster = start_cluster;
 
         while current_cluster < self.props.total_clusters {
-            match self.read_nth_FAT_entry(current_cluster)? {
-                FATEntry::Free => {
-                    self.first_free_cluster = current_cluster;
+            if self.read_nth_FAT_entry(current_cluster)? == FATEntry::Free {
+                self.first_free_cluster = current_cluster;
 
-                    match &mut self.boot_record {
-                        BootRecord::FAT(boot_record_fat) => {
-                            if let EBR::FAT32(_, fsinfo) = &mut boot_record_fat.ebr {
-                                fsinfo.first_free_cluster = current_cluster;
-                            }
+                match &mut self.boot_record {
+                    BootRecord::Fat(boot_record_fat) => {
+                        if let Ebr::FAT32(_, fsinfo) = &mut boot_record_fat.ebr {
+                            fsinfo.first_free_cluster = current_cluster;
                         }
-                        BootRecord::ExFAT(_) => todo!("ExFAT not yet implemented"),
                     }
-
-                    return Ok(Some(current_cluster));
+                    BootRecord::ExFAT(_) => todo!("ExFAT not yet implemented"),
                 }
-                _ => (),
+
+                return Ok(Some(current_cluster));
             }
             current_cluster += 1;
         }
@@ -884,7 +871,7 @@ where
         const MAX_PROBE_SIZE: u32 = 1 << 20;
 
         let fat_byte_size = match self.boot_record {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.fat_sector_size(),
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.fat_sector_size(),
             BootRecord::ExFAT(_) => unreachable!(),
         };
 
@@ -915,7 +902,7 @@ where
     #[allow(non_snake_case)]
     pub(crate) fn sector_belongs_to_FAT(&self, sector: u64) -> bool {
         match self.boot_record {
-            BootRecord::FAT(boot_record_fat) => (boot_record_fat.first_fat_sector().into()
+            BootRecord::Fat(boot_record_fat) => (boot_record_fat.first_fat_sector().into()
                 ..boot_record_fat.first_root_dir_sector().into())
                 .contains(&sector),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
@@ -947,7 +934,7 @@ where
     pub(crate) fn read_nth_FAT_entry(&mut self, n: u32) -> Result<FATEntry, S::Error> {
         // the size of an entry rounded up to bytes
         let entry_size = self.fat_type.entry_size();
-        let entry_props = FATEntryProps::new(n, &self);
+        let entry_props = FATEntryProps::new(n, self);
 
         self.read_nth_sector(entry_props.fat_sector.into())?;
 
@@ -995,10 +982,11 @@ where
             FATType::FAT12 => match value {
                 0x000 => FATEntry::Free,
                 0xFF7 => FATEntry::Bad,
-                0xFF8..=0xFFE | 0xFFF => FATEntry::EOF,
+                #[allow(clippy::manual_range_patterns)]
+                0xFF8..=0xFFE | 0xFFF => FATEntry::Eof,
                 _ => {
-                    if (0x002..(self.props.total_clusters + 1)).contains(&value.into()) {
-                        FATEntry::Allocated(value.into())
+                    if (0x002..(self.props.total_clusters + 1)).contains(&value) {
+                        FATEntry::Allocated(value)
                     } else {
                         FATEntry::Reserved
                     }
@@ -1007,10 +995,11 @@ where
             FATType::FAT16 => match value {
                 0x0000 => FATEntry::Free,
                 0xFFF7 => FATEntry::Bad,
-                0xFFF8..=0xFFFE | 0xFFFF => FATEntry::EOF,
+                #[allow(clippy::manual_range_patterns)]
+                0xFFF8..=0xFFFE | 0xFFFF => FATEntry::Eof,
                 _ => {
-                    if (0x0002..(self.props.total_clusters + 1)).contains(&value.into()) {
-                        FATEntry::Allocated(value.into())
+                    if (0x0002..(self.props.total_clusters + 1)).contains(&value) {
+                        FATEntry::Allocated(value)
                     } else {
                         FATEntry::Reserved
                     }
@@ -1019,10 +1008,11 @@ where
             FATType::FAT32 => match value {
                 0x00000000 => FATEntry::Free,
                 0x0FFFFFF7 => FATEntry::Bad,
-                0x0FFFFFF8..=0xFFFFFFE | 0x0FFFFFFF => FATEntry::EOF,
+                #[allow(clippy::manual_range_patterns)]
+                0x0FFFFFF8..=0xFFFFFFE | 0x0FFFFFFF => FATEntry::Eof,
                 _ => {
-                    if (0x00000002..(self.props.total_clusters + 1)).contains(&value.into()) {
-                        FATEntry::Allocated(value.into())
+                    if (0x00000002..(self.props.total_clusters + 1)).contains(&value) {
+                        FATEntry::Allocated(value)
                     } else {
                         FATEntry::Reserved
                     }
@@ -1042,7 +1032,7 @@ where
     pub(crate) fn write_nth_FAT_entry(&mut self, n: u32, entry: FATEntry) -> Result<(), S::Error> {
         // the size of an entry rounded up to bytes
         let entry_size = self.fat_type.entry_size();
-        let entry_props = FATEntryProps::new(n, &self);
+        let entry_props = FATEntryProps::new(n, self);
 
         // the previous solution would overflow, here's a correct implementation
         let mask = utils::bits::setbits_u32(self.fat_type.bits_per_entry());
@@ -1120,22 +1110,18 @@ where
         }
 
         // lastly, update the FSInfoFAT32 structure is it is available
-        match &mut self.boot_record {
-            BootRecord::FAT(boot_record_fat) => match &mut boot_record_fat.ebr {
-                EBR::FAT32(_, fsinfo) => {
-                    match entry {
-                        FATEntry::Free => {
-                            fsinfo.free_cluster_count += 1;
-                            if n < fsinfo.first_free_cluster {
-                                fsinfo.first_free_cluster = n;
-                            }
+        if let BootRecord::Fat(boot_record_fat) = &mut self.boot_record {
+            if let Ebr::FAT32(_, fsinfo) = &mut boot_record_fat.ebr {
+                match entry {
+                    FATEntry::Free => {
+                        fsinfo.free_cluster_count += 1;
+                        if n < fsinfo.first_free_cluster {
+                            fsinfo.first_free_cluster = n;
                         }
-                        _ => fsinfo.free_cluster_count -= 1,
-                    };
-                }
-                _ => (),
-            },
-            _ => (),
+                    }
+                    _ => fsinfo.free_cluster_count -= 1,
+                };
+            }
         }
 
         Ok(())
@@ -1182,16 +1168,12 @@ where
                 // we have moved to a new sector
                 current_sector += 1;
 
-                match current_cluster_option {
+                if let Some(mut current_cluster) = current_cluster_option {
                     // data region
-                    Some(mut current_cluster) => {
-                        if self.partition_sector_to_data_cluster(current_sector) != current_cluster
-                        {
-                            current_cluster = self.get_next_cluster(current_cluster)?.unwrap();
-                            current_sector = self.data_cluster_to_partition_sector(current_cluster);
-                        }
+                    if self.partition_sector_to_data_cluster(current_sector) != current_cluster {
+                        current_cluster = self.get_next_cluster(current_cluster)?.unwrap();
+                        current_sector = self.data_cluster_to_partition_sector(current_cluster);
                     }
-                    None => (),
                 }
 
                 current_offset = 0;
@@ -1257,11 +1239,11 @@ where
             if let Some(fat_sector_props) = FATSectorProps::new(self.stored_sector, self) {
                 log::trace!("syncing FAT sector {}", fat_sector_props.sector_offset,);
                 match self.boot_record {
-                    BootRecord::FAT(boot_record_fat) => match boot_record_fat.ebr {
-                        EBR::FAT12_16(_) => {
+                    BootRecord::Fat(boot_record_fat) => match boot_record_fat.ebr {
+                        Ebr::FAT12_16(_) => {
                             self._sync_FAT_sector(&fat_sector_props)?;
                         }
-                        EBR::FAT32(ebr_fat32, _) => {
+                        Ebr::FAT32(ebr_fat32, _) => {
                             if ebr_fat32.extended_flags.mirroring_disabled() {
                                 self._sync_current_sector()?;
                             } else {
@@ -1314,7 +1296,7 @@ where
 
         let mut entries = self.process_root_dir()?;
 
-        for dir_name in path.clone().into_iter() {
+        for dir_name in path.clone() {
             let dir_cluster = match entries.iter().find(|entry| {
                 entry.name == dir_name && entry.attributes.contains(RawAttributes::DIRECTORY)
             }) {

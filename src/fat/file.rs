@@ -63,7 +63,7 @@ where
     #[inline]
     /// Non-[`panic`]king version of [`next_cluster()`](ROFile::next_cluster)
     fn get_next_cluster(&mut self) -> Result<Option<u32>, <Self as IOBase>::Error> {
-        Ok(self.fs.get_next_cluster(self.props.current_cluster)?)
+        self.fs.get_next_cluster(self.props.current_cluster)
     }
 
     /// Returns that last cluster in the file's cluster chain
@@ -74,7 +74,7 @@ where
         loop {
             match self.fs.read_nth_FAT_entry(current_cluster)? {
                 FATEntry::Allocated(next_cluster) => current_cluster = next_cluster,
-                FATEntry::EOF => break,
+                FATEntry::Eof => break,
                 _ => unreachable!(),
             }
         }
@@ -328,7 +328,7 @@ where
         // we set the new last cluster in the chain to be EOF
         self.ro_file
             .fs
-            .write_nth_FAT_entry(self.ro_file.props.current_cluster, FATEntry::EOF)?;
+            .write_nth_FAT_entry(self.ro_file.props.current_cluster, FATEntry::Eof)?;
 
         // then, we set each cluster after the current one to EOF
         while let Some(next_cluster) = next_cluster_option {
@@ -507,7 +507,7 @@ where
                         )?;
                         // we also set the next free cluster to be EOF
                         self.fs
-                            .write_nth_FAT_entry(next_free_cluster, FATEntry::EOF)?;
+                            .write_nth_FAT_entry(next_free_cluster, FATEntry::Eof)?;
                         log::trace!(
                             "cluster {} now points to {}",
                             last_cluster_in_chain,

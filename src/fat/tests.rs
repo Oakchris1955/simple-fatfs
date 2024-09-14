@@ -19,7 +19,7 @@ fn check_FAT_offset() {
     let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
     let fat_offset = match fs.boot_record {
-        BootRecord::FAT(boot_record_fat) => boot_record_fat.first_fat_sector(),
+        BootRecord::Fat(boot_record_fat) => boot_record_fat.first_fat_sector(),
         BootRecord::ExFAT(_boot_record_exfat) => unreachable!(),
     };
 
@@ -27,7 +27,7 @@ fn check_FAT_offset() {
     fs.read_nth_sector(fat_offset.into()).unwrap();
 
     let first_entry = u16::from_le_bytes(fs.sector_buffer[..2].try_into().unwrap());
-    let media_type = if let BootRecord::FAT(boot_record_fat) = fs.boot_record {
+    let media_type = if let BootRecord::Fat(boot_record_fat) = fs.boot_record {
         boot_record_fat.bpb._media_type
     } else {
         unreachable!("this should be a FAT16 filesystem")
@@ -54,8 +54,8 @@ fn read_file_in_root_dir() {
 }
 
 static BEE_MOVIE_SCRIPT: &str = include_str!("../../tests/bee movie script.txt");
-fn assert_vec_is_bee_movie_script(buf: &Vec<u8>) {
-    let string = std::str::from_utf8(&buf).unwrap();
+fn assert_vec_is_bee_movie_script(buf: &[u8]) {
+    let string = std::str::from_utf8(buf).unwrap();
     let expected_size = BEE_MOVIE_SCRIPT.len();
     assert_eq!(buf.len(), expected_size);
 
@@ -513,7 +513,7 @@ fn remove_fat32_dir() {
 #[test]
 #[allow(non_snake_case)]
 fn FAT_tables_after_fat32_write_are_identical() {
-    use crate::fat::{BootRecord, EBR};
+    use crate::fat::{BootRecord, Ebr};
 
     use std::io::Cursor;
 
@@ -521,8 +521,8 @@ fn FAT_tables_after_fat32_write_are_identical() {
     let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
     match fs.boot_record {
-        BootRecord::FAT(boot_record_fat) => match boot_record_fat.ebr {
-            EBR::FAT32(ebr_fat32, _) => assert!(
+        BootRecord::Fat(boot_record_fat) => match boot_record_fat.ebr {
+            Ebr::FAT32(ebr_fat32, _) => assert!(
                 !ebr_fat32.extended_flags.mirroring_disabled(),
                 "mirroring should be enabled for this .img file"
             ),

@@ -15,17 +15,11 @@ pub trait Clock: fmt::Debug {
 ///
 /// Returns the current local time in a `std` environment.
 /// In a `no-std` environment, it just returns the [`EPOCH`]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[allow(missing_copy_implementations)]
 pub struct DefaultClock;
 
 pub(crate) static STATIC_DEFAULT_CLOCK: DefaultClock = DefaultClock {};
-
-impl Default for DefaultClock {
-    fn default() -> Self {
-        DefaultClock {}
-    }
-}
 
 impl Clock for DefaultClock {
     fn now(&self) -> PrimitiveDateTime {
@@ -35,9 +29,8 @@ impl Clock for DefaultClock {
 
             // TODO: make the trait return an error to handle such cases
             let now_odt = OffsetDateTime::now_local().unwrap();
-            let now_pdt = PrimitiveDateTime::new(now_odt.date(), now_odt.time());
 
-            now_pdt
+            PrimitiveDateTime::new(now_odt.date(), now_odt.time())
         }
         #[cfg(not(feature = "std"))]
         EPOCH

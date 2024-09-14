@@ -14,6 +14,6 @@ where
         // in case this filesystem doesn't support
         // write operations, don't error out
         Err(ref e) if e.kind().is_unsupported() => Ok(false),
-        Err(e) => return Err(e),
+        Err(e) => Err(e),
     }
 }

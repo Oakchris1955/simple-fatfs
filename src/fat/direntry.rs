@@ -103,8 +103,7 @@ impl TryFrom<TimeAttribute> for Time {
             .with_hour_24(value.hour())
             .and_then(|parsed| parsed.with_minute(value.minutes()))
             .and_then(|parsed| parsed.with_second(value.seconds() * 2))
-            .map(|parsed| parsed.try_into().ok())
-            .flatten()
+            .and_then(|parsed| parsed.try_into().ok())
             .ok_or(())
     }
 }
@@ -117,8 +116,7 @@ impl TryFrom<DateAttribute> for Date {
             .with_year(i32::from(value.year()) + EPOCH.year())
             .and_then(|parsed| parsed.with_month(value.month().try_into().ok()?))
             .and_then(|parsed| parsed.with_day(num::NonZeroU8::new(value.day())?))
-            .map(|parsed| parsed.try_into().ok())
-            .flatten()
+            .and_then(|parsed| parsed.try_into().ok())
             .ok_or(())
     }
 }
@@ -177,7 +175,7 @@ pub(crate) const NONROOT_MIN_DIRENTRIES: usize = 2;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub(crate) struct FATDirEntry {
-    pub(crate) sfn: SFN,
+    pub(crate) sfn: Sfn,
     pub(crate) attributes: RawAttributes,
     pub(crate) _reserved: [u8; 1],
     pub(crate) created: EntryCreationTime,
@@ -189,12 +187,12 @@ pub(crate) struct FATDirEntry {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub(crate) struct SFN {
+pub(crate) struct Sfn {
     name: [u8; 8],
     ext: [u8; 3],
 }
 
-impl SFN {
+impl Sfn {
     fn get_byte_slice(&self) -> [u8; 11] {
         let mut slice = [0; 11];
 
@@ -213,13 +211,13 @@ impl SFN {
                 .wrapping_add(c)
         }
 
-        log::debug!("SFN checksum: {:X}", sum);
+        log::debug!("Sfn checksum: {:X}", sum);
 
         sum
     }
 }
 
-impl fmt::Display for SFN {
+impl fmt::Display for Sfn {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // we begin by writing the name (even if it is padded with spaces, they will be trimmed, so we don't care)
         write!(f, "{}", String::from_utf8_lossy(&self.name).trim())?;
@@ -245,8 +243,8 @@ pub(crate) struct LFNEntry {
     pub(crate) _long_entry_type: u8,
     /// If this doesn't match with the computed cksum, then the set of LFNs is considered corrupt
     ///
-    /// A [`LFNEntry`] will be marked as corrupt even if it isn't, if the SFN is modifed by a legacy system,
-    /// since the new SFN's signature and the one on this field won't (probably) match
+    /// A [`LFNEntry`] will be marked as corrupt even if it isn't, if the Sfn is modifed by a legacy system,
+    /// since the new Sfn's signature and the one on this field won't (probably) match
     pub(crate) checksum: u8,
     pub(crate) mid_chars: [u8; 12],
     pub(crate) _zeroed: [u8; 2],

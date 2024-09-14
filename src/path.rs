@@ -45,7 +45,7 @@ fn is_forbidden(pathbuf: &PathBuf) -> bool {
         if RESERVED_FILENAMES
             .iter()
             // remove extension
-            .map(|file_name| file_name.split_once(".").map(|s| s.0).unwrap_or(file_name))
+            .map(|file_name| file_name.split_once('.').map(|s| s.0).unwrap_or(file_name))
             .any(|reserved| file_name == reserved)
         {
             return true;
@@ -58,7 +58,7 @@ fn is_forbidden(pathbuf: &PathBuf) -> bool {
 // TODO: pushing an absolute path should replace a pathbuf
 
 /// Represents an owned, mutable path
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct PathBuf {
     inner: VecDeque<String>,
 }
@@ -158,7 +158,7 @@ impl PathBuf {
 
     /// Checks whether `self` is malformed (as if someone pushed a string with many consecutive slashes)
     pub(crate) fn is_malformed(&self) -> bool {
-        is_forbidden(&self)
+        is_forbidden(self)
     }
 }
 
@@ -184,14 +184,6 @@ impl fmt::Display for PathBuf {
             "/{}",
             self.inner.iter().cloned().collect::<Vec<_>>().join("/")
         )
-    }
-}
-
-impl Default for PathBuf {
-    fn default() -> Self {
-        Self {
-            inner: VecDeque::new(),
-        }
     }
 }
 

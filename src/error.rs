@@ -103,7 +103,7 @@ pub enum InternalFSError {
     InvalidBPBSig,
     /**
      Invalid FAT32 FSInfo signature.
-     Perhaps the FSInfo structure or the FAT32 EBR's fat_info field is malformed?
+     Perhaps the FSInfo structure or the FAT32 Ebr's fat_info field is malformed?
     */
     InvalidFSInfoSig,
     /**

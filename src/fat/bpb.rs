@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum BootRecord {
-    FAT(BootRecordFAT),
+    Fat(BootRecordFAT),
     ExFAT(BootRecordExFAT),
 }
 
@@ -17,7 +18,7 @@ impl BootRecord {
     /// The FAT type of this file system
     pub(crate) fn fat_type(&self) -> FATType {
         match self {
-            BootRecord::FAT(boot_record_fat) => boot_record_fat.fat_type(),
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.fat_type(),
             BootRecord::ExFAT(_boot_record_exfat) => {
                 todo!("ExFAT not yet implemented");
                 FATType::ExFAT
@@ -28,7 +29,7 @@ impl BootRecord {
     #[allow(non_snake_case)]
     pub(crate) fn nth_FAT_table_sector(&self, n: u8) -> u32 {
         match self {
-            BootRecord::FAT(boot_record_fat) => {
+            BootRecord::Fat(boot_record_fat) => {
                 boot_record_fat.first_fat_sector() as u32
                     + n as u32 * boot_record_fat.fat_sector_size()
             }
@@ -46,8 +47,8 @@ pub(crate) const FAT_SIGNATURE: u16 = 0x55AA;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BootRecordFAT {
-    pub bpb: BPBFAT,
-    pub ebr: EBR,
+    pub bpb: BpbFat,
+    pub ebr: Ebr,
 }
 
 impl BootRecordFAT {
@@ -55,11 +56,11 @@ impl BootRecordFAT {
     pub(crate) fn verify_signature(&self) -> bool {
         match self.fat_type() {
             FATType::FAT12 | FATType::FAT16 | FATType::FAT32 => match self.ebr {
-                EBR::FAT12_16(ebr_fat12_16) => {
+                Ebr::FAT12_16(ebr_fat12_16) => {
                     ebr_fat12_16.boot_signature == BOOT_SIGNATURE
                         && ebr_fat12_16.signature == FAT_SIGNATURE
                 }
-                EBR::FAT32(ebr_fat32, _) => {
+                Ebr::FAT32(ebr_fat32, _) => {
                     ebr_fat32.boot_signature == BOOT_SIGNATURE
                         && ebr_fat32.signature == FAT_SIGNATURE
                 }
@@ -82,8 +83,8 @@ impl BootRecordFAT {
     /// FAT size in sectors
     pub(crate) fn fat_sector_size(&self) -> u32 {
         match self.ebr {
-            EBR::FAT12_16(_ebr_fat12_16) => self.bpb.table_size_16.into(),
-            EBR::FAT32(ebr_fat32, _) => ebr_fat32.table_size_32,
+            Ebr::FAT12_16(_ebr_fat12_16) => self.bpb.table_size_16.into(),
+            Ebr::FAT32(ebr_fat32, _) => ebr_fat32.table_size_32,
         }
     }
 
@@ -171,7 +172,7 @@ pub(crate) struct BootRecordExFAT {
 
 pub(crate) const BPBFAT_SIZE: usize = 36;
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub(crate) struct BPBFAT {
+pub(crate) struct BpbFat {
     pub _jmpboot: [u8; 3],
     pub _oem_identifier: [u8; 8],
     pub bytes_per_sector: u16,
@@ -191,12 +192,13 @@ pub(crate) struct BPBFAT {
 
 pub(crate) const EBR_SIZE: usize = MIN_SECTOR_SIZE - BPBFAT_SIZE;
 #[derive(Clone, Copy)]
-pub(crate) enum EBR {
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum Ebr {
     FAT12_16(EBRFAT12_16),
     FAT32(EBRFAT32, FSInfoFAT32),
 }
 
-impl fmt::Debug for EBR {
+impl fmt::Debug for Ebr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: find a good way of printing this
         write!(f, "FAT12-16/32 Extended boot record...")
