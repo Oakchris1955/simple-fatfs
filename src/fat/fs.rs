@@ -578,6 +578,7 @@ where
     pub(crate) sector_buffer: Vec<u8>,
     /// ANY CHANGES TO THE SECTOR BUFFER SHOULD ALSO SET THIS TO TRUE
     pub(crate) buffer_modified: bool,
+    fsinfo_modified: bool,
     pub(crate) stored_sector: u64,
 
     clock: &'a dyn Clock,
@@ -712,6 +713,7 @@ where
             storage,
             sector_buffer: buffer[..props.sector_size as usize].to_vec(),
             buffer_modified: false,
+            fsinfo_modified: false,
             stored_sector,
             clock: &STATIC_DEFAULT_CLOCK,
             boot_record,
@@ -834,6 +836,7 @@ where
                     BootRecord::Fat(boot_record_fat) => {
                         if let Ebr::FAT32(_, fsinfo) = &mut boot_record_fat.ebr {
                             fsinfo.first_free_cluster = current_cluster;
+                            self.fsinfo_modified = true;
                         }
                     }
                     BootRecord::ExFAT(_) => todo!("ExFAT not yet implemented"),
@@ -1121,6 +1124,7 @@ where
                     }
                     _ => fsinfo.free_cluster_count -= 1,
                 };
+                self.fsinfo_modified = true;
             }
         }
 
@@ -1268,13 +1272,17 @@ where
     pub(crate) fn sync_fsinfo(&mut self) -> FSResult<(), S::Error> {
         use utils::bincode::bincode_config;
 
-        if let BootRecord::Fat(boot_record_fat) = self.boot_record {
-            if let Ebr::FAT32(ebr_fat32, fsinfo) = boot_record_fat.ebr {
-                self.read_nth_sector(ebr_fat32.fat_info.into())?;
+        if self.fsinfo_modified {
+            if let BootRecord::Fat(boot_record_fat) = self.boot_record {
+                if let Ebr::FAT32(ebr_fat32, fsinfo) = boot_record_fat.ebr {
+                    self.read_nth_sector(ebr_fat32.fat_info.into())?;
 
-                let bytes = bincode_config().serialize(&fsinfo)?;
-                self.sector_buffer.copy_from_slice(&bytes);
+                    let bytes = bincode_config().serialize(&fsinfo)?;
+                    self.sector_buffer.copy_from_slice(&bytes);
+                }
             }
+
+            self.fsinfo_modified = false;
         }
 
         Ok(())
@@ -1474,6 +1482,18 @@ where
 
         Ok(RWFile { ro_file })
     }
+
+    /// Sync any pending changes back to the storage medium and drop
+    ///
+    /// Use this to catch any IO errors that might be rejected silently
+    /// while [`Drop`]ping
+    pub fn unmount(&mut self) -> FSResult<(), S::Error> {
+        self.sync_fsinfo()?;
+        self.sync_sector_buffer()?;
+        self.storage.flush()?;
+
+        Ok(())
+    }
 }
 
 impl<S> ops::Drop for FileSystem<'_, S>
@@ -1481,9 +1501,7 @@ where
     S: Read + Write + Seek,
 {
     fn drop(&mut self) {
-        // nothing to do if these error out while dropping
-        let _ = self.sync_fsinfo();
-        let _ = self.sync_sector_buffer();
-        let _ = self.storage.flush();
+        // nothing to do if this errors out while dropping
+        let _ = self.unmount();
     }
 }
