@@ -1263,6 +1263,23 @@ where
         Ok(())
     }
 
+    /// Sync the [`FSInfoFAT32`] back to the storage medium
+    /// if this is FAT32
+    pub(crate) fn sync_fsinfo(&mut self) -> FSResult<(), S::Error> {
+        use utils::bincode::bincode_config;
+
+        if let BootRecord::Fat(boot_record_fat) = self.boot_record {
+            if let Ebr::FAT32(ebr_fat32, fsinfo) = boot_record_fat.ebr {
+                self.read_nth_sector(ebr_fat32.fat_info.into())?;
+
+                let bytes = bincode_config().serialize(&fsinfo)?;
+                self.sector_buffer.copy_from_slice(&bytes);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Returns an `Err` of `Unexpected [`IOErrorKind`]
     /// if the device medium is read-only
     fn _raise_io_rw_result(&mut self) -> Result<(), S::Error> {
@@ -1465,6 +1482,7 @@ where
 {
     fn drop(&mut self) {
         // nothing to do if these error out while dropping
+        let _ = self.sync_fsinfo();
         let _ = self.sync_sector_buffer();
         let _ = self.storage.flush();
     }
