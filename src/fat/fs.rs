@@ -6,6 +6,7 @@ use core::{cmp, ops};
 
 #[cfg(not(feature = "std"))]
 use alloc::{
+    borrow::ToOwned,
     format,
     string::{String, ToString},
     vec,
