@@ -1027,7 +1027,7 @@ where
 }
 
 /// Internal [`Write`]-related low-level functions
-impl<S> FileSystem<'_, S>
+impl<'a, S> FileSystem<'a, S>
 where
     S: Read + Write + Seek,
 {
@@ -1300,6 +1300,17 @@ where
 
         Ok(())
     }
+
+    /// Like [`Self::get_rw_file`], but will ignore the read-only flag (if it is present)
+    ///
+    /// This is a private function for obvious reasons
+    fn get_rw_file_unchecked(&mut self, path: PathBuf) -> FSResult<RWFile<'_, 'a, S>, S::Error> {
+        self._raise_io_rw_result()?;
+
+        let ro_file = self.get_ro_file(path)?;
+
+        Ok(RWFile { ro_file })
+    }
 }
 
 /// Public [`Read`]-related functions
@@ -1421,6 +1432,16 @@ where
         Ok(())
     }
 
+    /// Remove a file from the filesystem, even if it is read-only
+    ///
+    /// **USE WITH EXTREME CAUTION!**
+    #[inline]
+    pub fn remove_file_unchecked(&mut self, path: PathBuf) -> FSResult<(), S::Error> {
+        self.get_rw_file_unchecked(path)?.remove()?;
+
+        Ok(())
+    }
+
     /// Remove an empty directory from the filesystem
     ///
     /// Errors if the path provided points to the root directory
@@ -1467,20 +1488,88 @@ where
         Ok(())
     }
 
+    /// Removes a directory at this path, after removing all its contents.
+    ///
+    /// Use with caution!
+    ///
+    /// This will fail if there is at least 1 (one) read-only file
+    /// in this directory or in any subdirectory. To avoid this behaviour,
+    /// use [`remove_dir_all_unchecked()`](FileSystem::remove_dir_all_unchecked)
+    pub fn remove_dir_all(&mut self, path: PathBuf) -> FSResult<(), S::Error> {
+        // before we actually start removing stuff,
+        // let's make sure there are no read-only files
+
+        if self.check_for_readonly_files(path.clone())? {
+            log::error!(concat!(
+                "A read-only file has been found ",
+                "in a directory pending deletion."
+            ));
+            return Err(FSError::ReadOnlyFile);
+        }
+
+        // we have checked everything, this is safe to use
+        self.remove_dir_all_unchecked(path)?;
+
+        Ok(())
+    }
+
+    /// Like [`remove_dir_all()`](FileSystem::remove_dir_all),
+    /// but also removes read-only files.
+    ///
+    /// **USE WITH EXTREME CAUTION!**
+    pub fn remove_dir_all_unchecked(&mut self, path: PathBuf) -> FSResult<(), S::Error> {
+        for entry in self.read_dir(path.clone())? {
+            if entry.path.is_dir() {
+                self.remove_dir_all(entry.path.to_owned())?;
+            } else if entry.path.is_file() {
+                self.remove_file_unchecked(entry.path.to_owned())?;
+            } else {
+                unreachable!()
+            }
+        }
+
+        self.remove_empty_dir(path)?;
+
+        Ok(())
+    }
+
+    /// Check `path` recursively to see if there are any read-only files in it
+    ///
+    /// If successful, the `bool` returned indicates
+    /// whether or not at least 1 (one) read-only file has been found
+    pub fn check_for_readonly_files(&mut self, path: PathBuf) -> FSResult<bool, S::Error> {
+        for entry in self.read_dir(path)? {
+            let read_only_found = if entry.path.is_dir() {
+                self.check_for_readonly_files(entry.path.to_owned())?
+            } else if entry.path.is_file() {
+                entry.attributes.read_only
+            } else {
+                unreachable!()
+            };
+
+            if read_only_found {
+                // we have found at least 1 read-only file,
+                // no need to search any further
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
     /// Get a corresponding [`RWFile`] object from a [`PathBuf`]
     ///
     /// Borrows `&mut self` until that [`RWFile`] object is dropped, effectively locking `self` until that file closed
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
     pub fn get_rw_file(&mut self, path: PathBuf) -> FSResult<RWFile<'_, 'a, S>, S::Error> {
-        self._raise_io_rw_result()?;
+        let rw_file = self.get_rw_file_unchecked(path)?;
 
-        let ro_file = self.get_ro_file(path)?;
-        if ro_file.attributes.read_only {
+        if rw_file.attributes.read_only {
             return Err(FSError::ReadOnlyFile);
-        };
+        }
 
-        Ok(RWFile { ro_file })
+        Ok(rw_file)
     }
 
     /// Sync any pending changes back to the storage medium and drop

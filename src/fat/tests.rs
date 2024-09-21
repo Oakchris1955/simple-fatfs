@@ -236,6 +236,39 @@ fn remove_empty_dir() {
 }
 
 #[test]
+fn remove_nonempty_dir_with_readonly_file() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT16.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    let dir_path = PathBuf::from("/rootdir/");
+
+    // the directory should contain a read-only file (example.txt)
+    let del_result = fs.remove_dir_all(dir_path.clone());
+    match del_result {
+        Err(err) => match err {
+            FSError::ReadOnlyFile => (),
+            _ => panic!("unexpected IOError: {:?}", err),
+        },
+        _ => panic!("the directory shouldn't have been removed already"),
+    }
+
+    // this should now remove the directory
+    fs.remove_dir_all_unchecked(dir_path.clone()).unwrap();
+
+    // the directory should now be gone
+    let dir_result = fs.read_dir(dir_path);
+    match dir_result {
+        Err(err) => match err {
+            FSError::NotFound => (),
+            _ => panic!("unexpected IOError: {:?}", err),
+        },
+        _ => panic!("the directory should have been deleted by now"),
+    }
+}
+
+#[test]
 #[allow(non_snake_case)]
 fn FAT_tables_after_write_are_identical() {
     use std::io::Cursor;
@@ -489,7 +522,7 @@ fn remove_fat32_file() {
 }
 
 #[test]
-fn remove_fat32_dir() {
+fn remove_empty_fat32_dir() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
@@ -498,6 +531,28 @@ fn remove_fat32_dir() {
     let dir_path = PathBuf::from("/emptydir/");
 
     fs.remove_empty_dir(dir_path.clone()).unwrap();
+
+    // the directory should now be gone
+    let dir_result = fs.read_dir(dir_path);
+    match dir_result {
+        Err(err) => match err {
+            FSError::NotFound => (),
+            _ => panic!("unexpected IOError: {:?}", err),
+        },
+        _ => panic!("the directory should have been deleted by now"),
+    }
+}
+
+#[test]
+fn remove_nonempty_fat32_dir() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT32.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    let dir_path = PathBuf::from("/secret/");
+
+    fs.remove_dir_all(dir_path.clone()).unwrap();
 
     // the directory should now be gone
     let dir_result = fs.read_dir(dir_path);
