@@ -1136,57 +1136,25 @@ where
     ///
     /// Note: No validation is done to check whether or not the chain is valid
     pub(crate) fn remove_entry_chain(&mut self, chain: &DirEntryChain) -> Result<(), S::Error> {
-        // we begin by removing the corresponding entries...
         let mut entries_freed = 0;
-        let mut current_offset = chain.location.index;
+        let mut current_entry = chain.location.clone();
 
-        // current_cluster_option is `None` if we are dealing with a root directory entry
-        let (mut current_sector, current_cluster_option): (u32, Option<u32>) =
-            match chain.location.unit {
-                EntryLocationUnit::RootDirSector(root_dir_sector) => (
-                    (root_dir_sector + self.props.first_root_dir_sector).into(),
-                    None,
-                ),
-                EntryLocationUnit::DataCluster(data_cluster) => (
-                    self.data_cluster_to_partition_sector(data_cluster),
-                    Some(data_cluster),
-                ),
-            };
-
-        while entries_freed < chain.len {
-            if current_sector as u64 != self.stored_sector {
-                self.read_nth_sector(current_sector.into())?;
-            }
-
-            // we won't even bother zeroing the entire thing, just the first byte
-            let byte_offset = current_offset as usize * DIRENTRY_SIZE;
-            self.sector_buffer[byte_offset] = UNUSED_ENTRY;
-            self.buffer_modified = true;
-
-            log::trace!(
-                "freed entry at sector {} with byte offset {}",
-                current_sector,
-                byte_offset
-            );
-
-            if current_offset + 1 >= (self.sector_size() / DIRENTRY_SIZE as u32) {
-                // we have moved to a new sector
-                current_sector += 1;
-
-                if let Some(mut current_cluster) = current_cluster_option {
-                    // data region
-                    if self.partition_sector_to_data_cluster(current_sector) != current_cluster {
-                        current_cluster = self.get_next_cluster(current_cluster)?.unwrap();
-                        current_sector = self.data_cluster_to_partition_sector(current_cluster);
-                    }
-                }
-
-                current_offset = 0;
-            } else {
-                current_offset += 1
-            }
+        loop {
+            current_entry.free_entry(self)?;
 
             entries_freed += 1;
+
+            if entries_freed >= chain.len {
+                break;
+            }
+
+            current_entry = match current_entry.next_entry(self)? {
+                Some(current_entry) => current_entry,
+                None => unreachable!(
+                    concat!("It is guaranteed that at least as many entries ",
+                    "as there are in chain exist, since we counted them when initializing the struct")
+                ),
+            };
         }
 
         Ok(())

@@ -295,15 +295,109 @@ impl EntryLocationUnit {
             EntryLocationUnit::DataCluster(fs.partition_sector_to_data_cluster(sector))
         }
     }
+
+    pub(crate) fn get_max_offset<S>(&self, fs: &mut FileSystem<S>) -> u64
+    where
+        S: Read + Write + Seek,
+    {
+        match self {
+            EntryLocationUnit::DataCluster(_) => fs.props.cluster_size,
+            EntryLocationUnit::RootDirSector(_) => fs.props.sector_size.into(),
+        }
+    }
+
+    pub(crate) fn get_entry_sector<S>(&self, fs: &mut FileSystem<S>) -> u64
+    where
+        S: Read + Write + Seek,
+    {
+        match self {
+            EntryLocationUnit::RootDirSector(root_dir_sector) => {
+                (root_dir_sector + fs.props.first_root_dir_sector).into()
+            }
+            EntryLocationUnit::DataCluster(data_cluster) => {
+                fs.data_cluster_to_partition_sector(*data_cluster).into()
+            }
+        }
+    }
+
+    pub(crate) fn get_next_unit<S>(
+        &self,
+        fs: &mut FileSystem<S>,
+    ) -> Result<Option<EntryLocationUnit>, S::Error>
+    where
+        S: Read + Write + Seek,
+    {
+        match self {
+            EntryLocationUnit::RootDirSector(sector) => match fs.boot_record {
+                BootRecord::Fat(boot_record_fat) => {
+                    if boot_record_fat.root_dir_sectors() == 0 {
+                        unreachable!(concat!("This should be zero iff the FAT type if FAT32, ",
+                    "in which case we won't even be reading root directory sectors, since it doesn't exist"))
+                    }
+
+                    if *sector
+                        >= fs.props.first_root_dir_sector + boot_record_fat.root_dir_sectors()
+                    {
+                        Ok(None)
+                    } else {
+                        Ok(Some(EntryLocationUnit::RootDirSector(sector + 1)))
+                    }
+                }
+                BootRecord::ExFAT(_) => todo!("ExFAT is not implemented yet"),
+            },
+            EntryLocationUnit::DataCluster(cluster) => Ok(fs
+                .get_next_cluster(*cluster)?
+                .map(EntryLocationUnit::DataCluster)),
+        }
+    }
 }
 
 /// The location of a [`FATDirEntry`]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct EntryLocation {
     /// the location of the first corresponding entry's data unit
     pub(crate) unit: EntryLocationUnit,
     /// the first entry's index/offset from the start of the data unit
     pub(crate) index: u32,
+}
+
+impl EntryLocation {
+    pub(crate) fn free_entry<S>(&self, fs: &mut FileSystem<S>) -> Result<(), S::Error>
+    where
+        S: Read + Write + Seek,
+    {
+        let entry_sector = self.unit.get_entry_sector(fs);
+        fs.read_nth_sector(entry_sector)?;
+
+        let byte_offset = self.index as usize * DIRENTRY_SIZE;
+        fs.sector_buffer[byte_offset] = UNUSED_ENTRY;
+        fs.buffer_modified = true;
+
+        Ok(())
+    }
+
+    pub(crate) fn next_entry<S>(
+        mut self,
+        fs: &mut FileSystem<S>,
+    ) -> Result<Option<EntryLocation>, S::Error>
+    where
+        S: Read + Write + Seek,
+    {
+        self.index += 1;
+
+        // we haven't advanced to a new unit, we return immediately
+        if u64::from(self.index) < self.unit.get_max_offset(fs) {
+            return Ok(Some(self));
+        }
+
+        // we try to advance to the next entry unit (if it exists)
+        Ok(self.unit.get_next_unit(fs)?.map(|unit| {
+            self.unit = unit;
+            self.index = 0;
+
+            self
+        }))
+    }
 }
 
 /// The location of a chain of [`FATDirEntry`]
