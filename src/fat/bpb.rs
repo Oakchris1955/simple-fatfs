@@ -92,8 +92,7 @@ impl BootRecordFAT {
     /// The size of the root directory (unless we have FAT32, in which case the size will be 0)
     /// This calculation will round up
     pub(crate) fn root_dir_sectors(&self) -> u16 {
-        ((self.bpb.root_entry_count * DIRENTRY_SIZE as u16) + (self.bpb.bytes_per_sector - 1))
-            / self.bpb.bytes_per_sector
+        (self.bpb.root_entry_count * DIRENTRY_SIZE as u16).div_ceil(self.bpb.bytes_per_sector)
     }
 
     #[inline]
