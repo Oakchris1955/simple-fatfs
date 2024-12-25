@@ -16,6 +16,7 @@ log = "0.4.22"
 serde = { version = "1.0.204", default-features = false, features = [ "alloc", "derive" ] }
 serde-big-array = "0.5.1"
 time = { version = "0.3.36", default-features = false, features = [ "alloc", "parsing", "macros" ]}
+typed-path = { version = "0.10.0", default-features = false }
 
 [features]
 default = ["std"]

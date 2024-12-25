@@ -127,7 +127,7 @@ where
     #[displaydoc("An internal FS error occured: {0}")]
     InternalFSError(InternalFSError),
     /**
-     The [PathBuf](`crate::path::PathBuf`) provided is malformed.
+     The [Path](`crate::Path`) provided is malformed.
 
      This is mostly an error variant used for internal testing.
      If you get this error, open an issue: <https://github.com/Oakchris1955/simple-fatfs/issues>

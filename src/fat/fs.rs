@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::{error::*, io::prelude::*, path::PathBuf, time::*, utils, SPECIAL_ENTRIES};
+use crate::{error::*, io::prelude::*, path::*, time::*, utils};
 
 use core::{cmp, ops};
 
@@ -178,6 +178,7 @@ pub(crate) struct RawProperties {
 #[derive(Debug)]
 pub struct Properties {
     pub(crate) path: PathBuf,
+    pub(crate) is_dir: bool,
     pub(crate) attributes: Attributes,
     pub(crate) created: PrimitiveDateTime,
     pub(crate) modified: PrimitiveDateTime,
@@ -195,6 +196,18 @@ impl Properties {
     /// Get the corresponding [`PathBuf`] to this entry
     pub fn path(&self) -> &PathBuf {
         &self.path
+    }
+
+    #[inline]
+    /// Check whether this entry belongs to a directory
+    pub fn is_dir(&self) -> bool {
+        self.is_dir
+    }
+
+    #[inline]
+    /// Check whether this entry belongs to a file
+    pub fn is_file(&self) -> bool {
+        !self.is_dir()
     }
 
     #[inline]
@@ -242,6 +255,7 @@ impl Properties {
     fn from_raw(raw: RawProperties, path: PathBuf) -> Self {
         Properties {
             path,
+            is_dir: raw.is_dir,
             attributes: raw.attributes.into(),
             created: raw.created,
             modified: raw.modified,
@@ -1273,7 +1287,10 @@ where
     /// Like [`Self::get_rw_file`], but will ignore the read-only flag (if it is present)
     ///
     /// This is a private function for obvious reasons
-    fn get_rw_file_unchecked(&mut self, path: PathBuf) -> FSResult<RWFile<'_, 'a, S>, S::Error> {
+    fn get_rw_file_unchecked<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+    ) -> FSResult<RWFile<'_, 'a, S>, S::Error> {
         self._raise_io_rw_result()?;
 
         let ro_file = self.get_ro_file(path)?;
@@ -1290,20 +1307,20 @@ where
     /// Read all the entries of a directory ([`PathBuf`]) into [`Vec<DirEntry>`]
     ///
     /// Fails if `path` doesn't represent a directory, or if that directory doesn't exist
-    pub fn read_dir(&mut self, path: PathBuf) -> FSResult<Vec<DirEntry>, S::Error> {
-        if path.is_malformed() {
-            return Err(FSError::MalformedPath);
-        }
-        if !path.is_dir() {
-            log::error!("Not a directory");
-            return Err(FSError::NotADirectory);
-        }
+    pub fn read_dir<P: AsRef<Path>>(&mut self, path: P) -> FSResult<Vec<DirEntry>, S::Error> {
+        // normalize the given path
+        let path = path.as_ref().normalize();
 
         let mut entries = self.process_root_dir()?;
 
-        for dir_name in path.clone() {
+        for dir_name in path
+            .components()
+            // the path is normalized, so this essentially only filters prefixes and the root directory
+            .filter(|component| matches!(component, WindowsComponent::Normal(_)))
+        {
             let dir_cluster = match entries.iter().find(|entry| {
-                entry.name == dir_name && entry.attributes.contains(RawAttributes::DIRECTORY)
+                entry.name == dir_name.as_str()
+                    && entry.attributes.contains(RawAttributes::DIRECTORY)
             }) {
                 Some(entry) => entry.data_cluster,
                 None => {
@@ -1321,15 +1338,15 @@ where
             .into_iter()
             .filter(|x| self.filter.filter(x))
             // we shouldn't expose the special entries to the user
-            .filter(|x| !SPECIAL_ENTRIES.contains(&x.name.as_str()))
+            .filter(|x| {
+                ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
+                    .contains(&x.name.as_str())
+            })
             .map(|rawentry| {
-                let mut entry_path = path.clone();
+                let mut entry_path = path.to_path_buf();
 
-                entry_path.push(format!(
-                    "{}{}",
-                    rawentry.name,
-                    if rawentry.is_dir { "/" } else { "" }
-                ));
+                entry_path.push(PathBuf::from(&rawentry.name));
+
                 DirEntry {
                     entry: Properties::from_raw(rawentry, entry_path),
                 }
@@ -1342,13 +1359,17 @@ where
     /// Borrows `&mut self` until that [`ROFile`] object is dropped, effectively locking `self` until that file closed
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
-    pub fn get_ro_file(&mut self, path: PathBuf) -> FSResult<ROFile<'_, 'a, S>, S::Error> {
-        if path.is_malformed() {
-            return Err(FSError::MalformedPath);
-        }
+    pub fn get_ro_file<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+    ) -> FSResult<ROFile<'_, 'a, S>, S::Error> {
+        let path = path.as_ref();
 
         if let Some(file_name) = path.file_name() {
-            let parent_dir = self.read_dir(path.parent())?;
+            let parent_dir = self.read_dir(
+                path.parent()
+                    .expect("we aren't in the root directory, this shouldn't panic"),
+            )?;
             match parent_dir.into_iter().find(|direntry| {
                 direntry
                     .path()
@@ -1395,7 +1416,7 @@ where
     ///
     /// This is an alias to `self.get_rw_file(path)?.remove()?`
     #[inline]
-    pub fn remove_file(&mut self, path: PathBuf) -> FSResult<(), S::Error> {
+    pub fn remove_file<P: AsRef<Path>>(&mut self, path: P) -> FSResult<(), S::Error> {
         self.get_rw_file(path)?.remove()?;
 
         Ok(())
@@ -1405,7 +1426,7 @@ where
     ///
     /// **USE WITH EXTREME CAUTION!**
     #[inline]
-    pub fn remove_file_unchecked(&mut self, path: PathBuf) -> FSResult<(), S::Error> {
+    pub fn remove_file_unchecked<P: AsRef<Path>>(&mut self, path: P) -> FSResult<(), S::Error> {
         self.get_rw_file_unchecked(path)?.remove()?;
 
         Ok(())
@@ -1414,17 +1435,15 @@ where
     /// Remove an empty directory from the filesystem
     ///
     /// Errors if the path provided points to the root directory
-    pub fn remove_empty_dir(&mut self, path: PathBuf) -> FSResult<(), S::Error> {
-        if path.is_malformed() {
-            return Err(FSError::MalformedPath);
-        }
+    pub fn remove_empty_dir<P: AsRef<Path>>(&mut self, path: P) -> FSResult<(), S::Error> {
+        let path = path.as_ref();
 
-        if !path.is_dir() {
-            log::error!("Not a directory");
-            return Err(FSError::NotADirectory);
-        }
-
-        if path == PathBuf::new() {
+        if path
+            .components()
+            .last()
+            .expect("this iterator will always yield at least the root directory")
+            == WindowsComponent::root()
+        {
             // we are in the root directory, we can't remove it
             return Err(S::Error::new(
                 <S::Error as IOError>::Kind::new_unsupported(),
@@ -1433,13 +1452,15 @@ where
             .into());
         }
 
-        let dir_entries = self.read_dir(path.clone())?;
+        let dir_entries = self.read_dir(path)?;
 
         if dir_entries.len() > NONROOT_MIN_DIRENTRIES {
             return Err(FSError::DirectoryNotEmpty);
         }
 
-        let parent_path = path.parent();
+        let parent_path = path
+            .parent()
+            .expect("we aren't in the root directory, this shouldn't panic");
 
         let parent_dir_entries = self.read_dir(parent_path)?;
 
@@ -1464,11 +1485,11 @@ where
     /// This will fail if there is at least 1 (one) read-only file
     /// in this directory or in any subdirectory. To avoid this behaviour,
     /// use [`remove_dir_all_unchecked()`](FileSystem::remove_dir_all_unchecked)
-    pub fn remove_dir_all(&mut self, path: PathBuf) -> FSResult<(), S::Error> {
+    pub fn remove_dir_all<P: AsRef<Path>>(&mut self, path: P) -> FSResult<(), S::Error> {
         // before we actually start removing stuff,
         // let's make sure there are no read-only files
 
-        if self.check_for_readonly_files(path.clone())? {
+        if self.check_for_readonly_files(&path)? {
             log::error!(concat!(
                 "A read-only file has been found ",
                 "in a directory pending deletion."
@@ -1477,7 +1498,7 @@ where
         }
 
         // we have checked everything, this is safe to use
-        self.remove_dir_all_unchecked(path)?;
+        self.remove_dir_all_unchecked(&path)?;
 
         Ok(())
     }
@@ -1486,12 +1507,14 @@ where
     /// but also removes read-only files.
     ///
     /// **USE WITH EXTREME CAUTION!**
-    pub fn remove_dir_all_unchecked(&mut self, path: PathBuf) -> FSResult<(), S::Error> {
-        for entry in self.read_dir(path.clone())? {
-            if entry.path.is_dir() {
-                self.remove_dir_all(entry.path.to_owned())?;
-            } else if entry.path.is_file() {
-                self.remove_file_unchecked(entry.path.to_owned())?;
+    pub fn remove_dir_all_unchecked<P: AsRef<Path>>(&mut self, path: P) -> FSResult<(), S::Error> {
+        let path = path.as_ref();
+
+        for entry in self.read_dir(path)? {
+            if entry.is_dir() {
+                self.remove_dir_all(&entry.path)?;
+            } else if entry.is_file() {
+                self.remove_file_unchecked(&entry.path)?;
             } else {
                 unreachable!()
             }
@@ -1506,11 +1529,16 @@ where
     ///
     /// If successful, the `bool` returned indicates
     /// whether or not at least 1 (one) read-only file has been found
-    pub fn check_for_readonly_files(&mut self, path: PathBuf) -> FSResult<bool, S::Error> {
+    pub fn check_for_readonly_files<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+    ) -> FSResult<bool, S::Error> {
+        let path = path.as_ref();
+
         for entry in self.read_dir(path)? {
-            let read_only_found = if entry.path.is_dir() {
-                self.check_for_readonly_files(entry.path.to_owned())?
-            } else if entry.path.is_file() {
+            let read_only_found = if entry.is_dir() {
+                self.check_for_readonly_files(&entry.path)?
+            } else if entry.is_file() {
                 entry.attributes.read_only
             } else {
                 unreachable!()
@@ -1531,7 +1559,10 @@ where
     /// Borrows `&mut self` until that [`RWFile`] object is dropped, effectively locking `self` until that file closed
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
-    pub fn get_rw_file(&mut self, path: PathBuf) -> FSResult<RWFile<'_, 'a, S>, S::Error> {
+    pub fn get_rw_file<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+    ) -> FSResult<RWFile<'_, 'a, S>, S::Error> {
         let rw_file = self.get_rw_file_unchecked(path)?;
 
         if rw_file.attributes.read_only {

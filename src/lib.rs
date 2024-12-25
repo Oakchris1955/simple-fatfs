@@ -25,11 +25,11 @@
 //!     // We can either pass by value of by (mutable) reference
 //!     let mut fs = FileSystem::from_storage(&mut cursor).unwrap();
 //!
-//!     // Let's see what entries are in the root directory
+//!     // Let's see what entries there are in the root directory
 //!     for entry in fs.read_dir(PathBuf::from("/")).unwrap() {
-//!         if entry.path().is_dir() {
+//!         if entry.is_dir() {
 //!             println!("Directory: {}", entry.path())
-//!         } else if entry.path().is_file() {
+//!         } else if entry.is_file() {
 //!             println!("File: {}", entry.path())
 //!         } else {
 //!             unreachable!()
