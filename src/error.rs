@@ -115,6 +115,8 @@ pub enum InternalFSError {
     MismatchingFATTables,
     /// Encountered a malformed cluster chain
     MalformedClusterChain,
+    /// Encountered a malformed directory entry chain
+    MalformedEntryChain,
 }
 
 /// An error indicating that a filesystem-related operation has failed

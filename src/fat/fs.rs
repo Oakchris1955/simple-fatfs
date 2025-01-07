@@ -174,6 +174,21 @@ pub(crate) struct RawProperties {
     pub(crate) chain: DirEntryChain,
 }
 
+impl RawProperties {
+    pub(crate) fn into_dir_entry<P>(self, path: P) -> DirEntry
+    where
+        P: AsRef<Path>,
+    {
+        let mut entry_path = path.as_ref().to_path_buf();
+
+        entry_path.push(PathBuf::from(&self.name));
+
+        DirEntry {
+            entry: Properties::from_raw(self, entry_path),
+        }
+    }
+}
+
 /// A container for file/directory properties
 #[derive(Debug)]
 pub struct Properties {
@@ -263,6 +278,31 @@ impl Properties {
             file_size: raw.file_size,
             data_cluster: raw.data_cluster,
             chain: raw.chain,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DirInfo {
+    path: PathBuf,
+    chain_start: EntryLocationUnit,
+}
+
+impl DirInfo {
+    fn at_root_dir(boot_record: &BootRecord) -> Self {
+        DirInfo {
+            // this is basically the root directory
+            path: PathBuf::from(path_consts::SEPARATOR_STR),
+            chain_start: match boot_record {
+                BootRecord::Fat(boot_record_fat) => match boot_record_fat.ebr {
+                    // it doesn't really matter what value we put in here, since we won't be using it
+                    Ebr::FAT12_16(_ebr_fat12_16) => EntryLocationUnit::RootDirSector(0),
+                    Ebr::FAT32(ebr_fat32, _) => {
+                        EntryLocationUnit::DataCluster(ebr_fat32.root_cluster)
+                    }
+                },
+                BootRecord::ExFAT(_boot_record_exfat) => todo!(),
+            },
         }
     }
 }
@@ -596,6 +636,8 @@ where
     fsinfo_modified: bool,
     pub(crate) stored_sector: u64,
 
+    dir_info: DirInfo,
+
     clock: &'a dyn Clock,
 
     pub(crate) boot_record: BootRecord,
@@ -731,6 +773,7 @@ where
             fsinfo_modified: false,
             stored_sector,
             clock: &STATIC_DEFAULT_CLOCK,
+            dir_info: DirInfo::at_root_dir(&boot_record),
             boot_record,
             fat_type,
             props,
@@ -753,7 +796,7 @@ impl<S> FileSystem<'_, S>
 where
     S: Read + Write + Seek,
 {
-    fn process_root_dir(&mut self) -> FSResult<Vec<RawProperties>, S::Error> {
+    fn _process_root_dir(&mut self) -> FSResult<Vec<RawProperties>, S::Error> {
         match self.boot_record {
             BootRecord::Fat(boot_record_fat) => match boot_record_fat.ebr {
                 Ebr::FAT12_16(_ebr_fat12_16) => {
@@ -772,14 +815,14 @@ where
                 }
                 Ebr::FAT32(ebr_fat32, _) => {
                     let cluster = ebr_fat32.root_cluster;
-                    self.process_normal_dir(cluster)
+                    self._process_normal_dir(cluster)
                 }
             },
             BootRecord::ExFAT(_boot_record_exfat) => todo!(),
         }
     }
 
-    fn process_normal_dir(
+    fn _process_normal_dir(
         &mut self,
         mut data_cluster: u32,
     ) -> FSResult<Vec<RawProperties>, S::Error> {
@@ -815,6 +858,128 @@ where
         }
 
         Ok(entry_parser.finish())
+    }
+
+    fn process_current_dir(&mut self) -> FSResult<Vec<RawProperties>, S::Error> {
+        match self.dir_info.chain_start {
+            EntryLocationUnit::RootDirSector(_) => self._process_root_dir(),
+            EntryLocationUnit::DataCluster(data_cluster) => self._process_normal_dir(data_cluster),
+        }
+    }
+
+    /// Goes to the parent directory.
+    ///
+    /// If this is the root directory, it does nothing
+    fn _go_to_parent_dir(&mut self) -> FSResult<(), S::Error> {
+        if let Some(parent_path) = self.dir_info.path.parent() {
+            let parent_pathbuf = parent_path.to_path_buf();
+
+            let entries = self.process_current_dir()?;
+
+            let parent_entry = entries
+                .iter()
+                .filter(|entry| entry.is_dir)
+                .find(|entry| entry.name == path_consts::PARENT_DIR_STR)
+                .ok_or(FSError::InternalFSError(
+                    InternalFSError::MalformedEntryChain,
+                ))?;
+
+            self.dir_info.path = parent_pathbuf;
+            self.dir_info.chain_start = EntryLocationUnit::DataCluster(parent_entry.data_cluster);
+        } else {
+            self._go_to_root_directory();
+        }
+
+        Ok(())
+    }
+
+    /// Goes to the given child directory
+    ///
+    /// If it doesn't exist, the encapsulated [`Option`] will be `None`
+    fn _go_to_child_dir(&mut self, name: &str) -> FSResult<(), S::Error> {
+        let entries = self.process_current_dir()?;
+
+        let child_entry = entries
+            .iter()
+            .find(|entry| entry.name == name)
+            .ok_or(FSError::NotFound)?;
+
+        if !child_entry.is_dir {
+            return Err(FSError::NotADirectory);
+        }
+
+        self.dir_info.path.push(&child_entry.name);
+        self.dir_info.chain_start = EntryLocationUnit::DataCluster(child_entry.data_cluster);
+
+        Ok(())
+    }
+
+    fn _go_to_root_directory(&mut self) {
+        self.dir_info = DirInfo::at_root_dir(&self.boot_record);
+    }
+
+    // This is a helper function for `go_to_dir`
+    fn _go_up_till_target<P>(&mut self, target: P) -> FSResult<(), S::Error>
+    where
+        P: AsRef<Path>,
+    {
+        let target = target.as_ref();
+
+        while self.dir_info.path != target {
+            self._go_to_parent_dir()?;
+        }
+
+        Ok(())
+    }
+
+    // This is a helper function for `go_to_dir`
+    fn _go_down_till_target<P>(&mut self, target: P) -> FSResult<(), S::Error>
+    where
+        P: AsRef<Path>,
+    {
+        for dir_name in target.as_ref().components().filter(keep_path_normals) {
+            self._go_to_child_dir(dir_name.as_str())?;
+        }
+
+        Ok(())
+    }
+
+    // There are many ways this can be achieved. That's how we'll do it:
+    // Firstly, we find the common path prefix of the `current_path` and the `target`
+    // Then, we check whether it is faster to start from the root directory
+    // and get down to the target or whether we should start from where we are
+    // now, go up till we find the common prefix path and then go down to the `target`
+
+    /// Navigates to the `target` [`Path`]
+    pub(crate) fn go_to_dir<P>(&mut self, target: P) -> FSResult<(), S::Error>
+    where
+        P: AsRef<Path>,
+    {
+        let target = target.as_ref();
+
+        if self.dir_info.path == target {
+            // we are already where we want to be
+            return Ok(());
+        }
+
+        let common_path_prefix = find_common_path_prefix(&self.dir_info.path, target);
+
+        // Note: these are the distances to the common prefix, not the target path
+        let distance_from_root = common_path_prefix.ancestors().count() - 1;
+        let distance_from_current_path =
+            (self.dir_info.path.ancestors().count() - 1) - distance_from_root;
+
+        if distance_from_root <= distance_from_current_path {
+            self._go_to_root_directory();
+
+            self._go_down_till_target(target)?;
+        } else {
+            self._go_up_till_target(target)?;
+
+            self._go_down_till_target(target)?;
+        }
+
+        Ok(())
     }
 
     /// Gets the next free cluster. Returns an IO [`Result`]
@@ -1311,29 +1476,11 @@ where
         // normalize the given path
         let path = path.as_ref().normalize();
 
-        let mut entries = self.process_root_dir()?;
+        self.go_to_dir(&path)?;
 
-        for dir_name in path
-            .components()
-            // the path is normalized, so this essentially only filters prefixes and the root directory
-            .filter(|component| matches!(component, WindowsComponent::Normal(_)))
-        {
-            let dir_cluster = match entries.iter().find(|entry| {
-                entry.name == dir_name.as_str()
-                    && entry.attributes.contains(RawAttributes::DIRECTORY)
-            }) {
-                Some(entry) => entry.data_cluster,
-                None => {
-                    log::error!("Directory {} not found", path);
-                    return Err(FSError::NotFound);
-                }
-            };
+        let entries = self.process_current_dir()?;
 
-            entries = self.process_normal_dir(dir_cluster)?;
-        }
-
-        // if we haven't returned by now, that means that the entries vector
-        // contains what we want, let's map it to DirEntries and return
+        // let's map the entries vector to DirEntries and return
         Ok(entries
             .into_iter()
             .filter(|x| self.filter.filter(x))
@@ -1342,15 +1489,7 @@ where
                 ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
                     .contains(&x.name.as_str())
             })
-            .map(|rawentry| {
-                let mut entry_path = path.to_path_buf();
-
-                entry_path.push(PathBuf::from(&rawentry.name));
-
-                DirEntry {
-                    entry: Properties::from_raw(rawentry, entry_path),
-                }
-            })
+            .map(|rawentry| rawentry.into_dir_entry(&path))
             .collect())
     }
 
@@ -1370,6 +1509,7 @@ where
                 path.parent()
                     .expect("we aren't in the root directory, this shouldn't panic"),
             )?;
+
             match parent_dir.into_iter().find(|direntry| {
                 direntry
                     .path()
