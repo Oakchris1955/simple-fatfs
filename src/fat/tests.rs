@@ -176,7 +176,7 @@ fn remove_root_dir_file() {
 
     // the bee movie script (here) is in the root directory region
     let file_path = PathBuf::from("/bee movie script.txt");
-    let file = fs.get_rw_file(file_path.clone()).unwrap();
+    let file = fs.get_rw_file(&file_path).unwrap();
     file.remove().unwrap();
 
     // the file should now be gone
@@ -199,7 +199,7 @@ fn remove_data_region_file() {
 
     // the bee movie script (here) is in the data region
     let file_path = PathBuf::from("/test/bee movie script.txt");
-    let file = fs.get_rw_file(file_path.clone()).unwrap();
+    let file = fs.get_rw_file(&file_path).unwrap();
     file.remove().unwrap();
 
     // the file should now be gone
@@ -222,7 +222,7 @@ fn remove_empty_dir() {
 
     let dir_path = PathBuf::from("/another root directory/");
 
-    fs.remove_empty_dir(dir_path.clone()).unwrap();
+    fs.remove_empty_dir(&dir_path).unwrap();
 
     // the directory should now be gone
     let dir_result = fs.read_dir(dir_path);
@@ -245,7 +245,7 @@ fn remove_nonempty_dir_with_readonly_file() {
     let dir_path = PathBuf::from("/rootdir/");
 
     // the directory should contain a read-only file (example.txt)
-    let del_result = fs.remove_dir_all(dir_path.clone());
+    let del_result = fs.remove_dir_all(&dir_path);
     match del_result {
         Err(err) => match err {
             FSError::ReadOnlyFile => (),
@@ -344,7 +344,7 @@ fn get_hidden_file() {
     let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
     let file_path = PathBuf::from("/hidden");
-    let file_result = fs.get_ro_file(file_path.clone());
+    let file_result = fs.get_ro_file(&file_path);
     match file_result {
         Err(err) => match err {
             FSError::NotFound => (),
@@ -507,7 +507,7 @@ fn remove_fat32_file() {
 
     let file_path = PathBuf::from("/secret/bee movie script.txt");
 
-    let file = fs.get_rw_file(file_path.clone()).unwrap();
+    let file = fs.get_rw_file(&file_path).unwrap();
     file.remove().unwrap();
 
     // the file should now be gone
@@ -530,7 +530,7 @@ fn remove_empty_fat32_dir() {
 
     let dir_path = PathBuf::from("/emptydir/");
 
-    fs.remove_empty_dir(dir_path.clone()).unwrap();
+    fs.remove_empty_dir(&dir_path).unwrap();
 
     // the directory should now be gone
     let dir_result = fs.read_dir(dir_path);
@@ -552,7 +552,7 @@ fn remove_nonempty_fat32_dir() {
 
     let dir_path = PathBuf::from("/secret/");
 
-    fs.remove_dir_all(dir_path.clone()).unwrap();
+    fs.remove_dir_all(&dir_path).unwrap();
 
     // the directory should now be gone
     let dir_result = fs.read_dir(dir_path);
