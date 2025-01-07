@@ -566,6 +566,26 @@ fn remove_nonempty_fat32_dir() {
 }
 
 #[test]
+fn attempt_to_remove_file_as_directory() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT32.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    let dir_path = PathBuf::from("/hello.txt");
+
+    let fs_result = fs.remove_dir_all(dir_path);
+
+    match fs_result {
+        Err(err) => match err {
+            FSError::NotADirectory => (),
+            _ => panic!("unexpected IOError: {:?}", err),
+        },
+        _ => panic!("the filesystem struct should have detected that this isn't a directory"),
+    }
+}
+
+#[test]
 #[allow(non_snake_case)]
 fn FAT_tables_after_fat32_write_are_identical() {
     use crate::fat::{BootRecord, Ebr};
