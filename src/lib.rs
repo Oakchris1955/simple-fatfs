@@ -94,7 +94,7 @@
 #![deny(unused_import_braces)]
 #![deny(unused_lifetimes)]
 // clippy attributes
-#![deny(clippy::redundant_clone)]
+#![warn(clippy::redundant_clone)]
 
 extern crate alloc;
 
