@@ -6,7 +6,11 @@ use crate::time::EPOCH;
 use core::{fmt, iter, mem, num};
 
 #[cfg(not(feature = "std"))]
-use alloc::{borrow::ToOwned, string::String};
+use alloc::{
+    borrow::ToOwned,
+    boxed::Box,
+    string::{String, ToString},
+};
 
 use bitfield_struct::bitfield;
 use bitflags::bitflags;
