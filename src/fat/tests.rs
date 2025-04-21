@@ -53,24 +53,40 @@ fn read_file_in_root_dir() {
     assert_eq!(file_string, EXPECTED_STR);
 }
 
-static BEE_MOVIE_SCRIPT: &str = include_str!("../../tests/bee movie script.txt");
-fn assert_vec_is_bee_movie_script(buf: &[u8]) {
+fn assert_vec_is_string(buf: &[u8], expected_string: &str) {
     let string = std::str::from_utf8(buf).unwrap();
-    let expected_size = BEE_MOVIE_SCRIPT.len();
+    let expected_size = expected_string.len();
     assert_eq!(buf.len(), expected_size);
 
-    assert_eq!(string, BEE_MOVIE_SCRIPT);
+    assert_eq!(string, expected_string);
 }
-fn assert_file_is_bee_movie_script<S>(file: &mut ROFile<'_, '_, S>)
+fn assert_file_against_string<S>(file: &mut ROFile<'_, '_, S>, expected_string: &str)
 where
     S: Read + Write + Seek,
 {
     let mut buf = Vec::new();
     file.read_to_end(&mut buf).unwrap();
 
-    assert_vec_is_bee_movie_script(&buf);
+    assert_vec_is_string(&buf, expected_string);
 }
 
+static BEE_MOVIE_SCRIPT: &str = include_str!("../../tests/bee movie script.txt");
+fn assert_vec_is_bee_movie_script(buf: &[u8]) {
+    assert_vec_is_string(buf, BEE_MOVIE_SCRIPT)
+}
+fn assert_file_is_bee_movie_script<S>(file: &mut ROFile<'_, '_, S>)
+where
+    S: Read + Write + Seek,
+{
+    assert_file_against_string(file, BEE_MOVIE_SCRIPT);
+}
+static I_DONT_NEED_A_BADGE: &str = include_str!("../../tests/I don't need a badge.txt");
+fn assert_file_is_i_dont_need_a_badge<S>(file: &mut ROFile<'_, '_, S>)
+where
+    S: Read + Write + Seek,
+{
+    assert_file_against_string(file, I_DONT_NEED_A_BADGE);
+}
 #[test]
 fn read_huge_file() {
     use std::io::Cursor;
@@ -165,6 +181,38 @@ fn write_to_file() {
 
         assert_vec_is_bee_movie_script(&buf);
     }
+}
+
+#[test]
+fn create_root_dir_file() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT16.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    let mut file = fs.create_file(PathBuf::from("/new.txt")).unwrap();
+
+    file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
+    file.rewind().unwrap();
+
+    assert_file_is_i_dont_need_a_badge(&mut file);
+}
+
+#[test]
+fn create_subdir_file() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT16.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    let mut file = fs
+        .create_file(PathBuf::from("/another root directory/baby i am free.txt"))
+        .unwrap();
+
+    file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
+    file.rewind().unwrap();
+
+    assert_file_is_i_dont_need_a_badge(&mut file);
 }
 
 #[test]
@@ -428,6 +476,40 @@ fn read_file_fat32() {
         .unwrap();
 
     assert_file_is_bee_movie_script(&mut file);
+}
+
+#[test]
+fn create_file_root_dir_fat32() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT32.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    let mut file = fs
+        .create_file(PathBuf::from("/bee movie script or something ig.txt"))
+        .unwrap();
+
+    file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
+    file.rewind().unwrap();
+
+    assert_file_is_i_dont_need_a_badge(&mut file);
+}
+
+#[test]
+fn create_file_subdir_fat32() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT32.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    let mut file = fs
+        .create_file(PathBuf::from("/secret/baby i am free.txt"))
+        .unwrap();
+
+    file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
+    file.rewind().unwrap();
+
+    assert_file_is_i_dont_need_a_badge(&mut file);
 }
 
 #[test]
