@@ -2,7 +2,7 @@ use super::*;
 
 use crate::{error::*, io::prelude::*, path::*, time::*, utils};
 
-use core::{cmp, ops};
+use core::{cmp, iter, num, ops};
 
 #[cfg(not(feature = "std"))]
 use alloc::{
@@ -160,9 +160,10 @@ impl FATSectorProps {
 }
 
 /// A resolved file/directory entry (for internal usage only)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct RawProperties {
     pub(crate) name: String,
+    pub(crate) sfn: Sfn,
     pub(crate) is_dir: bool,
     pub(crate) attributes: RawAttributes,
     pub(crate) created: PrimitiveDateTime,
@@ -193,6 +194,7 @@ impl RawProperties {
 #[derive(Debug)]
 pub struct Properties {
     pub(crate) path: PathBuf,
+    pub(crate) sfn: Sfn,
     pub(crate) is_dir: bool,
     pub(crate) attributes: Attributes,
     pub(crate) created: PrimitiveDateTime,
@@ -211,6 +213,12 @@ impl Properties {
     /// Get the corresponding [`PathBuf`] to this entry
     pub fn path(&self) -> &PathBuf {
         &self.path
+    }
+
+    #[inline]
+    /// Get the corresponding [short filename](`Sfn`) for this entry
+    pub fn sfn(&self) -> &Sfn {
+        &self.sfn
     }
 
     #[inline]
@@ -270,6 +278,7 @@ impl Properties {
     fn from_raw(raw: RawProperties, path: PathBuf) -> Self {
         Properties {
             path,
+            sfn: raw.sfn,
             is_dir: raw.is_dir,
             attributes: raw.attributes.into(),
             created: raw.created,
@@ -440,6 +449,7 @@ impl EntryParser {
             ) {
                 self.entries.push(RawProperties {
                     name: filename,
+                    sfn: entry.sfn,
                     is_dir: entry.attributes.contains(RawAttributes::DIRECTORY),
                     attributes: entry.attributes,
                     created,
@@ -464,6 +474,90 @@ impl EntryParser {
         self.entries
     }
 }
+
+/// This is essentially the reverse of [`EntryParser`]
+#[derive(Debug)]
+struct EntryComposer<'a> {
+    entries: &'a [RawProperties],
+    entry_index: usize,
+
+    lfn_iter: Option<LFNEntryGenerator>,
+}
+
+impl<'a> EntryComposer<'a> {
+    fn from_entries(entries: &'a [RawProperties]) -> Self {
+        Self {
+            entries,
+            entry_index: 0,
+
+            lfn_iter: None,
+        }
+    }
+}
+
+impl Iterator for EntryComposer<'_> {
+    type Item = [u8; 32];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        use utils::bincode::bincode_config;
+
+        if self.entry_index >= self.entries.len() {
+            return None;
+        }
+
+        let current_entry = &self.entries[self.entry_index];
+
+        match &mut self.lfn_iter {
+            Some(lfn_iter) => match lfn_iter.next() {
+                Some(lfn_entry) => Some(
+                    bincode_config()
+                        .serialize(&lfn_entry)
+                        .expect("these are completely valid data, this shouldn't panic")
+                        .try_into()
+                        .expect(
+                            "the LFNEntry should be exactly 32 bytes in size, this shouldn't panic",
+                        ),
+                ),
+                None => {
+                    // this LFN generator has been exhausted, return the SFN entry
+                    self.lfn_iter = None;
+                    self.entry_index += 1;
+
+                    Some(bincode_config()
+                        .serialize(&FATDirEntry::from_props(current_entry.clone(), current_entry.sfn))
+                        .expect("these are completely valid data, this shouldn't panic")
+                        .try_into()
+                        .expect(
+                            "the FATDirEntry should be exactly 32 bytes in size, this shouldn't panic",
+                    ))
+                }
+            },
+            None => {
+                // no reason to generate a SFN if the filename is already a valid one
+                if current_entry.sfn.to_string() == current_entry.name {
+                    self.entry_index += 1;
+
+                    Some(bincode_config()
+                        .serialize(&FATDirEntry::from_props(current_entry.clone(), current_entry.sfn))
+                        .expect("these are completely valid data, this shouldn't panic")
+                        .try_into()
+                        .expect(
+                            "the FATDirEntry should be exactly 32 bytes in size, this shouldn't panic",
+                    ))
+                } else {
+                    self.lfn_iter = Some(LFNEntryGenerator::new(
+                        &current_entry.name,
+                        current_entry.sfn.gen_checksum(),
+                    ));
+
+                    self.next()
+                }
+            }
+        }
+    }
+}
+
+impl iter::FusedIterator for EntryComposer<'_> {}
 
 pub(crate) trait OffsetConversions {
     fn sector_size(&self) -> u32;
@@ -944,6 +1038,19 @@ where
         Ok(())
     }
 
+    /// Make sure that the sector stored in the sector buffer is the same as
+    /// the first sector of cahced directory chain
+    fn _go_to_cached_dir(&mut self) -> FSResult<(), S::Error> {
+        let dir_chain = self.dir_info.chain_start;
+        let target_sector = dir_chain.get_entry_sector(self);
+
+        if target_sector != self.stored_sector {
+            self.read_nth_sector(target_sector)?;
+        }
+
+        Ok(())
+    }
+
     // There are many ways this can be achieved. That's how we'll do it:
     // Firstly, we find the common path prefix of the `current_path` and the `target`
     // Then, we check whether it is faster to start from the root directory
@@ -958,7 +1065,10 @@ where
         let target = target.as_ref();
 
         if self.dir_info.path == target {
-            // we are already where we want to be
+            // there's a chance that the current loaded sector doesn't belong
+            // to the directory we have cached, so we must also navigate to the correct sector
+            self._go_to_cached_dir()?;
+
             return Ok(());
         }
 
@@ -1311,6 +1421,95 @@ where
         Ok(())
     }
 
+    /// Allocate room for at least `n` contiguous [`FATDirEntries`](FATDirEntry)
+    /// in the current directory entry chain
+    ///
+    /// This may or may not allocate new clusters
+    pub(crate) fn allocate_nth_entries(&mut self, n: u32) -> FSResult<EntryLocation, S::Error> {
+        // navigate to the cached directory, if we aren't already there
+        self._go_to_cached_dir()?;
+
+        // we may not even need to allocate new entries.
+        // let's check if there is a chain of unused entries big enough to be used
+        let mut first_entry =
+            EntryLocation::from_partition_sector(self.stored_sector.try_into().unwrap(), self);
+        let mut last_entry = first_entry.clone();
+
+        let mut chain_len = 0;
+
+        loop {
+            let entry_status = last_entry.entry_status(self)?;
+            match entry_status {
+                EntryStatus::Unused | EntryStatus::LastUnused => chain_len += 1,
+                EntryStatus::Used => chain_len = 0,
+            }
+
+            if chain_len >= n {
+                return Ok(first_entry);
+            }
+
+            if entry_status == EntryStatus::LastUnused {
+                break;
+            }
+
+            last_entry = last_entry
+                .next_entry(self)?
+                .ok_or(FSError::InternalFSError(
+                    InternalFSError::MalformedEntryChain,
+                ))?;
+
+            if entry_status == EntryStatus::Used {
+                first_entry = last_entry.clone();
+            }
+        }
+
+        // we have broken out of the loop, that means we reached the end of the chain
+        // of the already-allocated entries
+        match last_entry.unit {
+            EntryLocationUnit::RootDirSector(_) => {
+                let remaining_sectors: u32 = match self.boot_record {
+                    BootRecord::Fat(boot_record_fat) => {
+                        boot_record_fat.first_root_dir_sector() as u32
+                            + boot_record_fat.root_dir_sectors() as u32
+                            - last_entry.unit.get_entry_sector(self) as u32
+                    }
+                    BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
+                };
+
+                let entries_per_sector = self.props.sector_size / DIRENTRY_SIZE as u32;
+                let remaining_entries = remaining_sectors * entries_per_sector
+                    + (entries_per_sector - last_entry.index + 1);
+
+                if remaining_entries < n - chain_len {
+                    Err(FSError::RootDirectoryFull)
+                } else {
+                    Ok(first_entry)
+                }
+            }
+            EntryLocationUnit::DataCluster(cluster) => {
+                // first, we check how many clusters need to be allocated (if any)
+                let entries_per_cluster: u32 =
+                    self.props.cluster_size as u32 / DIRENTRY_SIZE as u32;
+
+                let entries_left = n - chain_len;
+                let free_entries_on_current_cluster = entries_per_cluster - (last_entry.index + 1);
+
+                // if we do in fact have to allocate some clusters, we allocate them
+                if free_entries_on_current_cluster < entries_left {
+                    let clusters_to_allocate = (entries_left - free_entries_on_current_cluster)
+                        .div_ceil(entries_per_cluster);
+
+                    self.allocate_clusters(
+                        num::NonZero::new(clusters_to_allocate).expect("this should be at least 1"),
+                        Some(cluster),
+                    )?;
+                }
+
+                Ok(first_entry)
+            }
+        }
+    }
+
     /// Mark the individual entries of a contiguous FAT entry chain as unused
     ///
     /// Note: No validation is done to check whether or not the chain is valid
@@ -1357,6 +1556,59 @@ where
         }
 
         Ok(())
+    }
+
+    /// Allocate `n` clusters and return the index of the first one allocated
+    ///
+    /// Also has a second [`Option`] argument that if not [`None`] indicates
+    /// that this cluster should point to the newly allocated cluster chain
+    pub(crate) fn allocate_clusters(
+        &mut self,
+        n: num::NonZero<u32>,
+        first_cluster: Option<u32>,
+    ) -> FSResult<u32, S::Error> {
+        let mut last_cluster_in_chain = first_cluster;
+        let mut first_allocated_cluster = first_cluster;
+
+        for i in 0..n.into() {
+            match self.next_free_cluster()? {
+                Some(next_free_cluster) => {
+                    // FIXME: in FAT12 filesystems, this can cause a sector
+                    // to be updated up to 4 times for seeminly no reason
+                    // Similar behavour is observed in FAT16/32, with 2 sync operations
+                    // THis number should be halved for both cases
+
+                    if i == 0 && first_cluster.is_none() {
+                        first_allocated_cluster = Some(next_free_cluster);
+                    }
+
+                    // we set the last allocated cluster to point to the next free one
+                    if let Some(last_cluster_in_chain) = last_cluster_in_chain {
+                        self.write_nth_FAT_entry(
+                            last_cluster_in_chain,
+                            FATEntry::Allocated(next_free_cluster),
+                        )?;
+                    }
+                    // we also set the next free cluster to be EOF
+                    self.write_nth_FAT_entry(next_free_cluster, FATEntry::Eof)?;
+                    if let Some(last_cluster_in_chain) = last_cluster_in_chain {
+                        log::trace!(
+                            "cluster {} now points to {}",
+                            last_cluster_in_chain,
+                            next_free_cluster
+                        );
+                    }
+                    // now the next free cluster i the last allocated one
+                    last_cluster_in_chain = Some(next_free_cluster);
+                }
+                None => {
+                    log::error!("storage medium full while attempting to allocate more clusters");
+                    return Err(FSError::StorageFull);
+                }
+            }
+        }
+
+        Ok(first_allocated_cluster.expect("This should have Some value by now"))
     }
 
     /// Syncs `self.sector_buffer` back to the storage
@@ -1552,6 +1804,80 @@ impl<'a, S> FileSystem<'a, S>
 where
     S: Read + Write + Seek,
 {
+    /// Create a new [`RWFile`] and return its handle
+    #[inline]
+    pub fn create_file<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+    ) -> FSResult<RWFile<'_, 'a, S>, S::Error> {
+        let target = path.as_ref().normalize();
+
+        let parent_dir = match target.parent() {
+            Some(parent) => parent,
+            // technically, the path provided is a directory, the root directory
+            None => return Err(FSError::IsADirectory),
+        };
+
+        let file_name = target
+            .file_name()
+            .expect("the path is normalized and it isn't the root directory either");
+
+        let file_cluster = self.allocate_clusters(num::NonZero::new(1).expect("1 != 0"), None)?;
+
+        let entries_needed = entries_needed(file_name);
+
+        self.go_to_dir(parent_dir)?;
+
+        let first_entry = self.allocate_nth_entries(entries_needed)?;
+
+        let sfn = utils::string::gen_sfn(file_name, self, parent_dir)?;
+
+        // we got everything to create our first (and only) RawProperties struct
+        let raw_properties = RawProperties {
+            name: file_name.to_string(),
+            sfn,
+            is_dir: false,
+            // this needs to be set when creating a file
+            attributes: RawAttributes::empty() | RawAttributes::ARCHIVE,
+            created: self.clock.now(),
+            modified: self.clock.now(),
+            accessed: self.clock.now().date(),
+            file_size: 0,
+            data_cluster: file_cluster,
+            chain: DirEntryChain {
+                location: first_entry.clone(),
+                len: entries_needed,
+            },
+        };
+
+        let entries = [raw_properties];
+        let mut entries_iter = EntryComposer::from_entries(&entries);
+
+        let mut current_entry = first_entry;
+        let mut entry_bytes = entries_iter
+            .next()
+            .expect("this iterator is guaranteed to return at least once");
+        loop {
+            let entry_sector = current_entry.get_entry_sector(self);
+            self.read_nth_sector(entry_sector)?;
+            let byte_offset = current_entry.get_sector_byte_offset(self);
+            self.sector_buffer[byte_offset..(byte_offset + DIRENTRY_SIZE)]
+                .copy_from_slice(&entry_bytes);
+
+            match entries_iter.next() {
+                Some(bytes) => entry_bytes = bytes,
+                None => break,
+            };
+
+            current_entry = current_entry
+                .next_entry(self)?
+                .expect("This entry chain should be valid, we just generated it");
+        }
+
+        // TODO: we know everything about that file, construct it and return it here
+        self.get_rw_file(path)
+    }
+
     /// Remove a [`RWFile`] from the filesystem
     ///
     /// This is an alias to `self.get_rw_file(path)?.remove()?`

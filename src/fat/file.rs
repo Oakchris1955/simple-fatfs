@@ -1,6 +1,6 @@
 use super::*;
 
-use core::{cmp, ops};
+use core::{cmp, num, ops};
 
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
@@ -490,48 +490,23 @@ where
                 clusters_to_allocate
             );
 
-            let mut last_cluster_in_chain = self.last_cluster_in_chain()?;
+            let last_cluster_in_chain = self.last_cluster_in_chain()?;
 
-            for clusters_allocated in 0..clusters_to_allocate {
-                match self.fs.next_free_cluster()? {
-                    Some(next_free_cluster) => {
-                        // FIXME: in FAT12 filesystems, this can cause a sector
-                        // to be updated up to 4 times for seeminly no reason
-                        // Similar behavour is observed in FAT16/32, with 2 sync operations
-                        // THis number should be halved for both cases
-
-                        // we set the last allocated cluster to point to the next free one
-                        self.fs.write_nth_FAT_entry(
-                            last_cluster_in_chain,
-                            FATEntry::Allocated(next_free_cluster),
-                        )?;
-                        // we also set the next free cluster to be EOF
-                        self.fs
-                            .write_nth_FAT_entry(next_free_cluster, FATEntry::Eof)?;
-                        log::trace!(
-                            "cluster {} now points to {}",
-                            last_cluster_in_chain,
-                            next_free_cluster
-                        );
-                        // now the next free cluster i the last allocated one
-                        last_cluster_in_chain = next_free_cluster;
-                    }
-                    None => {
-                        self.file_size = (((self.file_size as u64)
-                            .next_multiple_of(self.fs.cluster_size())
-                            - offset)
-                            + clusters_allocated * self.fs.cluster_size())
-                            as u32;
-                        self.props.offset = self.file_size.into();
-
-                        log::error!("storage medium full while attempting to allocate more clusters for a ROFile");
-                        return Err(IOError::new(
-                            <Self::Error as IOError>::Kind::new_unexpected_eof(),
-                            "the storage medium is full, can't increase size of file",
-                        ));
-                    }
+            // TODO: if possible, find how many clusters we successfully allocated
+            // and modify the file length accordingly
+            // TODO: this should return a proper IO error
+            match self.fs.allocate_clusters(
+                num::NonZero::new(clusters_to_allocate as u32).expect("This is greater than 1"),
+                Some(last_cluster_in_chain),
+            ) {
+                Ok(_) => (),
+                Err(_) => {
+                    return Err(IOError::new(
+                        <Self::Error as IOError>::Kind::new_unexpected_eof(),
+                        "the storage medium is full, can't increase size of file",
+                    ))
                 }
-            }
+            };
 
             self.file_size = offset as u32;
             log::debug!(

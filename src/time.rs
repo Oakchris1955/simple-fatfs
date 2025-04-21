@@ -28,7 +28,7 @@ impl Clock for DefaultClock {
             // https://stackoverflow.com/a/76149536/
 
             // TODO: make the trait return an error to handle such cases
-            let now_odt = OffsetDateTime::now_local().unwrap();
+            let now_odt = OffsetDateTime::now_local().unwrap_or(OffsetDateTime::now_utc());
 
             PrimitiveDateTime::new(now_odt.date(), now_odt.time())
         }

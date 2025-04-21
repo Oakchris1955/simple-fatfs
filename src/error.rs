@@ -119,6 +119,7 @@ pub enum InternalFSError {
     MalformedEntryChain,
 }
 
+// TODO: mark this as non-exhaustive before release
 /// An error indicating that a filesystem-related operation has failed
 #[derive(Debug, displaydoc::Display)]
 pub enum FSError<I>
@@ -152,6 +153,13 @@ where
     ReadOnlyFile,
     /// A file or directory wasn't found
     NotFound,
+    /// The underlying sotrage is full.
+    StorageFull,
+    /**
+     There aren't enough free entries on the root directory to perform
+     this operation. Consider performing this operation on a subdirectory instead
+    */
+    RootDirectoryFull,
     /// An IO error occured
     #[displaydoc("An IO error occured: {0}")]
     IOError(I),

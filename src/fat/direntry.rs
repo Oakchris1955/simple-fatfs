@@ -3,7 +3,7 @@ use super::*;
 use crate::io::prelude::*;
 use crate::time::EPOCH;
 
-use core::{fmt, mem, num};
+use core::{fmt, iter, mem, num};
 
 #[cfg(not(feature = "std"))]
 use alloc::{borrow::ToOwned, string::String};
@@ -84,6 +84,15 @@ pub(crate) struct TimeAttribute {
     hour: u8,
 }
 
+impl From<Time> for TimeAttribute {
+    fn from(value: Time) -> Self {
+        Self::new()
+            .with_seconds(value.second() / 2)
+            .with_minutes(value.minute())
+            .with_hour(value.hour())
+    }
+}
+
 #[bitfield(u16)]
 #[derive(Serialize, Deserialize)]
 pub(crate) struct DateAttribute {
@@ -93,6 +102,15 @@ pub(crate) struct DateAttribute {
     month: u8,
     #[bits(7)]
     year: u8,
+}
+
+impl From<Date> for DateAttribute {
+    fn from(value: Date) -> Self {
+        Self::new()
+            .with_day(value.day())
+            .with_month(value.month().into())
+            .with_year((value.year() - EPOCH.year()) as u8)
+    }
 }
 
 impl TryFrom<TimeAttribute> for Time {
@@ -148,6 +166,16 @@ impl TryFrom<EntryCreationTime> for PrimitiveDateTime {
     }
 }
 
+impl From<PrimitiveDateTime> for EntryCreationTime {
+    fn from(value: PrimitiveDateTime) -> Self {
+        Self {
+            hundredths_of_second: (value.second() % 2) * 100 + (value.millisecond() / 10) as u8,
+            time: value.time().into(),
+            date: value.date().into(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub(crate) struct EntryModificationTime {
     pub(crate) time: TimeAttribute,
@@ -162,6 +190,15 @@ impl TryFrom<EntryModificationTime> for PrimitiveDateTime {
             value.date.try_into()?,
             value.time.try_into()?,
         ))
+    }
+}
+
+impl From<PrimitiveDateTime> for EntryModificationTime {
+    fn from(value: PrimitiveDateTime) -> Self {
+        Self {
+            time: value.time().into(),
+            date: value.date().into(),
+        }
     }
 }
 
@@ -186,18 +223,40 @@ pub(crate) struct FATDirEntry {
     pub(crate) file_size: u32,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub(crate) struct Sfn {
-    name: [u8; 8],
-    ext: [u8; 3],
+impl FATDirEntry {
+    pub(crate) fn from_props(props: RawProperties, sfn: Sfn) -> Self {
+        Self {
+            sfn,
+            attributes: props.attributes,
+            // according to some documents I found, this must be set to zero
+            _reserved: [0x00],
+            created: props.created.into(),
+            accessed: props.accessed.into(),
+            cluster_high: (props.data_cluster >> (u32::BITS / 2)) as u16,
+            modified: props.modified.into(),
+            cluster_low: props.data_cluster as u16,
+            file_size: props.file_size,
+        }
+    }
+}
+
+pub(crate) const SFN_NAME_LEN: usize = 8;
+pub(crate) const SFN_EXT_LEN: usize = 3;
+pub(crate) const SFN_LEN: usize = SFN_NAME_LEN + SFN_EXT_LEN;
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+/// The short filename of an entry
+pub struct Sfn {
+    pub(crate) name: [u8; SFN_NAME_LEN],
+    pub(crate) ext: [u8; SFN_EXT_LEN],
 }
 
 impl Sfn {
-    fn get_byte_slice(&self) -> [u8; 11] {
-        let mut slice = [0; 11];
+    fn get_byte_slice(&self) -> [u8; SFN_LEN] {
+        let mut slice = [0; SFN_LEN];
 
-        slice[..8].copy_from_slice(&self.name);
-        slice[8..].copy_from_slice(&self.ext);
+        slice[..SFN_NAME_LEN].copy_from_slice(&self.name);
+        slice[SFN_NAME_LEN..].copy_from_slice(&self.ext);
 
         slice
     }
@@ -231,6 +290,10 @@ impl fmt::Display for Sfn {
         Ok(())
     }
 }
+
+const LAST_LFN_ENTRY_MASK: u8 = 0x40;
+const CHARS_PER_LFN_ENTRY: usize = 13;
+const LONG_ENTRY_TYPE: u8 = 0;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct LFNEntry {
@@ -272,6 +335,99 @@ impl LFNEntry {
         self._long_entry_type == 0 && self._zeroed.iter().all(|v| *v == 0)
     }
 }
+
+/// Estimate how many entries a file with the provided file_name would take
+///
+/// This only takes into account the [`DirEntries`](DirEntry) needed,
+/// not the contents of the file
+pub(crate) fn entries_needed<S>(file_name: S) -> u32
+where
+    S: ToString,
+{
+    let char_count = file_name.to_string().chars().count();
+    let lfn_entries_needed = char_count.div_ceil(CHARS_PER_LFN_ENTRY);
+    // let's not forget the first entry
+    let entries_needed = 1 + lfn_entries_needed;
+
+    entries_needed as u32
+}
+
+#[derive(Debug)]
+pub(crate) struct LFNEntryGenerator {
+    // a necessary evil (lfn entries are stored in reverse (thanks microsoft!))
+    chars: Box<[Box<[u8]>]>,
+    current_entry: u8,
+    checksum: u8,
+
+    exhausted: bool,
+}
+
+impl LFNEntryGenerator {
+    pub(crate) fn new<S>(filename: S, checksum: u8) -> Self
+    where
+        S: ToString,
+    {
+        let filename = filename.to_string();
+        let chars: Box<[Box<[u8]>]> = filename
+            .encode_utf16()
+            .collect::<Box<[u16]>>()
+            .chunks(CHARS_PER_LFN_ENTRY)
+            .map(|s| {
+                s.iter()
+                    .copied()
+                    .flat_map(u16::to_le_bytes)
+                    .collect::<Box<[u8]>>()
+            })
+            .collect();
+
+        Self {
+            current_entry: chars.len() as u8,
+            chars,
+            checksum,
+
+            exhausted: false,
+        }
+    }
+}
+
+impl Iterator for LFNEntryGenerator {
+    type Item = LFNEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.exhausted {
+            return None;
+        }
+
+        let current_chars = &self.chars[(self.current_entry - 1) as usize];
+        let mut chars = [0_u8; CHARS_PER_LFN_ENTRY * 2];
+        chars[..current_chars.len()].copy_from_slice(current_chars);
+
+        let lfn_mask = if self.current_entry >= self.chars.len() as u8 {
+            LAST_LFN_ENTRY_MASK
+        } else {
+            0
+        };
+
+        self.current_entry -= 1;
+
+        if self.current_entry == 0 {
+            self.exhausted = true;
+        }
+
+        Some(LFNEntry {
+            order: lfn_mask | (self.current_entry + 1),
+            first_chars: chars[..10].try_into().unwrap(),
+            _lfn_attribute: RawAttributes::LFN.bits(),
+            _long_entry_type: LONG_ENTRY_TYPE,
+            checksum: self.checksum,
+            mid_chars: chars[10..22].try_into().unwrap(),
+            _zeroed: [0, 0],
+            last_chars: chars[22..].try_into().unwrap(),
+        })
+    }
+}
+
+impl iter::FusedIterator for LFNEntryGenerator {}
 
 /// The root directory sector or data cluster a [`FATDirEntry`] belongs too
 #[derive(Debug, Clone, Copy)]
@@ -352,6 +508,13 @@ impl EntryLocationUnit {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub(crate) enum EntryStatus {
+    Unused,
+    LastUnused,
+    Used,
+}
+
 /// The location of a [`FATDirEntry`]
 #[derive(Clone, Debug)]
 pub(crate) struct EntryLocation {
@@ -362,6 +525,52 @@ pub(crate) struct EntryLocation {
 }
 
 impl EntryLocation {
+    pub(crate) fn from_partition_sector<S>(sector: u32, fs: &mut FileSystem<S>) -> Self
+    where
+        S: Read + Write + Seek,
+    {
+        let unit = if sector < fs.first_data_sector() {
+            EntryLocationUnit::RootDirSector(
+                (sector - fs.props.first_root_dir_sector as u32) as u16,
+            )
+        } else {
+            EntryLocationUnit::DataCluster(fs.partition_sector_to_data_cluster(sector))
+        };
+
+        Self { unit, index: 0 }
+    }
+
+    pub(crate) fn entry_status<S>(&self, fs: &mut FileSystem<S>) -> Result<EntryStatus, S::Error>
+    where
+        S: Read + Write + Seek,
+    {
+        let entry_sector = self.unit.get_entry_sector(fs);
+        fs.read_nth_sector(entry_sector)?;
+
+        let byte_offset = self.get_sector_byte_offset(fs);
+        Ok(match fs.sector_buffer[byte_offset] {
+            UNUSED_ENTRY => EntryStatus::Unused,
+            LAST_AND_UNUSED_ENTRY => EntryStatus::LastUnused,
+            _ => EntryStatus::Used,
+        })
+    }
+
+    #[inline]
+    pub(crate) fn get_entry_sector<S>(&self, fs: &mut FileSystem<S>) -> u64
+    where
+        S: Read + Write + Seek,
+    {
+        self.unit.get_entry_sector(fs)
+    }
+
+    #[inline]
+    pub(crate) fn get_sector_byte_offset<S>(&self, fs: &mut FileSystem<S>) -> usize
+    where
+        S: Read + Write + Seek,
+    {
+        (self.index as usize * DIRENTRY_SIZE) % fs.props.sector_size as usize
+    }
+
     pub(crate) fn free_entry<S>(&self, fs: &mut FileSystem<S>) -> Result<(), S::Error>
     where
         S: Read + Write + Seek,
@@ -369,7 +578,7 @@ impl EntryLocation {
         let entry_sector = self.unit.get_entry_sector(fs);
         fs.read_nth_sector(entry_sector)?;
 
-        let byte_offset = self.index as usize * DIRENTRY_SIZE;
+        let byte_offset = self.get_sector_byte_offset(fs);
         fs.sector_buffer[byte_offset] = UNUSED_ENTRY;
         fs.buffer_modified = true;
 
@@ -401,7 +610,7 @@ impl EntryLocation {
 }
 
 /// The location of a chain of [`FATDirEntry`]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct DirEntryChain {
     /// the location of the first corresponding entry
     pub(crate) location: EntryLocation,
