@@ -1,6 +1,6 @@
 use core::fmt;
 
-use time::{macros::date, OffsetDateTime, PrimitiveDateTime};
+use time::{macros::date, PrimitiveDateTime};
 
 pub(crate) const EPOCH: PrimitiveDateTime = date!(1980 - 01 - 01).midnight();
 
@@ -25,6 +25,8 @@ impl Clock for DefaultClock {
     fn now(&self) -> PrimitiveDateTime {
         #[cfg(feature = "std")]
         {
+            use time::OffsetDateTime;
+
             // https://stackoverflow.com/a/76149536/
 
             // TODO: make the trait return an error to handle such cases
