@@ -522,7 +522,7 @@ impl EntryComposer {
 }
 
 impl Iterator for EntryComposer {
-    type Item = [u8; 32];
+    type Item = [u8; DIRENTRY_SIZE];
 
     fn next(&mut self) -> Option<Self::Item> {
         use utils::bincode::bincode_config;
