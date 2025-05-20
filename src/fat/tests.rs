@@ -216,6 +216,45 @@ fn create_subdir_file() {
 }
 
 #[test]
+fn create_directory_in_root_and_file() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT16.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    fs.create_dir(PathBuf::from("/unbelievable")).unwrap();
+    let mut file = fs
+        .create_file(PathBuf::from("/unbelievable/baby i am free.txt"))
+        .unwrap();
+
+    file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
+    file.rewind().unwrap();
+
+    assert_file_is_i_dont_need_a_badge(&mut file);
+}
+
+#[test]
+fn create_directory_in_subdir_and_file() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT16.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    fs.create_dir(PathBuf::from("/another root directory"))
+        .unwrap();
+    let mut file = fs
+        .create_file(PathBuf::from(
+            "/another root directory/bee movie script.txt",
+        ))
+        .unwrap();
+
+    file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
+    file.rewind().unwrap();
+
+    assert_file_is_bee_movie_script(&mut file);
+}
+
+#[test]
 fn remove_root_dir_file() {
     use std::io::Cursor;
 
@@ -510,6 +549,45 @@ fn create_file_subdir_fat32() {
     file.rewind().unwrap();
 
     assert_file_is_i_dont_need_a_badge(&mut file);
+}
+
+#[test]
+fn create_directory_in_root_and_file_fat32() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT32.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    fs.create_dir(PathBuf::from("/unbelievable")).unwrap();
+    let mut file = fs
+        .create_file(PathBuf::from("/unbelievable/baby i am free.txt"))
+        .unwrap();
+
+    file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
+    file.rewind().unwrap();
+
+    assert_file_is_i_dont_need_a_badge(&mut file);
+}
+
+#[test]
+fn create_directory_in_subdir_and_file_fat32() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT32.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    fs.create_dir(PathBuf::from("/another root directory"))
+        .unwrap();
+    let mut file = fs
+        .create_file(PathBuf::from(
+            "/another root directory/bee movie script.txt",
+        ))
+        .unwrap();
+
+    file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
+    file.rewind().unwrap();
+
+    assert_file_is_bee_movie_script(&mut file);
 }
 
 #[test]

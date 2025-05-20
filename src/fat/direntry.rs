@@ -228,7 +228,7 @@ pub(crate) struct FATDirEntry {
 }
 
 impl FATDirEntry {
-    pub(crate) fn from_props(props: RawProperties, sfn: Sfn) -> Self {
+    pub(crate) fn from_props(props: MinProperties, sfn: Sfn) -> Self {
         Self {
             sfn,
             attributes: props.attributes,
@@ -254,6 +254,33 @@ pub struct Sfn {
     pub(crate) name: [u8; SFN_NAME_LEN],
     pub(crate) ext: [u8; SFN_EXT_LEN],
 }
+
+pub(crate) const CURRENT_DIR_SFN: Sfn = Sfn {
+    name: {
+        use typed_path::constants::windows::CURRENT_DIR;
+
+        // not pretty, but it works
+        let mut s = [0; SFN_NAME_LEN];
+        // apparently, subslicing a const slice is not const, nice!
+        s[0] = CURRENT_DIR[0];
+        s
+    },
+    ext: [0; SFN_EXT_LEN],
+};
+
+pub(crate) const PARENT_DIR_SFN: Sfn = Sfn {
+    name: {
+        use typed_path::constants::windows::PARENT_DIR;
+
+        // not pretty, but it works
+        let mut s = [0; SFN_NAME_LEN];
+        // apparently, subslicing a const slice is not const, nice!
+        s[0] = PARENT_DIR[0];
+        s[1] = PARENT_DIR[1];
+        s
+    },
+    ext: [0; SFN_EXT_LEN],
+};
 
 impl Sfn {
     fn get_byte_slice(&self) -> [u8; SFN_LEN] {
@@ -344,16 +371,16 @@ impl LFNEntry {
 ///
 /// This only takes into account the [`DirEntries`](DirEntry) needed,
 /// not the contents of the file
-pub(crate) fn entries_needed<S>(file_name: S) -> u32
+pub(crate) fn calc_entries_needed<S>(file_name: S) -> u32
 where
     S: ToString,
 {
     let char_count = file_name.to_string().chars().count();
     let lfn_entries_needed = char_count.div_ceil(CHARS_PER_LFN_ENTRY);
     // let's not forget the first entry
-    let entries_needed = 1 + lfn_entries_needed;
+    let calc_entries_needed = 1 + lfn_entries_needed;
 
-    entries_needed as u32
+    calc_entries_needed as u32
 }
 
 #[derive(Debug)]

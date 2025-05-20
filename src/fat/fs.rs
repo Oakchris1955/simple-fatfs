@@ -157,6 +157,34 @@ impl FATSectorProps {
     }
 }
 
+/// A less-detailed version of [`RawProperties`]
+#[derive(Debug, Clone)]
+pub(crate) struct MinProperties {
+    pub(crate) name: Box<str>,
+    pub(crate) sfn: Sfn,
+    pub(crate) attributes: RawAttributes,
+    pub(crate) created: PrimitiveDateTime,
+    pub(crate) modified: PrimitiveDateTime,
+    pub(crate) accessed: Date,
+    pub(crate) file_size: u32,
+    pub(crate) data_cluster: u32,
+}
+
+impl From<RawProperties> for MinProperties {
+    fn from(value: RawProperties) -> Self {
+        Self {
+            name: Box::from(value.name),
+            sfn: value.sfn,
+            attributes: value.attributes,
+            created: value.created,
+            modified: value.modified,
+            accessed: value.accessed,
+            file_size: value.file_size,
+            data_cluster: value.data_cluster,
+        }
+    }
+}
+
 /// A resolved file/directory entry (for internal usage only)
 #[derive(Debug, Clone)]
 pub(crate) struct RawProperties {
@@ -475,15 +503,15 @@ impl EntryParser {
 
 /// This is essentially the reverse of [`EntryParser`]
 #[derive(Debug)]
-struct EntryComposer<'a> {
-    entries: &'a [RawProperties],
+struct EntryComposer {
+    entries: Box<[MinProperties]>,
     entry_index: usize,
 
     lfn_iter: Option<LFNEntryGenerator>,
 }
 
-impl<'a> EntryComposer<'a> {
-    fn from_entries(entries: &'a [RawProperties]) -> Self {
+impl EntryComposer {
+    fn from_entries(entries: Box<[MinProperties]>) -> Self {
         Self {
             entries,
             entry_index: 0,
@@ -493,7 +521,7 @@ impl<'a> EntryComposer<'a> {
     }
 }
 
-impl Iterator for EntryComposer<'_> {
+impl Iterator for EntryComposer {
     type Item = [u8; 32];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -532,7 +560,7 @@ impl Iterator for EntryComposer<'_> {
             },
             None => {
                 // no reason to generate a SFN if the filename is already a valid one
-                if current_entry.sfn.to_string() == current_entry.name {
+                if *current_entry.sfn.to_string() == *current_entry.name {
                     self.entry_index += 1;
 
                     Some(bincode_config()
@@ -555,7 +583,7 @@ impl Iterator for EntryComposer<'_> {
     }
 }
 
-impl iter::FusedIterator for EntryComposer<'_> {}
+impl iter::FusedIterator for EntryComposer {}
 
 pub(crate) trait OffsetConversions {
     fn sector_size(&self) -> u32;
@@ -1508,6 +1536,100 @@ where
         }
     }
 
+    /// Creates a new cluster chain with the `.` and `..` entries present,
+    pub(crate) fn create_entry_chain(
+        &mut self,
+        parent: EntryLocationUnit,
+    ) -> FSResult<u32, S::Error> {
+        // we need to allocate a cluster
+        let dir_cluster = self.allocate_clusters(num::NonZero::new(1).unwrap(), None)?;
+
+        let entries = Box::new([
+            MinProperties {
+                name: CURRENT_DIR_SFN.to_string().into(),
+                sfn: CURRENT_DIR_SFN,
+                // this needs to be set when creating a file
+                attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
+                created: self.clock.now(),
+                modified: self.clock.now(),
+                accessed: self.clock.now().date(),
+                file_size: 0,
+                data_cluster: dir_cluster,
+            },
+            MinProperties {
+                name: PARENT_DIR_SFN.to_string().into(),
+                sfn: PARENT_DIR_SFN,
+                // this needs to be set when creating a file
+                attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
+                created: self.clock.now(),
+                modified: self.clock.now(),
+                accessed: self.clock.now().date(),
+                file_size: 0,
+                data_cluster: match parent {
+                    EntryLocationUnit::DataCluster(cluster) => cluster,
+                    EntryLocationUnit::RootDirSector(_) => 0,
+                },
+            },
+        ]);
+
+        // this composer will ALWAYS generate 2 entries
+        let entries_iter = EntryComposer::from_entries(entries);
+
+        self.read_nth_sector(self.data_cluster_to_partition_sector(dir_cluster).into())?;
+
+        for (i, bytes) in entries_iter.enumerate() {
+            self.sector_buffer[(i * DIRENTRY_SIZE)..((i + 1) * DIRENTRY_SIZE)]
+                .copy_from_slice(&bytes);
+        }
+
+        self.buffer_modified = true;
+
+        Ok(dir_cluster)
+    }
+
+    // Insert the provided `entries` to the cluster chain of the current cached directory
+    pub(crate) fn insert_to_entry_chain(
+        &mut self,
+        entries: Box<[MinProperties]>,
+    ) -> FSResult<(), S::Error> {
+        let mut entries_needed = 0;
+
+        self._go_to_cached_dir()?;
+
+        for entry in &entries {
+            entries_needed += calc_entries_needed(&(*entry.name));
+        }
+
+        let first_entry = self.allocate_nth_entries(entries_needed)?;
+
+        let mut entries_iter = EntryComposer::from_entries(entries);
+
+        let mut current_entry = first_entry;
+        let mut entry_bytes = entries_iter
+            .next()
+            .expect("this iterator is guaranteed to return at least once");
+
+        loop {
+            let entry_sector = current_entry.get_entry_sector(self);
+            self.read_nth_sector(entry_sector)?;
+            self.buffer_modified = true;
+            let byte_offset = current_entry.get_sector_byte_offset(self);
+            self.sector_buffer[byte_offset..(byte_offset + DIRENTRY_SIZE)]
+                .copy_from_slice(&entry_bytes);
+
+            match entries_iter.next() {
+                Some(bytes) => entry_bytes = bytes,
+                None => break,
+            };
+
+            current_entry = current_entry
+                .next_entry(self)?
+                .expect("This entry chain should be valid, we just generated it");
+        }
+
+        Ok(())
+    }
+
     /// Mark the individual entries of a contiguous FAT entry chain as unused
     ///
     /// Note: No validation is done to check whether or not the chain is valid
@@ -1822,19 +1944,14 @@ where
 
         let file_cluster = self.allocate_clusters(num::NonZero::new(1).expect("1 != 0"), None)?;
 
-        let entries_needed = entries_needed(file_name);
-
         self.go_to_dir(parent_dir)?;
-
-        let first_entry = self.allocate_nth_entries(entries_needed)?;
 
         let sfn = utils::string::gen_sfn(file_name, self, parent_dir)?;
 
         // we got everything to create our first (and only) RawProperties struct
-        let raw_properties = RawProperties {
-            name: file_name.to_string(),
+        let raw_properties = MinProperties {
+            name: file_name.into(),
             sfn,
-            is_dir: false,
             // this needs to be set when creating a file
             attributes: RawAttributes::empty() | RawAttributes::ARCHIVE,
             created: self.clock.now(),
@@ -1842,38 +1959,56 @@ where
             accessed: self.clock.now().date(),
             file_size: 0,
             data_cluster: file_cluster,
-            chain: DirEntryChain {
-                location: first_entry.clone(),
-                len: entries_needed,
-            },
         };
 
         let entries = [raw_properties];
-        let mut entries_iter = EntryComposer::from_entries(&entries);
-
-        let mut current_entry = first_entry;
-        let mut entry_bytes = entries_iter
-            .next()
-            .expect("this iterator is guaranteed to return at least once");
-        loop {
-            let entry_sector = current_entry.get_entry_sector(self);
-            self.read_nth_sector(entry_sector)?;
-            let byte_offset = current_entry.get_sector_byte_offset(self);
-            self.sector_buffer[byte_offset..(byte_offset + DIRENTRY_SIZE)]
-                .copy_from_slice(&entry_bytes);
-
-            match entries_iter.next() {
-                Some(bytes) => entry_bytes = bytes,
-                None => break,
-            };
-
-            current_entry = current_entry
-                .next_entry(self)?
-                .expect("This entry chain should be valid, we just generated it");
-        }
+        self.insert_to_entry_chain(Box::new(entries))?;
 
         // TODO: we know everything about that file, construct it and return it here
         self.get_rw_file(path)
+    }
+
+    /// Create a new directory
+    #[inline]
+    pub fn create_dir<P: AsRef<Path>>(&mut self, path: P) -> FSResult<(), S::Error> {
+        let target = path.as_ref().normalize();
+
+        let parent_dir = match target.parent() {
+            Some(parent) => parent,
+            // technically, the path provided is a directory, the root directory
+            None => return Err(FSError::IsADirectory),
+        };
+
+        let file_name = target
+            .file_name()
+            .expect("the path is normalized and it isn't the root directory either");
+
+        let dir_cluster = self.create_entry_chain(self.dir_info.chain_start)?;
+
+        // The cluster chain of the directory has been created,
+        // we now need to add it as an entry to the current directory
+
+        let sfn = utils::string::gen_sfn(file_name, self, parent_dir)?;
+
+        // we got everything to create our first (and only) RawProperties struct
+        let raw_properties = MinProperties {
+            name: file_name.into(),
+            sfn,
+            attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
+            created: self.clock.now(),
+            modified: self.clock.now(),
+            accessed: self.clock.now().date(),
+            file_size: 0,
+            data_cluster: dir_cluster,
+        };
+
+        let entries = [raw_properties];
+
+        self.go_to_dir(parent_dir)?;
+
+        self.insert_to_entry_chain(Box::new(entries))?;
+
+        Ok(())
     }
 
     /// Remove a [`RWFile`] from the filesystem
