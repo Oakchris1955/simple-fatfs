@@ -2040,7 +2040,7 @@ where
 
         if path
             .components()
-            .last()
+            .next_back()
             .expect("this iterator will always yield at least the root directory")
             == WindowsComponent::root()
         {
