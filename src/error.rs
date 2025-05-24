@@ -153,6 +153,8 @@ where
     ReadOnlyFile,
     /// A file or directory wasn't found
     NotFound,
+    /// An entity already exists
+    AlreadyExists,
     /// The underlying sotrage is full.
     StorageFull,
     /**

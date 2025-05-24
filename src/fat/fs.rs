@@ -1976,8 +1976,8 @@ where
 
         let parent_dir = match target.parent() {
             Some(parent) => parent,
-            // technically, the path provided is a directory, the root directory
-            None => return Err(FSError::IsADirectory),
+            // the path provided is the root directory, which already exists
+            None => return Err(FSError::AlreadyExists),
         };
 
         let file_name = target
