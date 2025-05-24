@@ -95,6 +95,7 @@ impl IOErrorKind for std::io::ErrorKind {
 
 /// An error type that denotes that there is something wrong
 /// with the filesystem's structure itself (perhaps the FS itself is malformed/corrupted)
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, displaydoc::Display)]
 pub enum InternalFSError {
     /// The storage medium isn't large enough to accompany a FAT filesystem
@@ -121,6 +122,7 @@ pub enum InternalFSError {
 
 // TODO: mark this as non-exhaustive before release
 /// An error indicating that a filesystem-related operation has failed
+#[non_exhaustive]
 #[derive(Debug, displaydoc::Display)]
 pub enum FSError<I>
 where
