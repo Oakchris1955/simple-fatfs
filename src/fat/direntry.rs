@@ -315,8 +315,6 @@ impl Sfn {
                 .wrapping_add(c)
         }
 
-        log::debug!("Sfn checksum: {:X}", sum);
-
         sum
     }
 }
