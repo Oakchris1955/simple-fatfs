@@ -47,6 +47,20 @@ bitflags! {
     }
 }
 
+impl From<(Attributes, bool)> for RawAttributes {
+    fn from((attributes, is_dir): (Attributes, bool)) -> Self {
+        let mut raw_attributes = RawAttributes::empty();
+
+        raw_attributes.set(RawAttributes::READ_ONLY, attributes.read_only);
+        raw_attributes.set(RawAttributes::HIDDEN, attributes.hidden);
+        raw_attributes.set(RawAttributes::SYSTEM, attributes.system);
+        raw_attributes.set(RawAttributes::ARCHIVE, attributes.archive);
+        raw_attributes.set(RawAttributes::DIRECTORY, is_dir);
+
+        raw_attributes
+    }
+}
+
 /// A list of the various attributes specified for a file/directory
 #[derive(Debug, Clone, Copy)]
 pub struct Attributes {

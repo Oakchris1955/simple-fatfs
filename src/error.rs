@@ -157,6 +157,10 @@ where
     NotFound,
     /// An entity already exists
     AlreadyExists,
+    /// The operation lacked the necessary privileges to complete.
+    PermissionDenied,
+    /// A parameter was incorrect.
+    InvalidInput,
     /// The underlying sotrage is full.
     StorageFull,
     /**

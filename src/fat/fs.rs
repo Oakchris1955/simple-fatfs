@@ -186,6 +186,18 @@ impl From<RawProperties> for MinProperties {
     }
 }
 
+impl From<Properties> for MinProperties {
+    fn from(value: Properties) -> Self {
+        Self::from(RawProperties::from(value))
+    }
+}
+
+impl From<DirEntry> for MinProperties {
+    fn from(value: DirEntry) -> Self {
+        Self::from(value.entry)
+    }
+}
+
 /// A resolved file/directory entry (for internal usage only)
 #[derive(Debug, Clone)]
 pub(crate) struct RawProperties {
@@ -213,6 +225,23 @@ impl RawProperties {
 
         DirEntry {
             entry: Properties::from_raw(self, entry_path),
+        }
+    }
+}
+
+impl From<Properties> for RawProperties {
+    fn from(value: Properties) -> Self {
+        Self {
+            name: String::from(value.path.file_name().expect("the path is normalized")),
+            sfn: value.sfn,
+            is_dir: value.is_dir,
+            attributes: (value.attributes, value.is_dir).into(),
+            created: value.created,
+            modified: value.modified,
+            accessed: value.accessed,
+            file_size: value.file_size,
+            data_cluster: value.data_cluster,
+            chain: value.chain,
         }
     }
 }
@@ -2021,6 +2050,110 @@ where
         self.go_to_dir(parent_dir)?;
 
         self.insert_to_entry_chain(Box::new(entries))?;
+
+        Ok(())
+    }
+
+    /// Rename a file or directory to a new name
+    pub fn rename<P: AsRef<Path>, Q: AsRef<Path>>(
+        &mut self,
+        from: P,
+        to: Q,
+    ) -> FSResult<(), S::Error> {
+        let from = from.as_ref().normalize();
+        let to = to.as_ref().normalize();
+
+        let parent_from = match from.parent() {
+            Some(parent) => parent,
+            // we can't rename the root directory
+            None => return Err(FSError::PermissionDenied),
+        };
+        let parent_to = match to.parent() {
+            Some(parent) => parent,
+            // we can't rename the root directory
+            None => return Err(FSError::PermissionDenied),
+        };
+
+        let entry_from = match self
+            .read_dir(parent_from)?
+            .into_iter()
+            .find(|entry| *entry.path() == from)
+        {
+            Some(entry) => entry,
+            None => return Err(FSError::NotFound),
+        };
+
+        if self
+            .read_dir(parent_to)?
+            .into_iter()
+            .any(|entry| *entry.path() == to)
+        {
+            return Err(FSError::AlreadyExists);
+        };
+
+        // if the entry is a file, everything is way more simple,
+        // we just need to remove this entry a create a new one at
+        // the target directory. This can be accomplished in 2 ways:
+        // 1. we first remove the old entry and then create the new one, or
+        // 2. we first create the new entry and then remove the old one
+        // the first method is easier to implement, but has a higher risk of data loss
+        // the second method is a bit more difficult and in a worst-case scenario
+        // the file won't be lost, althought we will be left with 2 hard links
+        // pointing to the same file. Here we use the second method
+        self.go_to_dir(parent_to)?;
+
+        if entry_from.is_dir() {
+            // the process with directories is the same, expect we must modify the ".." entry
+            // so that it points to the new parent directory
+            // the ".." entry is always the second entry, so we will do something a bit hacky here
+            let parent_entry = MinProperties {
+                name: PARENT_DIR_SFN.to_string().into(),
+                sfn: PARENT_DIR_SFN,
+                // this needs to be set when creating a file
+                attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
+                created: self.clock.now(),
+                modified: self.clock.now(),
+                accessed: self.clock.now().date(),
+                file_size: 0,
+                data_cluster: match self.dir_info.chain_start {
+                    EntryLocationUnit::DataCluster(cluster) => cluster,
+                    EntryLocationUnit::RootDirSector(_) => 0,
+                },
+            };
+
+            use utils::bincode::bincode_config;
+
+            self._go_to_cached_dir()?;
+            let bytes: [u8; DIRENTRY_SIZE] = bincode_config()
+                .serialize(&FATDirEntry::from_props(
+                    parent_entry.clone(),
+                    parent_entry.sfn,
+                ))
+                .expect("these are completely valid data, this shouldn't panic")
+                .try_into()
+                .expect("the FATDirEntry should be exactly 32 bytes in size, this shouldn't panic");
+            self.sector_buffer[DIRENTRY_SIZE..(DIRENTRY_SIZE * 2)].copy_from_slice(&bytes);
+            self.buffer_modified = true;
+        }
+
+        let old_chain = entry_from.chain.clone();
+        let old_props: MinProperties = entry_from.into();
+        let to_filename = to.file_name().expect("this path is normalized");
+        let sfn = utils::string::gen_sfn(to_filename, self, parent_to)?;
+
+        let props = MinProperties {
+            name: Box::from(to_filename),
+            sfn,
+            attributes: old_props.attributes,
+            created: self.clock.now(),
+            modified: self.clock.now(),
+            accessed: self.clock.now().date(),
+            file_size: old_props.file_size,
+            data_cluster: old_props.data_cluster,
+        };
+        self.insert_to_entry_chain(Box::from([props]))?;
+
+        self.remove_entry_chain(&old_chain)?;
 
         Ok(())
     }
