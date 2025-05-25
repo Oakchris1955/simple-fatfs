@@ -241,19 +241,19 @@ pub(crate) struct FATDirEntry {
     pub(crate) file_size: u32,
 }
 
-impl FATDirEntry {
-    pub(crate) fn from_props(props: MinProperties, sfn: Sfn) -> Self {
+impl From<MinProperties> for FATDirEntry {
+    fn from(value: MinProperties) -> Self {
         Self {
-            sfn,
-            attributes: props.attributes,
+            sfn: value.sfn,
+            attributes: value.attributes,
             // according to some documents I found, this must be set to zero
             _reserved: [0x00],
-            created: props.created.into(),
-            accessed: props.accessed.into(),
-            cluster_high: (props.data_cluster >> (u32::BITS / 2)) as u16,
-            modified: props.modified.into(),
-            cluster_low: props.data_cluster as u16,
-            file_size: props.file_size,
+            created: value.created.into(),
+            accessed: value.accessed.into(),
+            cluster_high: (value.data_cluster >> (u32::BITS / 2)) as u16,
+            modified: value.modified.into(),
+            cluster_low: value.data_cluster as u16,
+            file_size: value.file_size,
         }
     }
 }

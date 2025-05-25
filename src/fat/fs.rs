@@ -224,7 +224,7 @@ impl RawProperties {
         entry_path.push(PathBuf::from(&self.name));
 
         DirEntry {
-            entry: Properties::from_raw(self, entry_path),
+            entry: Properties::from((self, entry_path)),
         }
     }
 }
@@ -328,10 +328,8 @@ impl Properties {
     }
 }
 
-/// Serialization methods
-impl Properties {
-    #[inline]
-    fn from_raw(raw: RawProperties, path: PathBuf) -> Self {
+impl From<(RawProperties, PathBuf)> for Properties {
+    fn from((raw, path): (RawProperties, PathBuf)) -> Self {
         Properties {
             path,
             sfn: raw.sfn,
@@ -540,10 +538,10 @@ struct EntryComposer {
     lfn_iter: Option<LFNEntryGenerator>,
 }
 
-impl EntryComposer {
-    fn from_entries(entries: Box<[MinProperties]>) -> Self {
+impl From<Box<[MinProperties]>> for EntryComposer {
+    fn from(value: Box<[MinProperties]>) -> Self {
         Self {
-            entries,
+            entries: value,
             entry_index: 0,
 
             lfn_iter: None,
@@ -580,7 +578,7 @@ impl Iterator for EntryComposer {
                     self.entry_index += 1;
 
                     Some(bincode_config()
-                        .serialize(&FATDirEntry::from_props(current_entry.clone(), current_entry.sfn))
+                        .serialize(&FATDirEntry::from(current_entry.clone()))
                         .expect("these are completely valid data, this shouldn't panic")
                         .try_into()
                         .expect(
@@ -594,7 +592,7 @@ impl Iterator for EntryComposer {
                     self.entry_index += 1;
 
                     Some(bincode_config()
-                        .serialize(&FATDirEntry::from_props(current_entry.clone(), current_entry.sfn))
+                        .serialize(&FATDirEntry::from(current_entry.clone()))
                         .expect("these are completely valid data, this shouldn't panic")
                         .try_into()
                         .expect(
@@ -684,13 +682,13 @@ pub(crate) struct FSProperties {
     pub(crate) first_data_sector: u32,
 }
 
-impl FSProperties {
-    fn from_boot_record(boot_record: &BootRecord) -> Self {
-        let sector_size = match boot_record {
+impl From<&BootRecord> for FSProperties {
+    fn from(value: &BootRecord) -> Self {
+        let sector_size = match value {
             BootRecord::Fat(boot_record_fat) => boot_record_fat.bpb.bytes_per_sector.into(),
             BootRecord::ExFAT(boot_record_exfat) => 1 << boot_record_exfat.sector_shift,
         };
-        let cluster_size = match boot_record {
+        let cluster_size = match value {
             BootRecord::Fat(boot_record_fat) => {
                 (boot_record_fat.bpb.sectors_per_cluster as u32 * sector_size).into()
             }
@@ -698,31 +696,31 @@ impl FSProperties {
                 1 << (boot_record_exfat.sector_shift + boot_record_exfat.cluster_shift)
             }
         };
-        let total_sectors = match boot_record {
+        let total_sectors = match value {
             BootRecord::Fat(boot_record_fat) => boot_record_fat.total_sectors(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
-        let total_clusters = match boot_record {
+        let total_clusters = match value {
             BootRecord::Fat(boot_record_fat) => boot_record_fat.total_clusters(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
-        let fat_table_count = match boot_record {
+        let fat_table_count = match value {
             BootRecord::Fat(boot_record_fat) => boot_record_fat.bpb.table_count,
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
-        let fat_sector_size = match boot_record {
+        let fat_sector_size = match value {
             BootRecord::Fat(boot_record_fat) => boot_record_fat.fat_sector_size(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
         };
-        let first_fat_sector = match boot_record {
+        let first_fat_sector = match value {
             BootRecord::Fat(boot_record_fat) => boot_record_fat.first_fat_sector(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
         };
-        let first_root_dir_sector = match boot_record {
+        let first_root_dir_sector = match value {
             BootRecord::Fat(boot_record_fat) => boot_record_fat.first_root_dir_sector(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
-        let first_data_sector = match boot_record {
+        let first_data_sector = match value {
             BootRecord::Fat(boot_record_fat) => boot_record_fat.first_data_sector().into(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
@@ -914,7 +912,7 @@ where
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
         };
 
-        let props = FSProperties::from_boot_record(&boot_record);
+        let props = FSProperties::from(&boot_record);
 
         let mut fs = Self {
             storage,
@@ -1587,7 +1585,7 @@ where
         // we need to allocate a cluster
         let dir_cluster = self.allocate_clusters(num::NonZero::new(1).unwrap(), None)?;
 
-        let entries = Box::new([
+        let entries = Box::from([
             MinProperties {
                 name: CURRENT_DIR_SFN.to_string().into(),
                 sfn: CURRENT_DIR_SFN,
@@ -1616,7 +1614,7 @@ where
         ]);
 
         // this composer will ALWAYS generate 2 entries
-        let entries_iter = EntryComposer::from_entries(entries);
+        let entries_iter = EntryComposer::from(entries);
 
         self.read_nth_sector(self.data_cluster_to_partition_sector(dir_cluster).into())?;
 
@@ -1645,7 +1643,7 @@ where
 
         let first_entry = self.allocate_nth_entries(entries_needed)?;
 
-        let mut entries_iter = EntryComposer::from_entries(entries);
+        let mut entries_iter = EntryComposer::from(entries);
 
         let mut current_entry = first_entry;
         let mut entry_bytes = entries_iter
@@ -2125,10 +2123,7 @@ where
 
             self._go_to_cached_dir()?;
             let bytes: [u8; DIRENTRY_SIZE] = bincode_config()
-                .serialize(&FATDirEntry::from_props(
-                    parent_entry.clone(),
-                    parent_entry.sfn,
-                ))
+                .serialize(&FATDirEntry::from(parent_entry))
                 .expect("these are completely valid data, this shouldn't panic")
                 .try_into()
                 .expect("the FATDirEntry should be exactly 32 bytes in size, this shouldn't panic");
