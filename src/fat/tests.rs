@@ -255,6 +255,128 @@ fn create_directory_in_subdir_and_file() {
 }
 
 #[test]
+fn rename_root_file() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT16.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    fs.rename(
+        PathBuf::from("/root.txt"),
+        PathBuf::from("/rootdir/not root.txt"),
+    )
+    .unwrap();
+
+    let mut file = fs
+        .get_ro_file(PathBuf::from("/rootdir/not root.txt"))
+        .unwrap();
+
+    let mut file_string = String::new();
+    file.read_to_string(&mut file_string).unwrap();
+    const EXPECTED_STR: &str = "I am in the filesystem's root!!!\n\n";
+    assert_eq!(file_string, EXPECTED_STR);
+}
+
+#[test]
+fn rename_nonroot_file() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT16.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    fs.rename(
+        PathBuf::from("/rootdir/example.txt"),
+        PathBuf::from("/another root directory/hello.txt"),
+    )
+    .unwrap();
+
+    let mut file = fs
+        .get_ro_file(PathBuf::from("/another root directory/hello.txt"))
+        .unwrap();
+
+    let mut file_string = String::new();
+    file.read_to_string(&mut file_string).unwrap();
+    const EXPECTED_STR: &str = "I am not in the root directory :(\n\n";
+    assert_eq!(file_string, EXPECTED_STR);
+}
+
+#[test]
+fn rename_root_directory() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT16.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    fs.rename(PathBuf::from("/rootdir"), PathBuf::from("/rootdir2"))
+        .unwrap();
+
+    let mut file = fs
+        .get_ro_file(PathBuf::from("/rootdir2/example.txt"))
+        .unwrap();
+
+    let mut file_string = String::new();
+    file.read_to_string(&mut file_string).unwrap();
+    const EXPECTED_STR: &str = "I am not in the root directory :(\n\n";
+    assert_eq!(file_string, EXPECTED_STR);
+}
+
+#[test]
+fn rename_root_file_fat32() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT32.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    fs.rename(
+        PathBuf::from("/hello.txt"),
+        PathBuf::from("/emptydir/bye.txt"),
+    )
+    .unwrap();
+
+    let mut file = fs.get_ro_file(PathBuf::from("/emptydir/bye.txt")).unwrap();
+
+    let mut file_string = String::new();
+    file.read_to_string(&mut file_string).unwrap();
+    const EXPECTED_STR: &str = "Hello from a FAT32 filesystem!!!\n";
+    assert_eq!(file_string, EXPECTED_STR);
+}
+
+#[test]
+fn rename_nonroot_file_fat32() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT32.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    fs.rename(
+        PathBuf::from("/secret/bee movie script.txt"),
+        PathBuf::from("/BEES.txt"),
+    )
+    .unwrap();
+
+    let mut file = fs.get_ro_file(PathBuf::from("/BEES.txt")).unwrap();
+
+    assert_file_is_bee_movie_script(&mut file);
+}
+
+#[test]
+fn rename_root_directory_fat32() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT32.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    fs.rename(PathBuf::from("/secret"), PathBuf::from("/emptydir/secret"))
+        .unwrap();
+
+    let mut file = fs
+        .get_ro_file(PathBuf::from("/emptydir/secret/bee movie script.txt"))
+        .unwrap();
+
+    assert_file_is_bee_movie_script(&mut file);
+}
+
+#[test]
 fn remove_root_dir_file() {
     use std::io::Cursor;
 
