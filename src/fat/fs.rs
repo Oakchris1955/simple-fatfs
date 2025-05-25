@@ -1585,15 +1585,17 @@ where
         // we need to allocate a cluster
         let dir_cluster = self.allocate_clusters(num::NonZero::new(1).unwrap(), None)?;
 
+        let now = self.clock.now();
+
         let entries = Box::from([
             MinProperties {
                 name: CURRENT_DIR_SFN.to_string().into(),
                 sfn: CURRENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-                created: self.clock.now(),
-                modified: self.clock.now(),
-                accessed: self.clock.now().date(),
+                created: now,
+                modified: now,
+                accessed: now.date(),
                 file_size: 0,
                 data_cluster: dir_cluster,
             },
@@ -1602,9 +1604,9 @@ where
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-                created: self.clock.now(),
-                modified: self.clock.now(),
-                accessed: self.clock.now().date(),
+                created: now,
+                modified: now,
+                accessed: now.date(),
                 file_size: 0,
                 data_cluster: match parent {
                     EntryLocationUnit::DataCluster(cluster) => cluster,
@@ -1989,15 +1991,17 @@ where
 
         let sfn = utils::string::gen_sfn(file_name, self, parent_dir)?;
 
+        let now = self.clock.now();
+
         // we got everything to create our first (and only) RawProperties struct
         let raw_properties = MinProperties {
             name: file_name.into(),
             sfn,
             // this needs to be set when creating a file
             attributes: RawAttributes::empty() | RawAttributes::ARCHIVE,
-            created: self.clock.now(),
-            modified: self.clock.now(),
-            accessed: self.clock.now().date(),
+            created: now,
+            modified: now,
+            accessed: now.date(),
             file_size: 0,
             data_cluster: file_cluster,
         };
@@ -2031,14 +2035,16 @@ where
 
         let sfn = utils::string::gen_sfn(file_name, self, parent_dir)?;
 
+        let now = self.clock.now();
+
         // we got everything to create our first (and only) RawProperties struct
         let raw_properties = MinProperties {
             name: file_name.into(),
             sfn,
             attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-            created: self.clock.now(),
-            modified: self.clock.now(),
-            accessed: self.clock.now().date(),
+            created: now,
+            modified: now,
+            accessed: now.date(),
             file_size: 0,
             data_cluster: dir_cluster,
         };
@@ -2100,6 +2106,8 @@ where
         // pointing to the same file. Here we use the second method
         self.go_to_dir(parent_to)?;
 
+        let now = self.clock.now();
+
         if entry_from.is_dir() {
             // the process with directories is the same, expect we must modify the ".." entry
             // so that it points to the new parent directory
@@ -2109,9 +2117,9 @@ where
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-                created: self.clock.now(),
-                modified: self.clock.now(),
-                accessed: self.clock.now().date(),
+                created: now,
+                modified: now,
+                accessed: now.date(),
                 file_size: 0,
                 data_cluster: match self.dir_info.chain_start {
                     EntryLocationUnit::DataCluster(cluster) => cluster,
@@ -2140,9 +2148,9 @@ where
             name: Box::from(to_filename),
             sfn,
             attributes: old_props.attributes,
-            created: self.clock.now(),
-            modified: self.clock.now(),
-            accessed: self.clock.now().date(),
+            created: now,
+            modified: now,
+            accessed: now.date(),
             file_size: old_props.file_size,
             data_cluster: old_props.data_cluster,
         };
