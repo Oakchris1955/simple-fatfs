@@ -387,8 +387,15 @@ pub(crate) fn calc_entries_needed<S>(file_name: S) -> u32
 where
     S: ToString,
 {
-    let char_count = file_name.to_string().chars().count();
-    let lfn_entries_needed = char_count.div_ceil(CHARS_PER_LFN_ENTRY);
+    use crate::utils::string::as_sfn;
+
+    let file_name = file_name.to_string();
+    let char_count = file_name.chars().count();
+    let lfn_entries_needed = if as_sfn(&file_name).is_some() {
+        0
+    } else {
+        char_count.div_ceil(CHARS_PER_LFN_ENTRY)
+    };
     // let's not forget the first entry
     let calc_entries_needed = 1 + lfn_entries_needed;
 
