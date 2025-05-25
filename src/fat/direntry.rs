@@ -260,12 +260,12 @@ pub(crate) const CURRENT_DIR_SFN: Sfn = Sfn {
         use typed_path::constants::windows::CURRENT_DIR;
 
         // not pretty, but it works
-        let mut s = [0; SFN_NAME_LEN];
+        let mut s = [b' '; SFN_NAME_LEN];
         // apparently, subslicing a const slice is not const, nice!
         s[0] = CURRENT_DIR[0];
         s
     },
-    ext: [0; SFN_EXT_LEN],
+    ext: [b' '; SFN_EXT_LEN],
 };
 
 pub(crate) const PARENT_DIR_SFN: Sfn = Sfn {
@@ -273,13 +273,13 @@ pub(crate) const PARENT_DIR_SFN: Sfn = Sfn {
         use typed_path::constants::windows::PARENT_DIR;
 
         // not pretty, but it works
-        let mut s = [0; SFN_NAME_LEN];
+        let mut s = [b' '; SFN_NAME_LEN];
         // apparently, subslicing a const slice is not const, nice!
         s[0] = PARENT_DIR[0];
         s[1] = PARENT_DIR[1];
         s
     },
-    ext: [0; SFN_EXT_LEN],
+    ext: [b' '; SFN_EXT_LEN],
 };
 
 impl Sfn {

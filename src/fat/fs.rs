@@ -1058,7 +1058,20 @@ where
     where
         P: AsRef<Path>,
     {
-        for dir_name in target.as_ref().components().filter(keep_path_normals) {
+        let target = target.as_ref();
+
+        let common_path_prefix = find_common_path_prefix(&self.dir_info.path, target);
+        let common_components = common_path_prefix
+            .normalize()
+            .components()
+            .filter(keep_path_normals)
+            .count();
+
+        for dir_name in target
+            .components()
+            .filter(keep_path_normals)
+            .skip(common_components)
+        {
             self._go_to_child_dir(dir_name.as_str())?;
         }
 
@@ -1111,7 +1124,7 @@ where
 
             self._go_down_till_target(target)?;
         } else {
-            self._go_up_till_target(target)?;
+            self._go_up_till_target(common_path_prefix)?;
 
             self._go_down_till_target(target)?;
         }

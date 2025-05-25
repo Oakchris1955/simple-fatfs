@@ -19,7 +19,7 @@ where
     let path1 = path1.as_ref().normalize();
     let path2 = path2.as_ref().normalize();
 
-    let mut common_prefix_pathbuf = PathBuf::new();
+    let mut common_prefix_pathbuf = PathBuf::from(path_consts::SEPARATOR_STR);
 
     for (component1, component2) in path1
         .components()
