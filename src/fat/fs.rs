@@ -422,7 +422,7 @@ impl EntryParser {
         let entry_location_unit = EntryLocationUnit::from_partition_sector(sector, fs);
 
         for (index, chunk) in fs
-            .read_nth_sector(sector.into())?
+            .load_nth_sector(sector.into())?
             .chunks(DIRENTRY_SIZE)
             .enumerate()
         {
@@ -1131,7 +1131,7 @@ where
         let target_sector = dir_chain.get_entry_sector(self);
 
         if target_sector != self.stored_sector {
-            self.read_nth_sector(target_sector)?;
+            self.load_nth_sector(target_sector)?;
         }
 
         Ok(())
@@ -1291,7 +1291,7 @@ where
     /// Read the nth sector from the partition's beginning and store it in [`self.sector_buffer`](Self::sector_buffer)
     ///
     /// This function also returns an immutable reference to [`self.sector_buffer`](Self::sector_buffer)
-    pub(crate) fn read_nth_sector(&mut self, n: u64) -> Result<&Vec<u8>, S::Error> {
+    pub(crate) fn load_nth_sector(&mut self, n: u64) -> Result<&Vec<u8>, S::Error> {
         // nothing to do if the sector we wanna read is already cached
         if n != self.stored_sector {
             // let's sync the current sector first
@@ -1317,7 +1317,7 @@ where
         let entry_size = self.fat_type.entry_size();
         let entry_props = FATEntryProps::new(n, self);
 
-        self.read_nth_sector(entry_props.fat_sector.into())?;
+        self.load_nth_sector(entry_props.fat_sector.into())?;
 
         let mut value_bytes = [0_u8; 4];
         let bytes_to_read: usize = cmp::min(
@@ -1331,7 +1331,7 @@ where
 
         // in FAT12, FAT entries may be split between two different sectors
         if self.fat_type == FATType::FAT12 && (bytes_to_read as u32) < entry_size {
-            self.read_nth_sector((entry_props.fat_sector + 1).into())?;
+            self.load_nth_sector((entry_props.fat_sector + 1).into())?;
 
             value_bytes[bytes_to_read..entry_size as usize]
                 .copy_from_slice(&self.sector_buffer[..(entry_size as usize - bytes_to_read)]);
@@ -1432,7 +1432,7 @@ where
                     value <<= 4;
                 }
 
-                self.read_nth_sector(entry_props.fat_sector.into())?;
+                self.load_nth_sector(entry_props.fat_sector.into())?;
 
                 let value_bytes = value.to_le_bytes();
 
@@ -1456,7 +1456,7 @@ where
 
                 if bytes_left_on_sector < entry_size as usize {
                     // looks like this FAT12 entry spans multiple sectors, we must also update the other one
-                    self.read_nth_sector((entry_props.fat_sector + 1).into())?;
+                    self.load_nth_sector((entry_props.fat_sector + 1).into())?;
                 }
 
                 let mut second_byte = value_bytes[1];
@@ -1474,7 +1474,7 @@ where
                 self.buffer_modified = true;
             }
             FATType::FAT16 | FATType::FAT32 => {
-                self.read_nth_sector(entry_props.fat_sector.into())?;
+                self.load_nth_sector(entry_props.fat_sector.into())?;
 
                 let value_bytes = value.to_le_bytes();
 
@@ -1639,7 +1639,7 @@ where
         // this composer will ALWAYS generate 2 entries
         let entries_iter = EntryComposer::from(entries);
 
-        self.read_nth_sector(self.data_cluster_to_partition_sector(dir_cluster).into())?;
+        self.load_nth_sector(self.data_cluster_to_partition_sector(dir_cluster).into())?;
 
         for (i, bytes) in entries_iter.enumerate() {
             self.sector_buffer[(i * DIRENTRY_SIZE)..((i + 1) * DIRENTRY_SIZE)]
@@ -1675,7 +1675,7 @@ where
 
         loop {
             let entry_sector = current_entry.get_entry_sector(self);
-            self.read_nth_sector(entry_sector)?;
+            self.load_nth_sector(entry_sector)?;
             self.buffer_modified = true;
             let byte_offset = current_entry.get_sector_byte_offset(self);
             self.sector_buffer[byte_offset..(byte_offset + DIRENTRY_SIZE)]
@@ -1859,7 +1859,7 @@ where
         if self.fsinfo_modified {
             if let BootRecord::Fat(boot_record_fat) = self.boot_record {
                 if let Ebr::FAT32(ebr_fat32, fsinfo) = boot_record_fat.ebr {
-                    self.read_nth_sector(ebr_fat32.fat_info.into())?;
+                    self.load_nth_sector(ebr_fat32.fat_info.into())?;
 
                     let bytes = bincode_config().serialize(&fsinfo)?;
                     self.sector_buffer.copy_from_slice(&bytes);

@@ -24,7 +24,7 @@ fn check_FAT_offset() {
     };
 
     // we manually read the first and second entry of the FAT table
-    fs.read_nth_sector(fat_offset.into()).unwrap();
+    fs.load_nth_sector(fat_offset.into()).unwrap();
 
     let first_entry = u16::from_le_bytes(fs.sector_buffer[..2].try_into().unwrap());
     let media_type = if let BootRecord::Fat(boot_record_fat) = fs.boot_record {

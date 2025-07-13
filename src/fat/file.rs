@@ -157,7 +157,7 @@ where
             );
 
             for sector in first_sector_of_cluster..=last_sector_of_cluster {
-                self.fs.read_nth_sector(sector.into())?;
+                self.fs.load_nth_sector(sector.into())?;
 
                 let start_index = self.props.offset as usize % self.fs.sector_size() as usize;
                 let bytes_to_read = cmp::min(
@@ -432,7 +432,7 @@ where
                 - sector_init_offset
                 - 1;
             for sector in first_sector_of_cluster..=last_sector_of_cluster {
-                self.fs.read_nth_sector(sector.into())?;
+                self.fs.load_nth_sector(sector.into())?;
 
                 let start_index = self.props.offset as usize % self.fs.sector_size() as usize;
 

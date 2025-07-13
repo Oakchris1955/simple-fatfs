@@ -595,7 +595,7 @@ impl EntryLocation {
         S: Read + Seek,
     {
         let entry_sector = self.unit.get_entry_sector(fs);
-        fs.read_nth_sector(entry_sector)?;
+        fs.load_nth_sector(entry_sector)?;
 
         let byte_offset = self.get_sector_byte_offset(fs);
         Ok(match fs.sector_buffer[byte_offset] {
@@ -626,7 +626,7 @@ impl EntryLocation {
         S: Read + Seek,
     {
         let entry_sector = self.unit.get_entry_sector(fs);
-        fs.read_nth_sector(entry_sector)?;
+        fs.load_nth_sector(entry_sector)?;
 
         let byte_offset = self.get_sector_byte_offset(fs);
         fs.sector_buffer[byte_offset] = UNUSED_ENTRY;
