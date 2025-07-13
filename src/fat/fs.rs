@@ -140,11 +140,11 @@ impl FATSectorProps {
     }
 
     #[allow(non_snake_case)]
-    pub fn get_corresponding_FAT_sectors<S>(&self, fs: &FileSystem<S>) -> Vec<u64>
+    pub fn get_corresponding_FAT_sectors<S>(&self, fs: &FileSystem<S>) -> Box<[u64]>
     where
         S: Read + Seek,
     {
-        let mut vec = Vec::new();
+        let mut vec = Vec::with_capacity(fs.props.fat_table_count.into());
 
         for i in 0..fs.props.fat_table_count {
             vec.push(
@@ -155,7 +155,7 @@ impl FATSectorProps {
             )
         }
 
-        vec
+        vec.into_boxed_slice()
     }
 }
 
@@ -523,10 +523,10 @@ impl EntryParser {
         Ok(false)
     }
 
-    /// Consumes [`Self`](EntryParser) & returns a `Vec` of [`RawProperties`]
+    /// Consumes [`Self`](EntryParser) & returns a [`Box<[RawProperties]>`][Box]
     /// of the parsed entries
-    fn finish(self) -> Vec<RawProperties> {
-        self.entries
+    fn finish(self) -> Box<[RawProperties]> {
+        self.entries.into_boxed_slice()
     }
 }
 
@@ -782,7 +782,7 @@ where
     storage: S,
 
     /// The length of this will be the sector size of the FS for all FAT types except FAT12, in that case, it will be double that value
-    pub(crate) sector_buffer: Vec<u8>,
+    pub(crate) sector_buffer: Box<[u8]>,
     /// ANY CHANGES TO THE SECTOR BUFFER SHOULD ALSO SET THIS TO TRUE
     pub(crate) buffer_modified: bool,
     fsinfo_modified: bool,
@@ -930,9 +930,11 @@ akin! {
 
             let props = FSProperties::from(&boot_record);
 
+            //buffer.
+
             let mut fs = Self {
                 storage,
-                sector_buffer: buffer[..props.sector_size as usize].to_vec(),
+                sector_buffer: Box::from(&buffer[..props.sector_size as usize]),
                 buffer_modified: false,
                 fsinfo_modified: false,
                 stored_sector,
@@ -963,7 +965,7 @@ impl<S> FileSystem<'_, S>
 where
     S: Read + Seek,
 {
-    fn _process_root_dir(&mut self) -> FSResult<Vec<RawProperties>, S::Error> {
+    fn _process_root_dir(&mut self) -> FSResult<Box<[RawProperties]>, S::Error> {
         match self.boot_record {
             BootRecord::Fat(boot_record_fat) => match boot_record_fat.ebr {
                 Ebr::FAT12_16(_ebr_fat12_16) => {
@@ -992,7 +994,7 @@ where
     fn _process_normal_dir(
         &mut self,
         mut data_cluster: u32,
-    ) -> FSResult<Vec<RawProperties>, S::Error> {
+    ) -> FSResult<Box<[RawProperties]>, S::Error> {
         let mut entry_parser = EntryParser::default();
 
         'outer: loop {
@@ -1027,7 +1029,7 @@ where
         Ok(entry_parser.finish())
     }
 
-    fn process_current_dir(&mut self) -> FSResult<Vec<RawProperties>, S::Error> {
+    fn process_current_dir(&mut self) -> FSResult<Box<[RawProperties]>, S::Error> {
         match self.dir_info.chain_start {
             EntryLocationUnit::RootDirSector(_) => self._process_root_dir(),
             EntryLocationUnit::DataCluster(data_cluster) => self._process_normal_dir(data_cluster),
@@ -1291,7 +1293,7 @@ where
     /// Read the nth sector from the partition's beginning and store it in [`self.sector_buffer`](Self::sector_buffer)
     ///
     /// This function also returns an immutable reference to [`self.sector_buffer`](Self::sector_buffer)
-    pub(crate) fn load_nth_sector(&mut self, n: u64) -> Result<&Vec<u8>, S::Error> {
+    pub(crate) fn load_nth_sector(&mut self, n: u64) -> Result<&[u8], S::Error> {
         // nothing to do if the sector we wanna read is already cached
         if n != self.stored_sector {
             // let's sync the current sector first
@@ -1905,10 +1907,10 @@ impl<'a, S> FileSystem<'a, S>
 where
     S: Read + Seek,
 {
-    /// Read all the entries of a directory ([`PathBuf`]) into [`Vec<DirEntry>`]
+    /// Read all the entries of a directory ([`PathBuf`]) into [`Box<[DirEntry]>`][Box]
     ///
     /// Fails if `path` doesn't represent a directory, or if that directory doesn't exist
-    pub fn read_dir<P: AsRef<Path>>(&mut self, path: P) -> FSResult<Vec<DirEntry>, S::Error> {
+    pub fn read_dir<P: AsRef<Path>>(&mut self, path: P) -> FSResult<Box<[DirEntry]>, S::Error> {
         // normalize the given path
         let path = path.as_ref().normalize();
 
@@ -1917,16 +1919,18 @@ where
         let entries = self.process_current_dir()?;
 
         // let's map the entries vector to DirEntries and return
-        Ok(entries
-            .into_iter()
-            .filter(|x| self.filter.filter(x))
-            // we shouldn't expose the special entries to the user
-            .filter(|x| {
-                ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
-                    .contains(&x.name.as_str())
-            })
-            .map(|rawentry| rawentry.into_dir_entry(&path))
-            .collect())
+        Ok(
+            IntoIterator::into_iter(entries) // don't ask, I don't know either (https://doc.rust-lang.org/std/boxed/index.html#editions)
+                .filter(|x| self.filter.filter(x))
+                // we shouldn't expose the special entries to the user
+                .filter(|x| {
+                    ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
+                        .contains(&x.name.as_str())
+                })
+                .map(|rawentry| rawentry.into_dir_entry(&path))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
     }
 
     /// Get a corresponding [`ROFile`] object from a [`PathBuf`]
@@ -1946,7 +1950,8 @@ where
                     .expect("we aren't in the root directory, this shouldn't panic"),
             )?;
 
-            match parent_dir.into_iter().find(|direntry| {
+            // don't ask, I don't know either (https://doc.rust-lang.org/std/boxed/index.html#editions)
+            match IntoIterator::into_iter(parent_dir).find(|direntry| {
                 direntry
                     .path()
                     .file_name()
@@ -2099,9 +2104,8 @@ where
             None => return Err(FSError::PermissionDenied),
         };
 
-        let entry_from = match self
-            .read_dir(parent_from)?
-            .into_iter()
+        // don't ask, I don't know either (https://doc.rust-lang.org/std/boxed/index.html#editions)
+        let entry_from = match IntoIterator::into_iter(self.read_dir(parent_from)?)
             .find(|entry| *entry.path() == from)
         {
             Some(entry) => entry,
@@ -2110,7 +2114,7 @@ where
 
         if self
             .read_dir(parent_to)?
-            .into_iter()
+            .iter()
             .any(|entry| *entry.path() == to)
         {
             return Err(FSError::AlreadyExists);
