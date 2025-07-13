@@ -393,7 +393,7 @@ fn remove_root_dir_file() {
     match file_result {
         Err(err) => match err {
             FSError::NotFound => (),
-            _ => panic!("unexpected IOError: {:?}", err),
+            _ => panic!("unexpected IOError: {err:?}"),
         },
         _ => panic!("file should have been deleted by now"),
     }
@@ -416,7 +416,7 @@ fn remove_data_region_file() {
     match file_result {
         Err(err) => match err {
             FSError::NotFound => (),
-            _ => panic!("unexpected IOError: {:?}", err),
+            _ => panic!("unexpected IOError: {err:?}"),
         },
         _ => panic!("file should have been deleted by now"),
     }
@@ -438,7 +438,7 @@ fn remove_empty_dir() {
     match dir_result {
         Err(err) => match err {
             FSError::NotFound => (),
-            _ => panic!("unexpected IOError: {:?}", err),
+            _ => panic!("unexpected IOError: {err:?}"),
         },
         _ => panic!("the directory should have been deleted by now"),
     }
@@ -458,7 +458,7 @@ fn remove_nonempty_dir_with_readonly_file() {
     match del_result {
         Err(err) => match err {
             FSError::ReadOnlyFile => (),
-            _ => panic!("unexpected IOError: {:?}", err),
+            _ => panic!("unexpected IOError: {err:?}"),
         },
         _ => panic!("the directory shouldn't have been removed already"),
     }
@@ -471,7 +471,7 @@ fn remove_nonempty_dir_with_readonly_file() {
     match dir_result {
         Err(err) => match err {
             FSError::NotFound => (),
-            _ => panic!("unexpected IOError: {:?}", err),
+            _ => panic!("unexpected IOError: {err:?}"),
         },
         _ => panic!("the directory should have been deleted by now"),
     }
@@ -797,7 +797,7 @@ fn remove_fat32_file() {
     match file_result {
         Err(err) => match err {
             FSError::NotFound => (),
-            _ => panic!("unexpected IOError: {:?}", err),
+            _ => panic!("unexpected IOError: {err:?}"),
         },
         _ => panic!("file should have been deleted by now"),
     }
@@ -819,7 +819,7 @@ fn remove_empty_fat32_dir() {
     match dir_result {
         Err(err) => match err {
             FSError::NotFound => (),
-            _ => panic!("unexpected IOError: {:?}", err),
+            _ => panic!("unexpected IOError: {err:?}"),
         },
         _ => panic!("the directory should have been deleted by now"),
     }
@@ -841,7 +841,7 @@ fn remove_nonempty_fat32_dir() {
     match dir_result {
         Err(err) => match err {
             FSError::NotFound => (),
-            _ => panic!("unexpected IOError: {:?}", err),
+            _ => panic!("unexpected IOError: {err:?}"),
         },
         _ => panic!("the directory should have been deleted by now"),
     }
@@ -861,7 +861,7 @@ fn attempt_to_remove_file_as_directory() {
     match fs_result {
         Err(err) => match err {
             FSError::NotADirectory => (),
-            _ => panic!("unexpected IOError: {:?}", err),
+            _ => panic!("unexpected IOError: {err:?}"),
         },
         _ => panic!("the filesystem struct should have detected that this isn't a directory"),
     }

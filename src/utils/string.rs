@@ -35,7 +35,7 @@ pub(crate) fn as_sfn(string: &str) -> Option<Sfn> {
 
     // don't forget the padding
     // here, 8 is SFN_NAME_LEN and 3 is SFN_EXT_LEN
-    let (name, ext) = (format!("{:<8}", name), format!("{:<3}", ext));
+    let (name, ext) = (format!("{name:<8}"), format!("{ext:<3}"));
 
     // this shouldn't panic, as we have checked that both the name
     // and the extension should fit into a SFN
@@ -84,7 +84,7 @@ impl SfnGenerator {
         (name, ext) = (name.to_ascii_uppercase(), ext.to_ascii_uppercase());
 
         // here, 6 is (SFN_NAME_LEN - 2) and 3 is SFN_EXT_LEN
-        (format!("{:<6}", name), format!("{:<3}", ext))
+        (format!("{name:<6}"), format!("{ext:<3}"))
     }
 
     /**

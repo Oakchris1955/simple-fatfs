@@ -327,7 +327,7 @@ impl fmt::Display for Sfn {
         // then, if the extension isn't empty (padded with zeroes), we write it too
         let ext = String::from_utf8_lossy(&self.ext).trim().to_owned();
         if !ext.is_empty() {
-            write!(f, ".{}", ext)?;
+            write!(f, ".{ext}")?;
         };
 
         Ok(())
