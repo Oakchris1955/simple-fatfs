@@ -12,6 +12,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "akin"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1763692fc1416554cf051efc56a3de5595eca47299d731cc5c2b583adf8b4d2f"
+
+[[package]]
 name = "anstream"
 version = "0.6.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -334,6 +340,7 @@ dependencies = [
 name = "simple-fatfs"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "akin",
  "bincode",
  "bitfield-struct",
  "bitflags",

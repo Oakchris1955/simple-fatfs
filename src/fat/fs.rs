@@ -1,4 +1,5 @@
 use super::*;
+use akin::akin;
 
 use crate::{error::*, io::prelude::*, path::*, time::*, utils};
 
@@ -94,7 +95,7 @@ impl FATEntryProps {
     /// Get the [`FATEntryProps`] of the `n`-th [`FATEntry`] of a [`ROFileSystem`] (`fs`)
     pub fn new<S>(n: u32, fs: &FileSystem<S>) -> Self
     where
-        S: Read + Write + Seek,
+        S: Read + Seek,
     {
         let fat_byte_offset: u32 = n * fs.fat_type.bits_per_entry() as u32 / 8;
         let fat_sector =
@@ -121,7 +122,7 @@ impl FATSectorProps {
     /// Returns [`None`] if this sector doesn't belong to a FAT table
     pub fn new<S>(sector: u64, fs: &FileSystem<S>) -> Option<Self>
     where
-        S: Read + Write + Seek,
+        S: Read + Seek,
     {
         if !fs.sector_belongs_to_FAT(sector) {
             return None;
@@ -141,7 +142,7 @@ impl FATSectorProps {
     #[allow(non_snake_case)]
     pub fn get_corresponding_FAT_sectors<S>(&self, fs: &FileSystem<S>) -> Vec<u64>
     where
-        S: Read + Write + Seek,
+        S: Read + Seek,
     {
         let mut vec = Vec::new();
 
@@ -414,7 +415,7 @@ impl EntryParser {
         fs: &mut FileSystem<S>,
     ) -> Result<bool, <S as IOBase>::Error>
     where
-        S: Read + Write + Seek,
+        S: Read + Seek,
     {
         use utils::bincode::bincode_config;
 
@@ -649,7 +650,7 @@ pub(crate) trait OffsetConversions {
 
 impl<S> OffsetConversions for FileSystem<'_, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
     #[inline]
     fn sector_size(&self) -> u32 {
@@ -768,13 +769,16 @@ impl Default for FileFilter {
     }
 }
 
+type SyncSectorBufferFn<'a, S> = fn(&mut FileSystem<'a, S>) -> Result<(), <S as IOBase>::Error>;
+type UnmountFn<'a, S> = fn(&mut FileSystem<'a, S>) -> FSResult<(), <S as IOBase>::Error>;
+
 /// An API to process a FAT filesystem
 #[derive(Debug)]
 pub struct FileSystem<'a, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
-    /// Any struct that implements the [`Read`], [`Write`] & [`Seek`] traits
+    /// Any struct that implements the [`Read`], [`Seek`] and optionally [`Write`] traits
     storage: S,
 
     /// The length of this will be the sector size of the FS for all FAT types except FAT12, in that case, it will be double that value
@@ -785,6 +789,9 @@ where
     pub(crate) stored_sector: u64,
 
     dir_info: DirInfo,
+
+    sync_f: Option<SyncSectorBufferFn<'a, S>>,
+    unmount_f: Option<UnmountFn<'a, S>>,
 
     clock: &'a dyn Clock,
 
@@ -802,7 +809,7 @@ where
 /// Getter functions
 impl<S> FileSystem<'_, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
     /// What is the [`FATType`] of the filesystem
     pub fn fat_type(&self) -> FATType {
@@ -813,7 +820,7 @@ where
 /// Setter functions
 impl<'a, S> FileSystem<'a, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
     /// Replace the internal [`Clock`] with a different one
     ///
@@ -826,7 +833,7 @@ where
 /// Setter functions
 impl<S> FileSystem<'_, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
     /// Whether or not to list hidden files
     ///
@@ -845,104 +852,116 @@ where
     }
 }
 
-/// Constructors
-impl<S> FileSystem<'_, S>
-where
-    S: Read + Write + Seek,
-{
-    /// Create a [`FileSystem`] from a storage object that implements [`Read`], [`Write`] & [`Seek`]
-    ///
-    /// Fails if the storage is way too small to support a FAT filesystem.
-    /// For most use cases, that shouldn't be an issue, you can just call [`.unwrap()`](Result::unwrap)
-    pub fn from_storage(mut storage: S) -> FSResult<Self, S::Error> {
-        use utils::bincode::bincode_config;
+akin! {
+    let &fn_name = [from_ro_storage, from_rw_storage];
+    let &impl_type = [ Read-Only, Read-Write ];
+    let &sync_fn = [None, Some(Self::sync_sector_buffer as SyncSectorBufferFn<'a, S>)];
+    let &unmount_fn = [None, Some(Self::unmount as UnmountFn<'a, S>)];
+    let &lifetimes = [NONE, {'a,}];
+    let &storage_lifetime = ['_, 'a];
+    let &write_trait = [NONE, + Write];
 
-        // Begin by reading the boot record
-        // We don't know the sector size yet, so we just go with the biggest possible one for now
-        let mut buffer = [0u8; MAX_SECTOR_SIZE];
+    /// Constructors for a *impl_type [`FileSystem`]
+    impl<*lifetimes S> FileSystem<*storage_lifetime, S>
+    where
+        S: Read *write_trait + Seek,
+    {
+        /// Create a *impl_type [`FileSystem`] from a *impl_type storage object
+        ///
+        /// Fails if the storage is way too small to support a FAT filesystem.
+        /// For most use cases, that shouldn't be an issue, you can just call [`.unwrap()`](Result::unwrap)
+        pub fn *fn_name(mut storage: S) -> FSResult<Self, S::Error> {
+            use utils::bincode::bincode_config;
 
-        let bytes_read = storage.read(&mut buffer)?;
-        let mut stored_sector = 0;
+            // Begin by reading the boot record
+            // We don't know the sector size yet, so we just go with the biggest possible one for now
+            let mut buffer = [0u8; MAX_SECTOR_SIZE];
 
-        if bytes_read < MIN_SECTOR_SIZE {
-            return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));
-        }
+            let bytes_read = storage.read(&mut buffer)?;
+            let mut stored_sector = 0;
 
-        let bpb: BpbFat = bincode_config().deserialize(&buffer[..BPBFAT_SIZE])?;
-
-        let ebr = if bpb.table_size_16 == 0 {
-            let ebr_fat32 = bincode_config()
-                .deserialize::<EBRFAT32>(&buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE])?;
-
-            storage.seek(SeekFrom::Start(
-                ebr_fat32.fat_info as u64 * bpb.bytes_per_sector as u64,
-            ))?;
-            stored_sector = ebr_fat32.fat_info.into();
-            storage.read_exact(&mut buffer[..bpb.bytes_per_sector as usize])?;
-            let fsinfo = bincode_config()
-                .deserialize::<FSInfoFAT32>(&buffer[..bpb.bytes_per_sector as usize])?;
-
-            if !fsinfo.verify_signature() {
-                log::error!("FAT32 FSInfo has invalid signature(s)");
-                return Err(FSError::InternalFSError(InternalFSError::InvalidFSInfoSig));
+            if bytes_read < MIN_SECTOR_SIZE {
+                return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));
             }
 
-            Ebr::FAT32(ebr_fat32, fsinfo)
-        } else {
-            Ebr::FAT12_16(
-                bincode_config()
-                    .deserialize::<EBRFAT12_16>(&buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE])?,
-            )
-        };
+            let bpb: BpbFat = bincode_config().deserialize(&buffer[..BPBFAT_SIZE])?;
 
-        // TODO: see how we will handle this for exfat
-        let boot_record = BootRecord::Fat(BootRecordFAT { bpb, ebr });
+            let ebr = if bpb.table_size_16 == 0 {
+                let ebr_fat32 = bincode_config()
+                    .deserialize::<EBRFAT32>(&buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE])?;
 
-        // verify boot record signature
-        let fat_type = boot_record.fat_type();
-        log::info!("The FAT type of the filesystem is {:?}", fat_type);
+                storage.seek(SeekFrom::Start(
+                    ebr_fat32.fat_info as u64 * bpb.bytes_per_sector as u64,
+                ))?;
+                stored_sector = ebr_fat32.fat_info.into();
+                storage.read_exact(&mut buffer[..bpb.bytes_per_sector as usize])?;
+                let fsinfo = bincode_config()
+                    .deserialize::<FSInfoFAT32>(&buffer[..bpb.bytes_per_sector as usize])?;
 
-        match boot_record {
-            BootRecord::Fat(boot_record_fat) => {
-                if boot_record_fat.verify_signature() {
-                    log::error!("FAT boot record has invalid signature(s)");
-                    return Err(FSError::InternalFSError(InternalFSError::InvalidBPBSig));
+                if !fsinfo.verify_signature() {
+                    log::error!("FAT32 FSInfo has invalid signature(s)");
+                    return Err(FSError::InternalFSError(InternalFSError::InvalidFSInfoSig));
                 }
+
+                Ebr::FAT32(ebr_fat32, fsinfo)
+            } else {
+                Ebr::FAT12_16(
+                    bincode_config()
+                        .deserialize::<EBRFAT12_16>(&buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE])?,
+                )
+            };
+
+            // TODO: see how we will handle this for exfat
+            let boot_record = BootRecord::Fat(BootRecordFAT { bpb, ebr });
+
+            // verify boot record signature
+            let fat_type = boot_record.fat_type();
+            log::info!("The FAT type of the filesystem is {:?}", fat_type);
+
+            match boot_record {
+                BootRecord::Fat(boot_record_fat) => {
+                    if boot_record_fat.verify_signature() {
+                        log::error!("FAT boot record has invalid signature(s)");
+                        return Err(FSError::InternalFSError(InternalFSError::InvalidBPBSig));
+                    }
+                }
+                BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
+            };
+
+            let props = FSProperties::from(&boot_record);
+
+            let mut fs = Self {
+                storage,
+                sector_buffer: buffer[..props.sector_size as usize].to_vec(),
+                buffer_modified: false,
+                fsinfo_modified: false,
+                stored_sector,
+                clock: &STATIC_DEFAULT_CLOCK,
+                dir_info: DirInfo::at_root_dir(&boot_record),
+                sync_f: *sync_fn,
+                unmount_f: *unmount_fn,
+                boot_record,
+                fat_type,
+                props,
+                first_free_cluster: RESERVED_FAT_ENTRIES,
+                filter: FileFilter::default(),
+            };
+
+            if !fs.FAT_tables_are_identical()? {
+                return Err(FSError::InternalFSError(
+                    InternalFSError::MismatchingFATTables,
+                ));
             }
-            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
-        };
 
-        let props = FSProperties::from(&boot_record);
-
-        let mut fs = Self {
-            storage,
-            sector_buffer: buffer[..props.sector_size as usize].to_vec(),
-            buffer_modified: false,
-            fsinfo_modified: false,
-            stored_sector,
-            clock: &STATIC_DEFAULT_CLOCK,
-            dir_info: DirInfo::at_root_dir(&boot_record),
-            boot_record,
-            fat_type,
-            props,
-            first_free_cluster: RESERVED_FAT_ENTRIES,
-            filter: FileFilter::default(),
-        };
-
-        if !fs.FAT_tables_are_identical()? {
-            return Err(FSError::InternalFSError(
-                InternalFSError::MismatchingFATTables,
-            ));
+            Ok(fs)
         }
-
-        Ok(fs)
     }
 }
 
 /// Internal [`Read`]-related low-level functions
 impl<S> FileSystem<'_, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
     fn _process_root_dir(&mut self) -> FSResult<Vec<RawProperties>, S::Error> {
         match self.boot_record {
@@ -1276,7 +1295,9 @@ where
         // nothing to do if the sector we wanna read is already cached
         if n != self.stored_sector {
             // let's sync the current sector first
-            self.sync_sector_buffer()?;
+            if let Some(sync_sector_buffer) = self.sync_f {
+                sync_sector_buffer(self)?
+            }
             self.storage.seek(SeekFrom::Start(
                 self.sector_to_partition_offset(n as u32).into(),
             ))?;
@@ -1882,7 +1903,7 @@ where
 /// Public [`Read`]-related functions
 impl<'a, S> FileSystem<'a, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
     /// Read all the entries of a directory ([`PathBuf`]) into [`Vec<DirEntry>`]
     ///
@@ -2336,10 +2357,12 @@ where
 
 impl<S> ops::Drop for FileSystem<'_, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
     fn drop(&mut self) {
-        // nothing to do if this errors out while dropping
-        let _ = self.unmount();
+        if let Some(unmount) = self.unmount_f {
+            // nothing to do if this errors out while dropping
+            let _ = unmount(self);
+        }
     }
 }

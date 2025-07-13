@@ -20,7 +20,7 @@ pub(crate) struct FileProps {
 #[derive(Debug)]
 pub struct ROFile<'a, 'b: 'a, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
     pub(crate) fs: &'a mut FileSystem<'b, S>,
     pub(crate) props: FileProps,
@@ -28,7 +28,7 @@ where
 
 impl<S> ops::Deref for ROFile<'_, '_, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
     type Target = Properties;
 
@@ -39,7 +39,7 @@ where
 
 impl<S> ops::DerefMut for ROFile<'_, '_, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.props.entry
@@ -49,7 +49,7 @@ where
 // Internal functions
 impl<S> ROFile<'_, '_, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
     #[inline]
     /// Panics if the current cluser doesn't point to another clluster
@@ -120,14 +120,14 @@ where
 
 impl<S> IOBase for ROFile<'_, '_, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
     type Error = S::Error;
 }
 
 impl<S> Read for ROFile<'_, '_, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         let mut bytes_read = 0;
@@ -215,7 +215,7 @@ where
 
 impl<S> Seek for ROFile<'_, '_, S>
 where
-    S: Read + Write + Seek,
+    S: Read + Seek,
 {
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error> {
         let offset = self.offset_from_seekfrom(pos);

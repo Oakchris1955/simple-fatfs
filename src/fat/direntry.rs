@@ -491,7 +491,7 @@ pub(crate) enum EntryLocationUnit {
 impl EntryLocationUnit {
     pub(crate) fn from_partition_sector<S>(sector: u32, fs: &mut FileSystem<S>) -> Self
     where
-        S: Read + Write + Seek,
+        S: Read + Seek,
     {
         if sector < fs.first_data_sector() {
             EntryLocationUnit::RootDirSector(
@@ -504,7 +504,7 @@ impl EntryLocationUnit {
 
     pub(crate) fn get_max_offset<S>(&self, fs: &mut FileSystem<S>) -> u64
     where
-        S: Read + Write + Seek,
+        S: Read + Seek,
     {
         match self {
             EntryLocationUnit::DataCluster(_) => fs.props.cluster_size,
@@ -514,7 +514,7 @@ impl EntryLocationUnit {
 
     pub(crate) fn get_entry_sector<S>(&self, fs: &mut FileSystem<S>) -> u64
     where
-        S: Read + Write + Seek,
+        S: Read + Seek,
     {
         match self {
             EntryLocationUnit::RootDirSector(root_dir_sector) => {
@@ -531,7 +531,7 @@ impl EntryLocationUnit {
         fs: &mut FileSystem<S>,
     ) -> Result<Option<EntryLocationUnit>, S::Error>
     where
-        S: Read + Write + Seek,
+        S: Read + Seek,
     {
         match self {
             EntryLocationUnit::RootDirSector(sector) => match fs.boot_record {
@@ -577,7 +577,7 @@ pub(crate) struct EntryLocation {
 impl EntryLocation {
     pub(crate) fn from_partition_sector<S>(sector: u32, fs: &mut FileSystem<S>) -> Self
     where
-        S: Read + Write + Seek,
+        S: Read + Seek,
     {
         let unit = if sector < fs.first_data_sector() {
             EntryLocationUnit::RootDirSector(
@@ -592,7 +592,7 @@ impl EntryLocation {
 
     pub(crate) fn entry_status<S>(&self, fs: &mut FileSystem<S>) -> Result<EntryStatus, S::Error>
     where
-        S: Read + Write + Seek,
+        S: Read + Seek,
     {
         let entry_sector = self.unit.get_entry_sector(fs);
         fs.read_nth_sector(entry_sector)?;
@@ -608,7 +608,7 @@ impl EntryLocation {
     #[inline]
     pub(crate) fn get_entry_sector<S>(&self, fs: &mut FileSystem<S>) -> u64
     where
-        S: Read + Write + Seek,
+        S: Read + Seek,
     {
         self.unit.get_entry_sector(fs)
     }
@@ -616,14 +616,14 @@ impl EntryLocation {
     #[inline]
     pub(crate) fn get_sector_byte_offset<S>(&self, fs: &mut FileSystem<S>) -> usize
     where
-        S: Read + Write + Seek,
+        S: Read + Seek,
     {
         (self.index as usize * DIRENTRY_SIZE) % fs.props.sector_size as usize
     }
 
     pub(crate) fn free_entry<S>(&self, fs: &mut FileSystem<S>) -> Result<(), S::Error>
     where
-        S: Read + Write + Seek,
+        S: Read + Seek,
     {
         let entry_sector = self.unit.get_entry_sector(fs);
         fs.read_nth_sector(entry_sector)?;
@@ -640,7 +640,7 @@ impl EntryLocation {
         fs: &mut FileSystem<S>,
     ) -> Result<Option<EntryLocation>, S::Error>
     where
-        S: Read + Write + Seek,
+        S: Read + Seek,
     {
         self.index += 1;
 

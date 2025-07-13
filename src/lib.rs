@@ -23,7 +23,7 @@
 //!     let mut cursor = std::io::Cursor::new(FAT_IMG.to_owned());
 //!
 //!     // We can either pass by value of by (mutable) reference
-//!     let mut fs = FileSystem::from_storage(&mut cursor).unwrap();
+//!     let mut fs = FileSystem::from_ro_storage(&mut cursor).unwrap();
 //!
 //!     // Let's see what entries there are in the root directory
 //!     for entry in fs.read_dir(PathBuf::from("/")).unwrap() {
