@@ -47,36 +47,6 @@
 //!     println!("root.txt contents:\n{}", string);
 //! }
 //! ```
-//!
-//! ## **FAQ**
-//! ### We have [`ROFile`] and [`RWFile`], why can't we also have `ROFileSystem` and `RWFileSystem`?
-//!
-//! *TL;DR:
-//! this is not possible until [RFC 1210 \(specialization\)][`RFC 1210`]
-//! [gets implemented](https://github.com/rust-lang/rust/issues/31844)
-//! \(it doesn't look like it's going to happen anytime soon\)*
-//!
-//! One way to implement this would be to have `RWFileSystem`
-//! `impl Deref(Mut) for ROFileSystem`.
-//! However, we would soon stumble across a major issue.
-//!
-//! Internally, we use a `read_nth_sector` method that does exactly what it says,
-//! but also sync any changes made to the previous sector back to the filesystem.
-//! Even if we were to have two separate such methods, one for the R/O filesystem
-//! that just reads a sector and another one for the R/W filesystem that also
-//! syncs the previous sector, all methods within `ROFileSystem` would use the
-//! one that doesn't sync any changes back to the storage medium. Thus, using
-//! this method, [`Write`] functionality would become impossible.
-//!
-//! One solution would to have a different implementation of the `read_nth_sector`
-//! method for `ROFileSystem`s for storage mediums that do and don't impl [`Write`].
-//! That's only possible using [specialization][`RFC 1210`].
-//!
-//! If you happen to know a way to bypass this restriction,
-//! [please open a new issue](https://github.com/Oakchris1955/simple-fatfs/issues)
-//!
-//! [`RFC 1210`]: https://github.com/rust-lang/rfcs/blob/master/text/1210-impl-specialization.md
-//! [`Write`]: crate::io::Write
 
 #![cfg_attr(not(feature = "std"), no_std)]
 // Even inside unsafe functions, we must acknowlegde the usage of unsafe code
