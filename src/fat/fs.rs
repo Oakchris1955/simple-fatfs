@@ -18,14 +18,33 @@ use bincode::Options as _;
 use ::time;
 use time::{Date, PrimitiveDateTime};
 
-/// An enum representing different versions of the FAT filesystem
+/// An enum representing different variants of the FAT filesystem
+///
+/// The logic is essentially the same in all of them, the only thing that
+/// changes is the size in bytes of FAT entries, and thus the maximum volume size
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 // no need for enum variant documentation here
-#[allow(missing_docs)]
 pub enum FATType {
+    /// One of the earliest versions, originally used all the way back to 1980.
+    /// This probably won't be encountered anywhere outside ancient MSDOS versions
+    /// or pretty low-size volumes, like microcontrollers
+    ///
+    /// Max volume size: 8 MB
     FAT12,
+    /// Used in many low-size volumes
+    ///
+    /// Min volume size: 8 MB,
+    /// Max volume size: 16 GB
     FAT16,
+    /// The most commonly-used variant.
+    ///
+    /// Min volume size: 256 MB,
+    /// Max volume size: 16 TB
     FAT32,
+    /// An ex-proprietory filesystem that allowes for even larger storage sizes
+    /// and its use is currently on the rise
+    ///
+    /// Not currently supported
     ExFAT,
 }
 
@@ -92,7 +111,7 @@ struct FATEntryProps {
 }
 
 impl FATEntryProps {
-    /// Get the [`FATEntryProps`] of the `n`-th [`FATEntry`] of a [`ROFileSystem`] (`fs`)
+    /// Get the [`FATEntryProps`] of the `n`-th [`FATEntry`] of a [`FileSystem`]
     pub fn new<S>(n: u32, fs: &FileSystem<S>) -> Self
     where
         S: Read + Seek,
@@ -371,7 +390,7 @@ impl DirInfo {
     }
 }
 
-/// A thin wrapper for [`Properties`] represing a directory entry
+/// A thin wrapper for [`Properties`] representing a directory entry
 #[derive(Debug)]
 pub struct DirEntry {
     pub(crate) entry: Properties,

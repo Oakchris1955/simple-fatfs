@@ -5,7 +5,7 @@ use alloc::string::FromUtf16Error;
 
 use crate::{io::prelude::*, path::*, FSResult, FileSystem, Sfn, SFN_EXT_LEN, SFN_NAME_LEN};
 
-/// variation of https://stackoverflow.com/a/42067321/19247098 for processing LFNs
+/// variation of <https://stackoverflow.com/a/42067321/19247098> for processing LFNs
 pub(crate) fn string_from_lfn(utf16_src: &[u16]) -> Result<String, FromUtf16Error> {
     let nul_range_end = utf16_src
         .iter()

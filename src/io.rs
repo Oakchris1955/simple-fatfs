@@ -272,7 +272,7 @@ pub trait Seek: IOBase {
     /// Seeking to a negative offset is considered an error.
     ///
     /// Seeking beyond the end of the stream behaviour depends on the implementation.
-    /// If [`self`] can be extended (because it's a [`File`](fs::File) for example), this shouldn't error out.
+    /// If [`self`] can be extended (because it's a [`File`](crate::ROFile) for example), this shouldn't error out.
     /// In the case that a stream is being extended or if the stream can't be extended,
     /// this should return an [`IOError`] with an [`IOErrorKind`] of `UnexpectedEOF`.
     /// The [`seek`](Seek::seek) operation should be considered partially successfull, since some clusters were allocated.

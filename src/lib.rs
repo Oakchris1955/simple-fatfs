@@ -22,7 +22,8 @@
 //! fn main() {
 //!     let mut cursor = std::io::Cursor::new(FAT_IMG.to_owned());
 //!
-//!     // We can either pass by value of by (mutable) reference
+//!     // We can either pass by value or by (mutable) reference
+//!     // (Yes, the storage medium might be Read-Only, but reading is a mutable action)
 //!     let mut fs = FileSystem::from_ro_storage(&mut cursor).unwrap();
 //!
 //!     // Let's see what entries there are in the root directory
@@ -36,7 +37,7 @@
 //!         }
 //!     }
 //!
-//!     // the image we currently use has a file named "root.txt"
+//!     // the disk image we currently use has a file named "root.txt"
 //!     // in the root directory. Let's read it
 //!
 //!     // please keep in mind that opening a `ROFile` or `RWFile` borrows

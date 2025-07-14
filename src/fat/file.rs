@@ -301,6 +301,7 @@ where
     ///
     /// If `size` is greater or equal to the current file size
     /// till the end of the last cluster allocated, this has no effect
+    /// to the file contents
     ///
     /// Furthermore, if the cursor point is beyond the new EOF, it will be moved there
     pub fn truncate(&mut self, size: u32) -> Result<(), <Self as IOBase>::Error> {

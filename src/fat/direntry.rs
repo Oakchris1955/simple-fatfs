@@ -70,7 +70,7 @@ pub struct Attributes {
     /// explicitly requesting inclusion of “hidden files”
     pub hidden: bool,
     /// This is a system file and shouldn't be listed unless a request
-    /// is issued explicitly requesting inclusion of system files”
+    /// is issued explicitly requesting inclusion of ”system files”
     pub system: bool,
     /// This file has been modified since last archival
     /// or has never been archived.
@@ -264,6 +264,10 @@ pub(crate) const SFN_LEN: usize = SFN_NAME_LEN + SFN_EXT_LEN;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 /// The short filename of an entry
+///
+/// In FAT, each file has 2 filenames: one long and one short filename.
+/// The short filename is retained for backwards-compatibility reasons
+/// by the FAT specification and shouldn't concern most users.
 pub struct Sfn {
     pub(crate) name: [u8; SFN_NAME_LEN],
     pub(crate) ext: [u8; SFN_EXT_LEN],
