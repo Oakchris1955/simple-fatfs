@@ -1,5 +1,8 @@
 use core::ops::{Deref, DerefMut};
 
+#[cfg(not(feature = "std"))]
+use alloc::boxed::Box;
+
 #[derive(Debug)]
 pub(crate) struct SectorBuffer {
     pub(crate) slice: Box<[u8]>,
