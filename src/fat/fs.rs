@@ -648,7 +648,7 @@ pub(crate) trait OffsetConversions {
     }
 }
 
-impl<S> OffsetConversions for FileSystem<'_, S>
+impl<S> OffsetConversions for FileSystem<S>
 where
     S: Read + Seek,
 {
@@ -769,12 +769,12 @@ impl Default for FileFilter {
     }
 }
 
-type SyncSectorBufferFn<'a, S> = fn(&mut FileSystem<'a, S>) -> Result<(), <S as IOBase>::Error>;
-type UnmountFn<'a, S> = fn(&mut FileSystem<'a, S>) -> FSResult<(), <S as IOBase>::Error>;
+type SyncSectorBufferFn<S> = fn(&mut FileSystem<S>) -> Result<(), <S as IOBase>::Error>;
+type UnmountFn<S> = fn(&mut FileSystem<S>) -> FSResult<(), <S as IOBase>::Error>;
 
 /// An API to process a FAT filesystem
 #[derive(Debug)]
-pub struct FileSystem<'a, S>
+pub struct FileSystem<S>
 where
     S: Read + Seek,
 {
@@ -787,10 +787,10 @@ where
 
     dir_info: DirInfo,
 
-    sync_f: Option<SyncSectorBufferFn<'a, S>>,
-    unmount_f: Option<UnmountFn<'a, S>>,
+    sync_f: Option<SyncSectorBufferFn<S>>,
+    unmount_f: Option<UnmountFn<S>>,
 
-    clock: &'a dyn Clock,
+    clock: Box<dyn Clock>,
 
     pub(crate) boot_record: BootRecord,
     // since `self.boot_record.fat_type()` calls like 5 nested functions, we keep this cached and expose it with a public getter function
@@ -804,7 +804,7 @@ where
 }
 
 /// Getter functions
-impl<S> FileSystem<'_, S>
+impl<S> FileSystem<S>
 where
     S: Read + Seek,
 {
@@ -815,20 +815,20 @@ where
 }
 
 /// Setter functions
-impl<'a, S> FileSystem<'a, S>
+impl<S> FileSystem<S>
 where
     S: Read + Seek,
 {
     /// Replace the internal [`Clock`] with a different one
     ///
     /// Use this in `no-std` contexts to replace the [`DefaultClock`] used
-    pub fn with_clock(&mut self, clock: &'a dyn Clock) {
-        self.clock = clock;
+    pub fn with_clock<C>(&mut self, boxed_clock: Box<dyn Clock>) {
+        self.clock = boxed_clock;
     }
 }
 
 /// Setter functions
-impl<S> FileSystem<'_, S>
+impl<S> FileSystem<S>
 where
     S: Read + Seek,
 {
@@ -852,14 +852,12 @@ where
 akin! {
     let &fn_name = [from_ro_storage, from_rw_storage];
     let &impl_type = [ Read-Only, Read-Write ];
-    let &sync_fn = [None, Some(Self::sync_sector_buffer as SyncSectorBufferFn<'a, S>)];
-    let &unmount_fn = [None, Some(Self::unmount as UnmountFn<'a, S>)];
-    let &lifetimes = [NONE, {'a,}];
-    let &storage_lifetime = ['_, 'a];
+    let &sync_fn = [None, Some(Self::sync_sector_buffer as SyncSectorBufferFn<S>)];
+    let &unmount_fn = [None, Some(Self::unmount as UnmountFn<S>)];
     let &write_trait = [NONE, + Write];
 
     /// Constructors for a *impl_type [`FileSystem`]
-    impl<*lifetimes S> FileSystem<*storage_lifetime, S>
+    impl< S> FileSystem<S>
     where
         S: Read *write_trait + Seek,
     {
@@ -933,7 +931,7 @@ akin! {
                 storage,
                 sector_buffer: SectorBuffer::from((&buffer[..props.sector_size as usize], stored_sector)),
                 fsinfo_modified: false,
-                clock: &STATIC_DEFAULT_CLOCK,
+                clock: Box::from(&STATIC_DEFAULT_CLOCK),
                 dir_info: DirInfo::at_root_dir(&boot_record),
                 sync_f: *sync_fn,
                 unmount_f: *unmount_fn,
@@ -956,7 +954,7 @@ akin! {
 }
 
 /// Internal [`Read`]-related low-level functions
-impl<S> FileSystem<'_, S>
+impl<S> FileSystem<S>
 where
     S: Read + Seek,
 {
@@ -1402,7 +1400,7 @@ where
 }
 
 /// Internal [`Write`]-related low-level functions
-impl<'a, S> FileSystem<'a, S>
+impl<S> FileSystem<S>
 where
     S: Read + Write + Seek,
 {
@@ -1892,7 +1890,7 @@ where
     fn get_rw_file_unchecked<P: AsRef<Path>>(
         &mut self,
         path: P,
-    ) -> FSResult<RWFile<'_, 'a, S>, S::Error> {
+    ) -> FSResult<RWFile<'_, S>, S::Error> {
         self._raise_io_rw_result()?;
 
         let ro_file = self.get_ro_file(path)?;
@@ -1902,7 +1900,7 @@ where
 }
 
 /// Public [`Read`]-related functions
-impl<'a, S> FileSystem<'a, S>
+impl<S> FileSystem<S>
 where
     S: Read + Seek,
 {
@@ -1937,10 +1935,7 @@ where
     /// Borrows `&mut self` until that [`ROFile`] object is dropped, effectively locking `self` until that file closed
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
-    pub fn get_ro_file<P: AsRef<Path>>(
-        &mut self,
-        path: P,
-    ) -> FSResult<ROFile<'_, 'a, S>, S::Error> {
+    pub fn get_ro_file<P: AsRef<Path>>(&mut self, path: P) -> FSResult<ROFile<'_, S>, S::Error> {
         let path = path.as_ref();
 
         if let Some(file_name) = path.file_name() {
@@ -1988,16 +1983,13 @@ where
 }
 
 /// [`Write`]-related functions
-impl<'a, S> FileSystem<'a, S>
+impl<S> FileSystem<S>
 where
     S: Read + Write + Seek,
 {
     /// Create a new [`RWFile`] and return its handle
     #[inline]
-    pub fn create_file<P: AsRef<Path>>(
-        &mut self,
-        path: P,
-    ) -> FSResult<RWFile<'_, 'a, S>, S::Error> {
+    pub fn create_file<P: AsRef<Path>>(&mut self, path: P) -> FSResult<RWFile<'_, S>, S::Error> {
         let target = path.as_ref().normalize();
 
         let parent_dir = match target.parent() {
@@ -2332,10 +2324,7 @@ where
     /// Borrows `&mut self` until that [`RWFile`] object is dropped, effectively locking `self` until that file closed
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
-    pub fn get_rw_file<P: AsRef<Path>>(
-        &mut self,
-        path: P,
-    ) -> FSResult<RWFile<'_, 'a, S>, S::Error> {
+    pub fn get_rw_file<P: AsRef<Path>>(&mut self, path: P) -> FSResult<RWFile<'_, S>, S::Error> {
         let rw_file = self.get_rw_file_unchecked(path)?;
 
         if rw_file.attributes.read_only {
@@ -2358,7 +2347,7 @@ where
     }
 }
 
-impl<S> ops::Drop for FileSystem<'_, S>
+impl<S> ops::Drop for FileSystem<S>
 where
     S: Read + Seek,
 {

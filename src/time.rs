@@ -38,3 +38,9 @@ impl Clock for DefaultClock {
         EPOCH
     }
 }
+
+impl Clock for &DefaultClock {
+    fn now(&self) -> PrimitiveDateTime {
+        (*self).now()
+    }
+}
