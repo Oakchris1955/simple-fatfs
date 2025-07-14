@@ -262,7 +262,7 @@ pub(crate) const SFN_NAME_LEN: usize = 8;
 pub(crate) const SFN_EXT_LEN: usize = 3;
 pub(crate) const SFN_LEN: usize = SFN_NAME_LEN + SFN_EXT_LEN;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 /// The short filename of an entry
 pub struct Sfn {
     pub(crate) name: [u8; SFN_NAME_LEN],

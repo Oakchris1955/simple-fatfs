@@ -19,7 +19,7 @@ use ::time;
 use time::{Date, PrimitiveDateTime};
 
 /// An enum representing different versions of the FAT filesystem
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 // no need for enum variant documentation here
 #[allow(missing_docs)]
 pub enum FATType {

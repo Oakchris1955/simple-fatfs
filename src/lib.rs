@@ -64,6 +64,7 @@
 #![warn(unused_import_braces)]
 #![warn(unused_lifetimes)]
 // clippy attributes
+#![warn(clippy::derive_partial_eq_without_eq)]
 #![warn(clippy::redundant_clone)]
 
 extern crate alloc;
