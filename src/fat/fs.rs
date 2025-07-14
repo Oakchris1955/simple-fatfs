@@ -782,11 +782,8 @@ where
     storage: S,
 
     /// The length of this will be the sector size of the FS for all FAT types except FAT12, in that case, it will be double that value
-    pub(crate) sector_buffer: Box<[u8]>,
-    /// ANY CHANGES TO THE SECTOR BUFFER SHOULD ALSO SET THIS TO TRUE
-    pub(crate) buffer_modified: bool,
+    pub(crate) sector_buffer: SectorBuffer,
     fsinfo_modified: bool,
-    pub(crate) stored_sector: u64,
 
     dir_info: DirInfo,
 
@@ -934,10 +931,8 @@ akin! {
 
             let mut fs = Self {
                 storage,
-                sector_buffer: Box::from(&buffer[..props.sector_size as usize]),
-                buffer_modified: false,
+                sector_buffer: SectorBuffer::from((&buffer[..props.sector_size as usize], stored_sector)),
                 fsinfo_modified: false,
-                stored_sector,
                 clock: &STATIC_DEFAULT_CLOCK,
                 dir_info: DirInfo::at_root_dir(&boot_record),
                 sync_f: *sync_fn,
@@ -1132,7 +1127,7 @@ where
         let dir_chain = self.dir_info.chain_start;
         let target_sector = dir_chain.get_entry_sector(self);
 
-        if target_sector != self.stored_sector {
+        if target_sector != self.sector_buffer.stored_sector {
             self.load_nth_sector(target_sector)?;
         }
 
@@ -1295,7 +1290,7 @@ where
     /// This function also returns an immutable reference to [`self.sector_buffer`](Self::sector_buffer)
     pub(crate) fn load_nth_sector(&mut self, n: u64) -> Result<&[u8], S::Error> {
         // nothing to do if the sector we wanna read is already cached
-        if n != self.stored_sector {
+        if n != self.sector_buffer.stored_sector {
             // let's sync the current sector first
             if let Some(sync_sector_buffer) = self.sync_f {
                 sync_sector_buffer(self)?
@@ -1307,7 +1302,7 @@ where
             self.storage
                 .seek(SeekFrom::Current(-i64::from(self.props.sector_size)))?;
 
-            self.stored_sector = n;
+            self.sector_buffer.stored_sector = n;
         }
 
         Ok(&self.sector_buffer)
@@ -1449,7 +1444,7 @@ where
                 }
 
                 self.sector_buffer[entry_props.sector_offset] = first_byte; // this shouldn't panic
-                self.buffer_modified = true;
+                self.sector_buffer.modified = true;
 
                 let bytes_left_on_sector: usize = cmp::min(
                     entry_size as usize,
@@ -1473,7 +1468,7 @@ where
                 }
 
                 self.sector_buffer[second_byte_index] = second_byte; // this shouldn't panic
-                self.buffer_modified = true;
+                self.sector_buffer.modified = true;
             }
             FATType::FAT16 | FATType::FAT32 => {
                 self.load_nth_sector(entry_props.fat_sector.into())?;
@@ -1483,7 +1478,7 @@ where
                 self.sector_buffer
                     [entry_props.sector_offset..entry_props.sector_offset + entry_size as usize]
                     .copy_from_slice(&value_bytes[..entry_size as usize]); // this shouldn't panic
-                self.buffer_modified = true;
+                self.sector_buffer.modified = true;
             }
             FATType::ExFAT => todo!("ExFAT not yet implemented"),
         };
@@ -1521,8 +1516,10 @@ where
 
         // we may not even need to allocate new entries.
         // let's check if there is a chain of unused entries big enough to be used
-        let mut first_entry =
-            EntryLocation::from_partition_sector(self.stored_sector.try_into().unwrap(), self);
+        let mut first_entry = EntryLocation::from_partition_sector(
+            self.sector_buffer.stored_sector.try_into().unwrap(),
+            self,
+        );
         let mut last_entry = first_entry.clone();
 
         let mut chain_len = 0;
@@ -1648,7 +1645,7 @@ where
                 .copy_from_slice(&bytes);
         }
 
-        self.buffer_modified = true;
+        self.sector_buffer.modified = true;
 
         Ok(dir_cluster)
     }
@@ -1678,7 +1675,7 @@ where
         loop {
             let entry_sector = current_entry.get_entry_sector(self);
             self.load_nth_sector(entry_sector)?;
-            self.buffer_modified = true;
+            self.sector_buffer.modified = true;
             let byte_offset = current_entry.get_sector_byte_offset(self);
             self.sector_buffer[byte_offset..(byte_offset + DIRENTRY_SIZE)]
                 .copy_from_slice(&entry_bytes);
@@ -1825,8 +1822,10 @@ where
     pub(crate) fn sync_sector_buffer(&mut self) -> Result<(), S::Error> {
         self._raise_io_rw_result()?;
 
-        if self.buffer_modified {
-            if let Some(fat_sector_props) = FATSectorProps::new(self.stored_sector, self) {
+        if self.sector_buffer.modified {
+            if let Some(fat_sector_props) =
+                FATSectorProps::new(self.sector_buffer.stored_sector, self)
+            {
                 log::trace!("syncing FAT sector {}", fat_sector_props.sector_offset,);
                 match self.boot_record {
                     BootRecord::Fat(boot_record_fat) => match boot_record_fat.ebr {
@@ -1844,11 +1843,11 @@ where
                     BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
                 }
             } else {
-                log::trace!("syncing sector {}", self.stored_sector);
+                log::trace!("syncing sector {}", self.sector_buffer.stored_sector);
                 self._sync_current_sector()?;
             }
         }
-        self.buffer_modified = false;
+        self.sector_buffer.modified = false;
 
         Ok(())
     }
@@ -2161,7 +2160,7 @@ where
                 .try_into()
                 .expect("the FATDirEntry should be exactly 32 bytes in size, this shouldn't panic");
             self.sector_buffer[DIRENTRY_SIZE..(DIRENTRY_SIZE * 2)].copy_from_slice(&bytes);
-            self.buffer_modified = true;
+            self.sector_buffer.modified = true;
         }
 
         let old_chain = entry_from.chain.clone();

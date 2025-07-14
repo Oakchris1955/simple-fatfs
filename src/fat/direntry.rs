@@ -630,7 +630,7 @@ impl EntryLocation {
 
         let byte_offset = self.get_sector_byte_offset(fs);
         fs.sector_buffer[byte_offset] = UNUSED_ENTRY;
-        fs.buffer_modified = true;
+        fs.sector_buffer.modified = true;
 
         Ok(())
     }
