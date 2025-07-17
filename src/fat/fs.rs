@@ -1603,10 +1603,23 @@ where
                     let clusters_to_allocate = (entries_left - free_entries_on_current_cluster)
                         .div_ceil(entries_per_cluster);
 
-                    self.allocate_clusters(
+                    let first_cluster = self.allocate_clusters(
                         num::NonZero::new(clusters_to_allocate).expect("this should be at least 1"),
                         Some(cluster),
                     )?;
+
+                    // before we return, we should zero those sectors according to the FAT spec
+                    for cluster in first_cluster..(first_cluster + clusters_to_allocate) {
+                        let first_sector = self.cluster_to_sector(cluster.into());
+
+                        for sector in
+                            first_sector..(first_sector + self.sectors_per_cluster() as u32)
+                        {
+                            self.load_nth_sector(sector.into())?;
+                            self.sector_buffer.fill(0);
+                            self.sector_buffer.modified = true;
+                        }
+                    }
                 }
 
                 Ok(first_entry)
@@ -1657,12 +1670,24 @@ where
 
         self.load_nth_sector(self.data_cluster_to_partition_sector(dir_cluster).into())?;
 
+        // we zero the current sector
+        self.sector_buffer.fill(0);
+
         for (i, bytes) in entries_iter.enumerate() {
             self.sector_buffer[(i * DIRENTRY_SIZE)..((i + 1) * DIRENTRY_SIZE)]
                 .copy_from_slice(&bytes);
         }
 
         self.sector_buffer.modified = true;
+
+        // we also zero everything else in the cluster
+        for sector in (self.sector_buffer.stored_sector + 1)
+            ..(self.sector_buffer.stored_sector + self.sectors_per_cluster())
+        {
+            self.load_nth_sector(sector)?;
+            self.sector_buffer.fill(0);
+            self.sector_buffer.modified = true;
+        }
 
         Ok(dir_cluster)
     }
