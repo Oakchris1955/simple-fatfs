@@ -1628,14 +1628,16 @@ where
     }
 
     /// Creates a new cluster chain with the `.` and `..` entries present,
+    // The datetime parameter is there so that we fully comply with the FAT32 spec:
+    // ". All date and time fields must be set to the same value as that for
+    // the containing directory"
     pub(crate) fn create_entry_chain(
         &mut self,
         parent: EntryLocationUnit,
+        datetime: PrimitiveDateTime,
     ) -> FSResult<u32, S::Error> {
         // we need to allocate a cluster
         let dir_cluster = self.allocate_clusters(num::NonZero::new(1).unwrap(), None)?;
-
-        let now = self.clock.now();
 
         let entries = Box::from([
             MinProperties {
@@ -1643,9 +1645,9 @@ where
                 sfn: CURRENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-                created: now,
-                modified: now,
-                accessed: now.date(),
+                created: datetime,
+                modified: datetime,
+                accessed: datetime.date(),
                 file_size: 0,
                 data_cluster: dir_cluster,
             },
@@ -1654,9 +1656,9 @@ where
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-                created: now,
-                modified: now,
-                accessed: now.date(),
+                created: datetime,
+                modified: datetime,
+                accessed: datetime.date(),
                 file_size: 0,
                 data_cluster: match parent {
                     EntryLocationUnit::DataCluster(cluster) => cluster,
@@ -2089,14 +2091,14 @@ where
             .file_name()
             .expect("the path is normalized and it isn't the root directory either");
 
-        let dir_cluster = self.create_entry_chain(self.dir_info.chain_start)?;
+        let now = self.clock.now();
+
+        let dir_cluster = self.create_entry_chain(self.dir_info.chain_start, now)?;
 
         // The cluster chain of the directory has been created,
         // we now need to add it as an entry to the current directory
 
         let sfn = utils::string::gen_sfn(file_name, self, parent_dir)?;
-
-        let now = self.clock.now();
 
         // we got everything to create our first (and only) RawProperties struct
         let raw_properties = MinProperties {
