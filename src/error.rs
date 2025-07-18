@@ -134,8 +134,10 @@ where
     /**
      The [Path](`crate::Path`) provided is malformed.
 
-     This is mostly an error variant used for internal testing.
-     If you get this error, open an issue: <https://github.com/Oakchris1955/simple-fatfs/issues>
+     This usually means that a path you provided isn't a valid [`Utf8WindowsPath`](typed_path::Utf8WindowsPath)
+
+     If you are 100% that your path is valid (`path.is_valid()`), then perhaps you have encountered a bug.
+     File a bug report here: <https://github.com/Oakchris1955/simple-fatfs/issues>
     */
     MalformedPath,
     /**

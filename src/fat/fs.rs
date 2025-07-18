@@ -1164,6 +1164,10 @@ where
     {
         let target = target.as_ref();
 
+        if !target.is_valid() {
+            return Err(FSError::MalformedPath);
+        }
+
         if self.dir_info.path == target {
             // there's a chance that the current loaded sector doesn't belong
             // to the directory we have cached, so we must also navigate to the correct sector
@@ -1955,7 +1959,13 @@ where
     /// Fails if `path` doesn't represent a directory, or if that directory doesn't exist
     pub fn read_dir<P: AsRef<Path>>(&mut self, path: P) -> FSResult<Box<[DirEntry]>, S::Error> {
         // normalize the given path
-        let path = path.as_ref().normalize();
+        let path = path.as_ref();
+
+        if !path.is_valid() {
+            return Err(FSError::MalformedPath);
+        }
+
+        let path = path.normalize();
 
         self.go_to_dir(&path)?;
 
@@ -1983,6 +1993,10 @@ where
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
     pub fn get_ro_file<P: AsRef<Path>>(&mut self, path: P) -> FSResult<ROFile<'_, S>, S::Error> {
         let path = path.as_ref();
+
+        if !path.is_valid() {
+            return Err(FSError::MalformedPath);
+        }
 
         if let Some(file_name) = path.file_name() {
             let parent_dir = self.read_dir(
@@ -2036,7 +2050,13 @@ where
     /// Create a new [`RWFile`] and return its handle
     #[inline]
     pub fn create_file<P: AsRef<Path>>(&mut self, path: P) -> FSResult<RWFile<'_, S>, S::Error> {
-        let target = path.as_ref().normalize();
+        let path = path.as_ref();
+
+        if !path.is_valid() {
+            return Err(FSError::MalformedPath);
+        }
+
+        let target = path.normalize();
 
         let parent_dir = match target.parent() {
             Some(parent) => parent,
@@ -2079,7 +2099,13 @@ where
     /// Create a new directory
     #[inline]
     pub fn create_dir<P: AsRef<Path>>(&mut self, path: P) -> FSResult<(), S::Error> {
-        let target = path.as_ref().normalize();
+        let path = path.as_ref();
+
+        if !path.is_valid() {
+            return Err(FSError::MalformedPath);
+        }
+
+        let target = path.normalize();
 
         let parent_dir = match target.parent() {
             Some(parent) => parent,
@@ -2127,8 +2153,15 @@ where
         from: P,
         to: Q,
     ) -> FSResult<(), S::Error> {
-        let from = from.as_ref().normalize();
-        let to = to.as_ref().normalize();
+        let from = from.as_ref();
+        let to = to.as_ref();
+
+        if !from.is_valid() || !to.is_valid() {
+            return Err(FSError::MalformedPath);
+        }
+
+        let from = from.normalize();
+        let to = to.normalize();
 
         let parent_from = match from.parent() {
             Some(parent) => parent,
@@ -2249,6 +2282,10 @@ where
     pub fn remove_empty_dir<P: AsRef<Path>>(&mut self, path: P) -> FSResult<(), S::Error> {
         let path = path.as_ref();
 
+        if !path.is_valid() {
+            return Err(FSError::MalformedPath);
+        }
+
         if path
             .components()
             .next_back()
@@ -2321,6 +2358,10 @@ where
     pub fn remove_dir_all_unchecked<P: AsRef<Path>>(&mut self, path: P) -> FSResult<(), S::Error> {
         let path = path.as_ref();
 
+        if !path.is_valid() {
+            return Err(FSError::MalformedPath);
+        }
+
         for entry in self.read_dir(path)? {
             if entry.is_dir() {
                 self.remove_dir_all(&entry.path)?;
@@ -2345,6 +2386,10 @@ where
         path: P,
     ) -> FSResult<bool, S::Error> {
         let path = path.as_ref();
+
+        if !path.is_valid() {
+            return Err(FSError::MalformedPath);
+        }
 
         for entry in self.read_dir(path)? {
             let read_only_found = if entry.is_dir() {
