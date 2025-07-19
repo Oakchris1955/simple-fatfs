@@ -1,5 +1,7 @@
 use core::fmt;
 
+use bincode::error::{DecodeError, EncodeError};
+
 /// Base error type
 ///
 /// To be replaced with [`core::error`] when feature [`error_in_core`](https://github.com/rust-lang/rust/issues/103765) gets pushed to `stable`
@@ -146,7 +148,7 @@ where
      This error variant should NEVER be raised.
      If you get this error, open an issue: <https://github.com/Oakchris1955/simple-fatfs/issues>
     */
-    BincodeError(bincode::Error),
+    BincodeError(BincodeError),
     /// Expected a directory
     NotADirectory,
     /// Found a directory when we expected a file
@@ -175,6 +177,18 @@ where
     IOError(I),
 }
 
+/// An encode/decode-related error
+///
+/// This error enum should NEVER be raised.
+/// If you get it, file an issue: <https://github.com/Oakchris1955/simple-fatfs/issues>
+#[derive(Debug)]
+pub enum BincodeError {
+    /// A decode-related error
+    DecodeError(DecodeError),
+    /// An encode-related error
+    EncodeError(EncodeError),
+}
+
 impl<I> From<I> for FSError<I>
 where
     I: IOError,
@@ -185,13 +199,23 @@ where
     }
 }
 
-impl<I> From<bincode::Error> for FSError<I>
+impl<I> From<DecodeError> for FSError<I>
 where
     I: IOError,
 {
     #[inline]
-    fn from(value: bincode::Error) -> Self {
-        FSError::BincodeError(value)
+    fn from(value: DecodeError) -> Self {
+        FSError::BincodeError(BincodeError::DecodeError(value))
+    }
+}
+
+impl<I> From<EncodeError> for FSError<I>
+where
+    I: IOError,
+{
+    #[inline]
+    fn from(value: EncodeError) -> Self {
+        FSError::BincodeError(BincodeError::EncodeError(value))
     }
 }
 

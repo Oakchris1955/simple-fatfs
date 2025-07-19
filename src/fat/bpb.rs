@@ -2,9 +2,8 @@ use super::*;
 
 use core::fmt;
 
+use bincode::{Decode, Encode};
 use bitfield_struct::bitfield;
-use serde::{Deserialize, Serialize};
-use serde_big_array::BigArray;
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -170,7 +169,7 @@ pub(crate) struct BootRecordExFAT {
 }
 
 pub(crate) const BPBFAT_SIZE: usize = 36;
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Encode, Decode, Debug, Clone, Copy)]
 pub(crate) struct BpbFat {
     pub _jmpboot: [u8; 3],
     pub _oem_identifier: [u8; 8],
@@ -204,7 +203,7 @@ impl fmt::Debug for Ebr {
     }
 }
 
-#[derive(Deserialize, Serialize, Clone, Copy)]
+#[derive(Encode, Decode, Clone, Copy)]
 pub(crate) struct EBRFAT12_16 {
     pub _drive_num: u8,
     pub _windows_nt_flags: u8,
@@ -212,13 +211,12 @@ pub(crate) struct EBRFAT12_16 {
     pub volume_serial_num: u32,
     pub volume_label: [u8; 11],
     pub _system_identifier: [u8; 8],
-    #[serde(with = "BigArray")]
     pub _boot_code: [u8; 448],
     pub signature: u16,
 }
 
 #[bitfield(u16, order = Lsb)]
-#[derive(Deserialize, Serialize)]
+#[derive(Encode, Decode)]
 pub(crate) struct FAT32ExtendedFlags {
     #[bits(4)]
     #[allow(non_snake_case)]
@@ -232,13 +230,13 @@ pub(crate) struct FAT32ExtendedFlags {
 }
 
 // FIXME: these might be the other way around
-#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
+#[derive(Encode, Decode, Debug, Clone, Copy)]
 pub(crate) struct FATVersion {
     minor: u8,
     major: u8,
 }
 
-#[derive(Deserialize, Serialize, Clone, Copy)]
+#[derive(Encode, Decode, Clone, Copy)]
 pub(crate) struct EBRFAT32 {
     pub table_size_32: u32,
     pub extended_flags: FAT32ExtendedFlags,
@@ -253,7 +251,6 @@ pub(crate) struct EBRFAT32 {
     pub volume_serial_num: u32,
     pub volume_label: [u8; 11],
     pub _system_ident: [u8; 8],
-    #[serde(with = "BigArray")]
     pub _boot_code: [u8; 420],
     pub signature: u16,
 }
@@ -261,10 +258,9 @@ pub(crate) struct EBRFAT32 {
 const FSINFO_LEAD_SIGNATURE: u32 = 0x41615252;
 const FSINFO_MID_SIGNATURE: u32 = 0x61417272;
 const FSINFO_TRAIL_SIGNAUTE: u32 = 0xAA550000;
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Encode, Decode, Debug, Clone, Copy)]
 pub(crate) struct FSInfoFAT32 {
     pub lead_signature: u32,
-    #[serde(with = "BigArray")]
     pub _reserved1: [u8; 480],
     pub mid_signature: u32,
     pub free_cluster_count: u32,

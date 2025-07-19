@@ -13,8 +13,6 @@ use alloc::{
     vec::Vec,
 };
 
-use bincode::Options as _;
-
 use ::time;
 use time::{Date, PrimitiveDateTime};
 
@@ -451,7 +449,9 @@ impl EntryParser {
                 _ => (),
             };
 
-            let Ok(entry) = bincode_config().deserialize::<FATDirEntry>(chunk) else {
+            let Ok(entry) = bincode::decode_from_slice::<FATDirEntry, _>(chunk, bincode_config())
+                .map(|(v, _)| v)
+            else {
                 continue;
             };
 
@@ -471,7 +471,9 @@ impl EntryParser {
 
             if entry.attributes.contains(RawAttributes::LFN) {
                 // TODO: perhaps there is a way to utilize the `order` field?
-                let Ok(lfn_entry) = bincode_config().deserialize::<LFNEntry>(chunk) else {
+                let Ok((lfn_entry, _)) =
+                    bincode::decode_from_slice::<LFNEntry, _>(chunk, bincode_config())
+                else {
                     self._decrement_parsed_entries_counter();
                     continue;
                 };
@@ -575,6 +577,8 @@ impl Iterator for EntryComposer {
     fn next(&mut self) -> Option<Self::Item> {
         use utils::bincode::bincode_config;
 
+        let mut item: Self::Item = [0; DIRENTRY_SIZE];
+
         if self.entry_index >= self.entries.len() {
             return None;
         }
@@ -583,27 +587,21 @@ impl Iterator for EntryComposer {
 
         match &mut self.lfn_iter {
             Some(lfn_iter) => match lfn_iter.next() {
-                Some(lfn_entry) => Some(
-                    bincode_config()
-                        .serialize(&lfn_entry)
-                        .expect("these are completely valid data, this shouldn't panic")
-                        .try_into()
-                        .expect(
-                            "the LFNEntry should be exactly 32 bytes in size, this shouldn't panic",
-                        ),
-                ),
+                Some(lfn_entry) => {
+                    bincode::encode_into_slice(lfn_entry, &mut item, bincode_config())
+                        .expect("these are completely valid data, this shouldn't panic");
+                }
                 None => {
                     // this LFN generator has been exhausted, return the SFN entry
                     self.lfn_iter = None;
                     self.entry_index += 1;
 
-                    Some(bincode_config()
-                        .serialize(&FATDirEntry::from(current_entry.clone()))
-                        .expect("these are completely valid data, this shouldn't panic")
-                        .try_into()
-                        .expect(
-                            "the FATDirEntry should be exactly 32 bytes in size, this shouldn't panic",
-                    ))
+                    bincode::encode_into_slice(
+                        FATDirEntry::from(current_entry.clone()),
+                        &mut item,
+                        bincode_config(),
+                    )
+                    .expect("these are completely valid data, this shouldn't panic");
                 }
             },
             None => {
@@ -611,23 +609,24 @@ impl Iterator for EntryComposer {
                 if *current_entry.sfn.to_string() == *current_entry.name {
                     self.entry_index += 1;
 
-                    Some(bincode_config()
-                        .serialize(&FATDirEntry::from(current_entry.clone()))
-                        .expect("these are completely valid data, this shouldn't panic")
-                        .try_into()
-                        .expect(
-                            "the FATDirEntry should be exactly 32 bytes in size, this shouldn't panic",
-                    ))
+                    bincode::encode_into_slice(
+                        FATDirEntry::from(current_entry.clone()),
+                        &mut item,
+                        bincode_config(),
+                    )
+                    .expect("these are completely valid data, this shouldn't panic");
                 } else {
                     self.lfn_iter = Some(LFNEntryGenerator::new(
                         &current_entry.name,
                         current_entry.sfn.gen_checksum(),
                     ));
 
-                    self.next()
+                    return self.next();
                 }
             }
         }
+
+        Some(item)
     }
 }
 
@@ -898,19 +897,17 @@ akin! {
                 return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));
             }
 
-            let bpb: BpbFat = bincode_config().deserialize(&buffer[..BPBFAT_SIZE])?;
+            let bpb: BpbFat = bincode::decode_from_slice(&buffer[..BPBFAT_SIZE], bincode_config()).map(|(v, _)| v)?;
 
             let ebr = if bpb.table_size_16 == 0 {
-                let ebr_fat32 = bincode_config()
-                    .deserialize::<EBRFAT32>(&buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE])?;
+                let ebr_fat32: EBRFAT32 = bincode::decode_from_slice(&buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE], bincode_config()).map(|(v, _)| v)?;
 
                 storage.seek(SeekFrom::Start(
                     ebr_fat32.fat_info as u64 * bpb.bytes_per_sector as u64,
                 ))?;
                 stored_sector = ebr_fat32.fat_info.into();
                 storage.read_exact(&mut buffer[..bpb.bytes_per_sector as usize])?;
-                let fsinfo = bincode_config()
-                    .deserialize::<FSInfoFAT32>(&buffer[..bpb.bytes_per_sector as usize])?;
+                let fsinfo: FSInfoFAT32 = bincode::decode_from_slice(&buffer[..bpb.bytes_per_sector as usize], bincode_config()).map(|(v, _)| v)?;
 
                 if !fsinfo.verify_signature() {
                     log::error!("FAT32 FSInfo has invalid signature(s)");
@@ -920,8 +917,7 @@ akin! {
                 Ebr::FAT32(ebr_fat32, fsinfo)
             } else {
                 Ebr::FAT12_16(
-                    bincode_config()
-                        .deserialize::<EBRFAT12_16>(&buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE])?,
+                    bincode::decode_from_slice(&buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE], bincode_config()).map(|(v, _)| v)?
                 )
             };
 
@@ -1910,8 +1906,7 @@ where
                 if let Ebr::FAT32(ebr_fat32, fsinfo) = boot_record_fat.ebr {
                     self.load_nth_sector(ebr_fat32.fat_info.into())?;
 
-                    let bytes = bincode_config().serialize(&fsinfo)?;
-                    self.sector_buffer.copy_from_slice(&bytes);
+                    bincode::encode_into_slice(fsinfo, &mut self.sector_buffer, bincode_config())?;
                 }
             }
 
@@ -2225,11 +2220,14 @@ where
             use utils::bincode::bincode_config;
 
             self._go_to_cached_dir()?;
-            let bytes: [u8; DIRENTRY_SIZE] = bincode_config()
-                .serialize(&FATDirEntry::from(parent_entry))
-                .expect("these are completely valid data, this shouldn't panic")
-                .try_into()
-                .expect("the FATDirEntry should be exactly 32 bytes in size, this shouldn't panic");
+            let mut bytes: [u8; DIRENTRY_SIZE] = [0; DIRENTRY_SIZE];
+
+            bincode::encode_into_slice(
+                FATDirEntry::from(parent_entry),
+                &mut bytes,
+                bincode_config(),
+            )?;
+
             self.sector_buffer[DIRENTRY_SIZE..(DIRENTRY_SIZE * 2)].copy_from_slice(&bytes);
             self.sector_buffer.modified = true;
         }

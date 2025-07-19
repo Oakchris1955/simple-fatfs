@@ -12,9 +12,9 @@ use alloc::{
     string::{String, ToString},
 };
 
+use bincode::{Decode, Encode};
 use bitfield_struct::bitfield;
 use bitflags::bitflags;
-use serde::{Deserialize, Serialize};
 use time::{Date, PrimitiveDateTime, Time};
 
 bitflags! {
@@ -23,7 +23,7 @@ bitflags! {
     /// To check whether a given [`Attributes`] struct contains a flag, use the [`contains()`](Attributes::contains()) method
     ///
     /// Generated using [bitflags](https://docs.rs/bitflags/2.6.0/bitflags/)
-    #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
+    #[derive(Debug, Clone, Copy, PartialEq)]
     pub(crate) struct RawAttributes: u8 {
         /// This entry is read-only
         const READ_ONLY = 0x01;
@@ -44,6 +44,35 @@ bitflags! {
                     Self::HIDDEN.bits() |
                     Self::SYSTEM.bits() |
                     Self::VOLUME_ID.bits();
+    }
+}
+
+impl<Context> bincode::Decode<Context> for RawAttributes {
+    fn decode<D: bincode::de::Decoder<Context = Context>>(
+        decoder: &mut D,
+    ) -> core::result::Result<Self, bincode::error::DecodeError> {
+        Ok(RawAttributes::from_bits_truncate(
+            <u8 as bincode::Decode<Context>>::decode(decoder)?,
+        ))
+    }
+}
+impl<'__de, Context> bincode::BorrowDecode<'__de, Context> for RawAttributes {
+    fn borrow_decode<D: bincode::de::BorrowDecoder<'__de, Context = Context>>(
+        decoder: &mut D,
+    ) -> core::result::Result<Self, bincode::error::DecodeError> {
+        Ok(RawAttributes::from_bits_truncate(
+            <u8 as bincode::BorrowDecode<Context>>::borrow_decode(decoder)?,
+        ))
+    }
+}
+
+impl bincode::Encode for RawAttributes {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        bincode::Encode::encode(&self.bits(), encoder)?;
+        Ok(())
     }
 }
 
@@ -91,7 +120,7 @@ impl From<RawAttributes> for Attributes {
 }
 
 #[bitfield(u16)]
-#[derive(Serialize, Deserialize)]
+#[derive(Encode, Decode)]
 pub(crate) struct TimeAttribute {
     /// Multiply by 2
     #[bits(5)]
@@ -112,7 +141,7 @@ impl From<Time> for TimeAttribute {
 }
 
 #[bitfield(u16)]
-#[derive(Serialize, Deserialize)]
+#[derive(Encode, Decode)]
 pub(crate) struct DateAttribute {
     #[bits(5)]
     day: u8,
@@ -157,7 +186,7 @@ impl TryFrom<DateAttribute> for Date {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Encode, Decode, Debug, Clone, Copy)]
 pub(crate) struct EntryCreationTime {
     pub(crate) hundredths_of_second: u8,
     pub(crate) time: TimeAttribute,
@@ -194,7 +223,7 @@ impl From<PrimitiveDateTime> for EntryCreationTime {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Encode, Decode, Debug, Clone, Copy)]
 pub(crate) struct EntryModificationTime {
     pub(crate) time: TimeAttribute,
     pub(crate) date: DateAttribute,
@@ -220,6 +249,23 @@ impl From<PrimitiveDateTime> for EntryModificationTime {
     }
 }
 
+#[derive(Encode, Decode, Debug, Clone, Copy)]
+pub(crate) struct EntryLastAccessedTime(DateAttribute);
+
+impl TryFrom<EntryLastAccessedTime> for Date {
+    type Error = ();
+
+    fn try_from(value: EntryLastAccessedTime) -> Result<Self, Self::Error> {
+        value.0.try_into()
+    }
+}
+
+impl From<Date> for EntryLastAccessedTime {
+    fn from(value: Date) -> Self {
+        Self(value.into())
+    }
+}
+
 // a directory entry occupies 32 bytes
 pub(crate) const DIRENTRY_SIZE: usize = 32;
 
@@ -228,13 +274,13 @@ pub(crate) const DIRENTRY_SIZE: usize = 32;
 // TODO: actually check this on runtime
 pub(crate) const NONROOT_MIN_DIRENTRIES: usize = 2;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Encode, Decode, Debug, Clone, Copy)]
 pub(crate) struct FATDirEntry {
     pub(crate) sfn: Sfn,
     pub(crate) attributes: RawAttributes,
     pub(crate) _reserved: [u8; 1],
     pub(crate) created: EntryCreationTime,
-    pub(crate) accessed: DateAttribute,
+    pub(crate) accessed: EntryLastAccessedTime,
     pub(crate) cluster_high: u16,
     pub(crate) modified: EntryModificationTime,
     pub(crate) cluster_low: u16,
@@ -262,7 +308,7 @@ pub(crate) const SFN_NAME_LEN: usize = 8;
 pub(crate) const SFN_EXT_LEN: usize = 3;
 pub(crate) const SFN_LEN: usize = SFN_NAME_LEN + SFN_EXT_LEN;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Encode, Decode, Debug, Clone, Copy, PartialEq, Eq)]
 /// The short filename of an entry
 ///
 /// In FAT, each file has 2 filenames: one long and one short filename.
@@ -342,7 +388,7 @@ const LAST_LFN_ENTRY_MASK: u8 = 0x40;
 const CHARS_PER_LFN_ENTRY: usize = 13;
 const LONG_ENTRY_TYPE: u8 = 0;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Encode, Decode)]
 pub(crate) struct LFNEntry {
     /// masked with 0x40 if this is the last entry
     pub(crate) order: u8,
