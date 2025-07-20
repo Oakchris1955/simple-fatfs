@@ -598,9 +598,15 @@ fn check_file_timestamps() {
         .get_ro_file(PathBuf::from("/rootdir/example.txt"))
         .unwrap();
 
-    assert_eq!(datetime!(2024-07-11 13:02:38.15), file.created);
+    assert_eq!(
+        Some((
+            datetime!(2024-07-11 13:02:38.15),
+            DateTimeResolution::Millisecond
+        )),
+        file.created
+    );
     assert_eq!(datetime!(2024-07-11 13:02:38.0), file.modified);
-    assert_eq!(date!(2024 - 07 - 11), file.accessed);
+    assert_eq!(Some(date!(2024 - 07 - 11)), file.accessed);
 }
 
 #[test]

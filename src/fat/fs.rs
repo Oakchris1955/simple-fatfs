@@ -182,9 +182,9 @@ pub(crate) struct MinProperties {
     pub(crate) name: Box<str>,
     pub(crate) sfn: Sfn,
     pub(crate) attributes: RawAttributes,
-    pub(crate) created: PrimitiveDateTime,
+    pub(crate) created: Option<(PrimitiveDateTime, DateTimeResolution)>,
     pub(crate) modified: PrimitiveDateTime,
-    pub(crate) accessed: Date,
+    pub(crate) accessed: Option<Date>,
     pub(crate) file_size: u32,
     pub(crate) data_cluster: u32,
 }
@@ -223,9 +223,9 @@ pub(crate) struct RawProperties {
     pub(crate) sfn: Sfn,
     pub(crate) is_dir: bool,
     pub(crate) attributes: RawAttributes,
-    pub(crate) created: PrimitiveDateTime,
+    pub(crate) created: Option<(PrimitiveDateTime, DateTimeResolution)>,
     pub(crate) modified: PrimitiveDateTime,
-    pub(crate) accessed: Date,
+    pub(crate) accessed: Option<Date>,
     pub(crate) file_size: u32,
     pub(crate) data_cluster: u32,
 
@@ -271,9 +271,9 @@ pub struct Properties {
     pub(crate) sfn: Sfn,
     pub(crate) is_dir: bool,
     pub(crate) attributes: Attributes,
-    pub(crate) created: PrimitiveDateTime,
+    pub(crate) created: Option<(PrimitiveDateTime, DateTimeResolution)>,
     pub(crate) modified: PrimitiveDateTime,
-    pub(crate) accessed: Date,
+    pub(crate) accessed: Option<Date>,
     pub(crate) file_size: u32,
     pub(crate) data_cluster: u32,
 
@@ -316,9 +316,25 @@ impl Properties {
     #[inline]
     /// Find out when this entry was created (max resolution: 1ms)
     ///
-    /// Returns a [`PrimitiveDateTime`] from the [`time`] crate
-    pub fn creation_time(&self) -> &PrimitiveDateTime {
-        &self.created
+    /// Returns an [`Option`] containing a [`PrimitiveDateTime`] from the [`time`] crate,
+    /// since that field is specified as optional in the FAT32 specification
+    pub fn creation_time(&self) -> Option<&PrimitiveDateTime> {
+        match &self.created {
+            Some((datetime, _res)) => Some(datetime),
+            None => None,
+        }
+    }
+
+    #[inline]
+    /// Get the resolution of the [`creation_time()`](Self::creation_time()),
+    /// if it exists
+    ///
+    /// Returns an [`Option`] containing a [`DateTimeResolution`]
+    pub fn creation_resolution(&self) -> Option<&DateTimeResolution> {
+        match &self.created {
+            Some((_datetime, res)) => Some(res),
+            None => None,
+        }
     }
 
     #[inline]
@@ -332,8 +348,9 @@ impl Properties {
     #[inline]
     /// Find out when this entry was last accessed (max resolution: 1 day)
     ///
-    /// Returns a [`Date`] from the [`time`] crate
-    pub fn last_accessed_date(&self) -> &Date {
+    /// Returns an [`Option`] containing a [`Date`] from the [`time`] crate,
+    /// since that field is specified as optional in the FAT32 specification
+    pub fn last_accessed_date(&self) -> &Option<Date> {
         &self.accessed
     }
 
@@ -1645,9 +1662,9 @@ where
                 sfn: CURRENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-                created: datetime,
+                created: Some((datetime, DateTimeResolution::Millisecond)),
                 modified: datetime,
-                accessed: datetime.date(),
+                accessed: Some(datetime.date()),
                 file_size: 0,
                 data_cluster: dir_cluster,
             },
@@ -1656,9 +1673,9 @@ where
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-                created: datetime,
+                created: Some((datetime, DateTimeResolution::Millisecond)),
                 modified: datetime,
-                accessed: datetime.date(),
+                accessed: Some(datetime.date()),
                 file_size: 0,
                 data_cluster: match parent {
                     EntryLocationUnit::DataCluster(cluster) => cluster,
@@ -2077,9 +2094,9 @@ where
             sfn,
             // this needs to be set when creating a file
             attributes: RawAttributes::empty() | RawAttributes::ARCHIVE,
-            created: now,
+            created: Some((now, DateTimeResolution::Millisecond)),
             modified: now,
-            accessed: now.date(),
+            accessed: Some(now.date()),
             file_size: 0,
             data_cluster: file_cluster,
         };
@@ -2126,9 +2143,9 @@ where
             name: file_name.into(),
             sfn,
             attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-            created: now,
+            created: Some((now, DateTimeResolution::Millisecond)),
             modified: now,
-            accessed: now.date(),
+            accessed: Some(now.date()),
             file_size: 0,
             data_cluster: dir_cluster,
         };
@@ -2207,9 +2224,9 @@ where
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-                created: now,
+                created: Some((now, DateTimeResolution::Millisecond)),
                 modified: now,
-                accessed: now.date(),
+                accessed: Some(now.date()),
                 file_size: 0,
                 data_cluster: match self.dir_info.chain_start {
                     EntryLocationUnit::DataCluster(cluster) => cluster,
@@ -2241,9 +2258,9 @@ where
             name: Box::from(to_filename),
             sfn,
             attributes: old_props.attributes,
-            created: now,
+            created: Some((now, DateTimeResolution::Millisecond)),
             modified: now,
-            accessed: now.date(),
+            accessed: Some(now.date()),
             file_size: old_props.file_size,
             data_cluster: old_props.data_cluster,
         };
