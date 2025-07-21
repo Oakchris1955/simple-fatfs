@@ -14,7 +14,6 @@ use alloc::{
 };
 
 use ::time;
-use impls::impls;
 use time::{Date, PrimitiveDateTime};
 
 /// An enum representing different variants of the FAT filesystem
@@ -903,10 +902,6 @@ akin! {
         /// For most use cases, that shouldn't be an issue, you can just call [`.unwrap()`](Result::unwrap)
         pub fn *fn_name(mut storage: S) -> FSResult<Self, S::Error> {
             use utils::bincode::bincode_config;
-
-            if impls!(S: Write) {
-                return Err(FSError::ExpectedROFilesystem)
-            }
 
             // Begin by reading the boot record
             // We don't know the sector size yet, so we just go with the biggest possible one for now

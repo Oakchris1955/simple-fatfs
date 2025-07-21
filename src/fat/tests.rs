@@ -16,7 +16,7 @@ fn check_FAT_offset() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::from_rw_storage(&mut storage).unwrap();
+    let mut fs = FileSystem::from_ro_storage(&mut storage).unwrap();
 
     let fat_offset = match fs.boot_record {
         BootRecord::Fat(boot_record_fat) => boot_record_fat.first_fat_sector(),
@@ -43,7 +43,7 @@ fn read_file_in_root_dir() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::from_rw_storage(&mut storage).unwrap();
+    let mut fs = FileSystem::from_ro_storage(&mut storage).unwrap();
 
     let mut file = fs.get_ro_file(PathBuf::from("/root.txt")).unwrap();
 
@@ -92,7 +92,7 @@ fn read_huge_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::from_rw_storage(&mut storage).unwrap();
+    let mut fs = FileSystem::from_ro_storage(&mut storage).unwrap();
 
     let mut file = fs
         .get_ro_file(PathBuf::from("/bee movie script.txt"))
@@ -108,7 +108,7 @@ fn seek_n_read() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::from_rw_storage(&mut storage).unwrap();
+    let mut fs = FileSystem::from_ro_storage(&mut storage).unwrap();
 
     let mut file = fs
         .get_ro_file(PathBuf::from("/GNU ⁄ Linux copypasta.txt"))
@@ -550,7 +550,7 @@ fn get_hidden_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT12.to_owned());
-    let mut fs = FileSystem::from_rw_storage(&mut storage).unwrap();
+    let mut fs = FileSystem::from_ro_storage(&mut storage).unwrap();
 
     let file_path = PathBuf::from("/hidden");
     let file_result = fs.get_ro_file(&file_path);
@@ -573,7 +573,7 @@ fn read_file_in_subdir() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::from_rw_storage(&mut storage).unwrap();
+    let mut fs = FileSystem::from_ro_storage(&mut storage).unwrap();
 
     let mut file = fs
         .get_ro_file(PathBuf::from("/rootdir/example.txt"))
@@ -592,7 +592,7 @@ fn check_file_timestamps() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::from_rw_storage(&mut storage).unwrap();
+    let mut fs = FileSystem::from_ro_storage(&mut storage).unwrap();
 
     let file = fs
         .get_ro_file(PathBuf::from("/rootdir/example.txt"))
@@ -614,7 +614,7 @@ fn read_file_fat12() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT12.to_owned());
-    let mut fs = FileSystem::from_rw_storage(&mut storage).unwrap();
+    let mut fs = FileSystem::from_ro_storage(&mut storage).unwrap();
 
     let mut file = fs.get_ro_file(PathBuf::from("/foo/bar.txt")).unwrap();
     let mut file_string = String::new();
@@ -636,7 +636,7 @@ fn read_file_fat32() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::from_rw_storage(&mut storage).unwrap();
+    let mut fs = FileSystem::from_ro_storage(&mut storage).unwrap();
 
     let mut file = fs
         .get_ro_file(PathBuf::from("/secret/bee movie script.txt"))
@@ -723,7 +723,7 @@ fn seek_n_read_fat32() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::from_rw_storage(&mut storage).unwrap();
+    let mut fs = FileSystem::from_ro_storage(&mut storage).unwrap();
 
     let mut file = fs.get_ro_file(PathBuf::from("/hello.txt")).unwrap();
     file.seek(SeekFrom::Start(13)).unwrap();
@@ -926,7 +926,7 @@ fn assert_img_fat_type() {
         use std::io::Cursor;
 
         let mut storage = Cursor::new(case.0.to_owned());
-        let fs = FileSystem::from_rw_storage(&mut storage).unwrap();
+        let fs = FileSystem::from_ro_storage(&mut storage).unwrap();
 
         assert_eq!(fs.fat_type(), case.1)
     }
