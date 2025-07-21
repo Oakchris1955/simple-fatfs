@@ -122,7 +122,6 @@ pub enum InternalFSError {
     MalformedEntryChain,
 }
 
-// TODO: mark this as non-exhaustive before release
 /// An error indicating that a filesystem-related operation has failed
 #[non_exhaustive]
 #[derive(Debug, displaydoc::Display)]
