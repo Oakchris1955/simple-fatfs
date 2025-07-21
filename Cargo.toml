@@ -13,6 +13,7 @@ bincode = "2.0.1"
 bitfield-struct = "0.8.0"
 bitflags = { version = "2.6.0", features = ["serde"] }
 displaydoc = { version = "0.2.5", default-features = false }
+impls = "1.0.3"
 log = "0.4.22"
 #serde = { version = "1.0.204", default-features = false, features = [ "alloc", "derive" ] }
 #serde-big-array = "0.5.1"

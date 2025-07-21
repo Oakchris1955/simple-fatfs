@@ -148,6 +148,12 @@ where
      If you get this error, open an issue: <https://github.com/Oakchris1955/simple-fatfs/issues>
     */
     BincodeError(BincodeError),
+    /**
+     Expected a read-only filesystem
+
+     Try using `from_rw_filesystem` instead
+    */
+    ExpectedROFilesystem,
     /// Expected a directory
     NotADirectory,
     /// Found a directory when we expected a file
