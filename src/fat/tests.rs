@@ -553,19 +553,23 @@ fn get_hidden_file() {
     let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
     let file_path = PathBuf::from("/hidden");
-    let file_result = fs.get_ro_file(&file_path);
-    match file_result {
-        Err(err) => match err {
-            FSError::NotFound => (),
-            _ => panic!("unexpected IOError"),
-        },
-        _ => panic!("file should be hidden by default"),
+    {
+        let file_result = fs.get_ro_file(&file_path);
+        match file_result {
+            Err(err) => match err {
+                FSError::NotFound => (),
+                _ => panic!("unexpected IOError"),
+            },
+            _ => panic!("file should be hidden by default"),
+        }
     }
 
-    // let's now allow the filesystem to list hidden files
-    fs.show_hidden(true);
-    let file = fs.get_ro_file(file_path).unwrap();
-    assert!(file.attributes.hidden);
+    {
+        // let's now allow the filesystem to list hidden files
+        fs.show_hidden(true);
+        let file = fs.get_ro_file(file_path).unwrap();
+        assert!(file.attributes.hidden);
+    }
 }
 
 #[test]
@@ -610,25 +614,129 @@ fn check_file_timestamps() {
 }
 
 #[test]
+fn modify_file_timestamps() {
+    use ::time::macros::*;
+
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT16.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    let mut file = fs
+        .get_rw_file(PathBuf::from("/bee movie script.txt"))
+        .unwrap();
+
+    // back to the future we go
+    file.set_accessed(date!(1985 - 07 - 3));
+
+    drop(file);
+
+    let file = fs
+        .get_ro_file(PathBuf::from("/bee movie script.txt"))
+        .unwrap();
+
+    assert_eq!(&Some(date!(1985 - 07 - 3)), file.last_accessed_date());
+}
+
+#[test]
+fn check_last_accessed_ro() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT16.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    let mut file = fs
+        .get_ro_file(PathBuf::from("/rootdir/example.txt"))
+        .unwrap();
+
+    // read some data
+    let mut target = [0; 42];
+    file.read(&mut target).unwrap();
+
+    drop(file);
+
+    let file = fs
+        .get_ro_file(PathBuf::from("/rootdir/example.txt"))
+        .unwrap();
+
+    assert_ne!(&Some(DefaultClock.now().date()), file.last_accessed_date());
+}
+
+#[test]
+fn check_last_accessed_rw() {
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT16.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    let mut file = fs
+        .get_rw_file(PathBuf::from("/bee movie script.txt"))
+        .unwrap();
+
+    // read some data
+    let mut target = [0; 42];
+    file.read(&mut target).unwrap();
+
+    drop(file);
+
+    let file = fs
+        .get_ro_file(PathBuf::from("/bee movie script.txt"))
+        .unwrap();
+
+    assert_eq!(&Some(DefaultClock.now().date()), file.last_accessed_date());
+}
+
+#[test]
+fn check_last_modified() {
+    use ::time::Duration;
+
+    use std::io::Cursor;
+
+    let mut storage = Cursor::new(FAT16.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    let mut file = fs
+        .get_rw_file(PathBuf::from("/bee movie script.txt"))
+        .unwrap();
+
+    // just some random data
+    file.write(&[49, 65, 47]).unwrap();
+
+    drop(file);
+
+    let file = fs
+        .get_ro_file(PathBuf::from("/bee movie script.txt"))
+        .unwrap();
+
+    assert_eq!(&Some(DefaultClock.now().date()), file.last_accessed_date());
+    // I find it highly unlikely that this test won't have been completed within 15 seconds
+    assert!(DefaultClock.now() - *file.modification_time() < Duration::seconds(15));
+}
+
+#[test]
 fn read_file_fat12() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT12.to_owned());
     let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
-    let mut file = fs.get_ro_file(PathBuf::from("/foo/bar.txt")).unwrap();
-    let mut file_string = String::new();
-    file.read_to_string(&mut file_string).unwrap();
-    const EXPECTED_STR: &str = "Hello, World!\n";
-    assert_eq!(file_string, EXPECTED_STR);
+    {
+        let mut file = fs.get_ro_file(PathBuf::from("/foo/bar.txt")).unwrap();
+        let mut file_string = String::new();
+        file.read_to_string(&mut file_string).unwrap();
+        const EXPECTED_STR: &str = "Hello, World!\n";
+        assert_eq!(file_string, EXPECTED_STR);
+    }
 
-    // please not that the FAT12 image has been modified so that
-    // one FAT entry of the file we are reading is split between different sectors
-    // this way, we also test for this case
-    let mut file = fs
-        .get_ro_file(PathBuf::from("/test/bee movie script.txt"))
-        .unwrap();
-    assert_file_is_bee_movie_script(&mut file);
+    {
+        // please not that the FAT12 image has been modified so that
+        // one FAT entry of the file we are reading is split between different sectors
+        // this way, we also test for this case
+        let mut file = fs
+            .get_ro_file(PathBuf::from("/test/bee movie script.txt"))
+            .unwrap();
+        assert_file_is_bee_movie_script(&mut file);
+    }
 }
 
 #[test]

@@ -4,9 +4,12 @@ use core::{cmp, num, ops};
 
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
+use time::{Date, PrimitiveDateTime};
 
 use crate::error::{IOError, IOErrorKind};
 use crate::io::prelude::*;
+use crate::utils::bincode::bincode_config;
+use crate::{FSError, FSResult, InternalFSError};
 
 #[derive(Debug)]
 pub(crate) struct FileProps {
@@ -17,6 +20,10 @@ pub(crate) struct FileProps {
 }
 
 /// A read-only file within a FAT filesystem
+///
+/// Note: whether or not your FileSystem is RO or R/W, this won't update
+/// the [`ROFile::last_accessed_date()`](Properties::last_accessed_date())
+/// If you want to avoid this behaviour in a R/W filesystem, use [`RWFile`]
 #[derive(Debug)]
 pub struct ROFile<'a, S>
 where
@@ -270,6 +277,8 @@ where
     S: Read + Write + Seek,
 {
     pub(crate) ro_file: ROFile<'a, S>,
+    /// Represents whether or not the file has been written to
+    pub(crate) timestamp_modified: bool,
 }
 
 impl<'a, S> ops::Deref for RWFile<'a, S>
@@ -297,6 +306,27 @@ impl<S> RWFile<'_, S>
 where
     S: Read + Write + Seek,
 {
+    /// Set the last accessed [`Date`] attribute of this file
+    pub fn set_accessed(&mut self, accessed: Date) {
+        self.accessed = Some(accessed);
+
+        self.timestamp_modified = true;
+    }
+
+    /// Set the creation [`DateTime`](PrimitiveDateTime) attributes of this file
+    pub fn set_created(&mut self, created: PrimitiveDateTime, resolution: DateTimeResolution) {
+        self.created = Some((created, resolution));
+
+        self.timestamp_modified = true;
+    }
+
+    /// Set the last modified [`DateTime`](PrimitiveDateTime) attributes of this file
+    pub fn set_modified(&mut self, modified: PrimitiveDateTime) {
+        self.modified = modified;
+
+        self.timestamp_modified = true;
+    }
+
     /// Truncates the file to a given size, deleting everything past the new EOF
     ///
     /// If `size` is greater or equal to the current file size
@@ -363,11 +393,75 @@ where
         // rewind back to the start of the file
         self.rewind()?;
 
-        self.ro_file
-            .fs
-            .free_cluster_chain(self.props.current_cluster)?;
+        let current_cluster = self.ro_file.props.current_cluster;
+        self.ro_file.fs.free_cluster_chain(current_cluster)?;
 
         Ok(())
+    }
+}
+
+// Private functions
+impl<S> RWFile<'_, S>
+where
+    S: Read + Write + Seek,
+{
+    fn sync_timestamps(&mut self) -> FSResult<(), S::Error> {
+        if self.timestamp_modified {
+            let direntry = FATDirEntry::from(MinProperties::from(self.props.entry.clone()));
+            let mut bytes = [0; DIRENTRY_SIZE];
+            bincode::encode_into_slice(direntry, &mut bytes, bincode_config())?;
+
+            let chain_start = self.props.entry.chain.location.clone();
+            let file_name = self
+                .path()
+                .file_name()
+                .expect("This file name should be valid")
+                .to_owned();
+            // the first entry of the dirchain could belong to a LFNEntry, so we must handle that
+            let direntry_location = match num::NonZero::new(calc_entries_needed(file_name) - 1) {
+                Some(nonzero) => {
+                    chain_start
+                        .nth_entry(self.fs, nonzero)?
+                        .ok_or(FSError::InternalFSError(
+                            InternalFSError::MalformedEntryChain,
+                        ))?
+                }
+                None => chain_start,
+            };
+            let sector = direntry_location.get_entry_sector(self.fs);
+            let offset = direntry_location.get_sector_byte_offset(self.fs);
+
+            self.fs.load_nth_sector(sector)?;
+            self.fs.sector_buffer[offset..(offset + DIRENTRY_SIZE)].clone_from_slice(&bytes);
+            self.fs.set_modified();
+
+            self.timestamp_modified = false;
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    fn _set_accessed(&mut self) {
+        let now = self.fs.clock.now();
+
+        if let Some(accessed) = &mut self.accessed {
+            *accessed = now.date();
+        }
+
+        self.timestamp_modified = true;
+    }
+
+    #[inline]
+    fn _set_modified(&mut self) {
+        let now = self.fs.clock.now();
+
+        if let Some(accessed) = &mut self.accessed {
+            *accessed = now.date();
+        }
+        self.modified = now;
+
+        self.timestamp_modified = true;
     }
 }
 
@@ -384,22 +478,46 @@ where
 {
     #[inline]
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        self.ro_file.read(buf)
+        let res = self.ro_file.read(buf);
+
+        if res.is_ok() {
+            self._set_accessed()
+        };
+
+        res
     }
 
     #[inline]
     fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), Self::Error> {
-        self.ro_file.read_exact(buf)
+        let res = self.ro_file.read_exact(buf);
+
+        if res.is_ok() {
+            self._set_accessed()
+        };
+
+        res
     }
 
     #[inline]
     fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize, Self::Error> {
-        self.ro_file.read_to_end(buf)
+        let res = self.ro_file.read_to_end(buf);
+
+        if res.is_ok() {
+            self._set_accessed()
+        };
+
+        res
     }
 
     #[inline]
     fn read_to_string(&mut self, string: &mut String) -> Result<usize, Self::Error> {
-        self.ro_file.read_to_string(string)
+        let res = self.ro_file.read_to_string(string);
+
+        if res.is_ok() {
+            self._set_accessed()
+        };
+
+        res
     }
 }
 
@@ -464,6 +582,9 @@ where
             self.next_cluster()?;
         }
 
+        // we've written something at this point
+        self._set_modified();
+
         Ok(bytes_written)
     }
 
@@ -516,6 +637,18 @@ where
             );
         }
 
+        self._set_accessed();
+
         self.ro_file.seek(pos)
+    }
+}
+
+impl<S> Drop for RWFile<'_, S>
+where
+    S: Read + Write + Seek,
+{
+    fn drop(&mut self) {
+        // nothing to do if this errors out while dropping
+        let _ = self.sync_timestamps();
     }
 }

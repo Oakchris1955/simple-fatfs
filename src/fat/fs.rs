@@ -264,7 +264,7 @@ impl From<Properties> for RawProperties {
 }
 
 /// A container for file/directory properties
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Properties {
     pub(crate) path: PathBuf,
     pub(crate) sfn: Sfn,
@@ -824,7 +824,7 @@ where
     sync_f: Option<SyncSectorBufferFn<S>>,
     unmount_f: Option<UnmountFn<S>>,
 
-    clock: Box<dyn Clock>,
+    pub(crate) clock: Box<dyn Clock>,
 
     pub(crate) boot_record: BootRecord,
     // since `self.boot_record.fat_type()` calls like 5 nested functions, we keep this cached and expose it with a public getter function
@@ -1977,7 +1977,10 @@ where
 
         let ro_file = self.get_ro_file(path)?;
 
-        Ok(RWFile { ro_file })
+        Ok(RWFile {
+            ro_file,
+            timestamp_modified: false,
+        })
     }
 }
 

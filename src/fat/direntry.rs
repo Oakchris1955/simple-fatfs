@@ -842,6 +842,27 @@ impl EntryLocation {
             self
         }))
     }
+
+    // The NonZero here is to ensure that the `0..n` doesn't panic
+    pub(crate) fn nth_entry<S>(
+        self,
+        fs: &mut FileSystem<S>,
+        n: num::NonZero<u32>,
+    ) -> Result<Option<EntryLocation>, S::Error>
+    where
+        S: Read + Seek,
+    {
+        let mut current_entry = self;
+
+        for _ in 0..n.into() {
+            match current_entry.next_entry(fs)? {
+                Some(next_entry) => current_entry = next_entry,
+                None => return Ok(None),
+            }
+        }
+
+        Ok(Some(current_entry))
+    }
 }
 
 /// The location of a chain of [`FATDirEntry`]
