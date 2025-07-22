@@ -807,14 +807,14 @@ impl EntryLocation {
 
     pub(crate) fn free_entry<S>(&self, fs: &mut FileSystem<S>) -> Result<(), S::Error>
     where
-        S: Read + Seek,
+        S: Read + Write + Seek,
     {
         let entry_sector = self.unit.get_entry_sector(fs);
         fs.load_nth_sector(entry_sector)?;
 
         let byte_offset = self.get_sector_byte_offset(fs);
         fs.sector_buffer[byte_offset] = UNUSED_ENTRY;
-        fs.sector_buffer.modified = true;
+        fs.set_modified();
 
         Ok(())
     }

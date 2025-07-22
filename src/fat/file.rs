@@ -444,7 +444,7 @@ where
 
                 self.fs.sector_buffer[start_index..start_index + bytes_to_write]
                     .copy_from_slice(&buf[bytes_written..bytes_written + bytes_to_write]);
-                self.fs.sector_buffer.modified = true;
+                self.fs.set_modified();
 
                 bytes_written += bytes_to_write;
                 self.props.offset += bytes_to_write as u64;

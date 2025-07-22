@@ -24,7 +24,7 @@
 //!
 //!     // We can either pass by value or by (mutable) reference
 //!     // (Yes, the storage medium might be Read-Only, but reading is a mutable action)
-//!     let mut fs = FileSystem::from_ro_storage(&mut cursor).unwrap();
+//!     let mut fs = FileSystem::from_storage(&mut cursor).unwrap();
 //!
 //!     // Let's see what entries there are in the root directory
 //!     for entry in fs.read_dir(PathBuf::from("/")).unwrap() {

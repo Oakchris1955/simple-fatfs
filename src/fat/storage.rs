@@ -6,7 +6,6 @@ use alloc::boxed::Box;
 #[derive(Debug)]
 pub(crate) struct SectorBuffer {
     pub(crate) slice: Box<[u8]>,
-    pub(crate) modified: bool,
     pub(crate) stored_sector: u64,
 }
 
@@ -14,7 +13,6 @@ impl From<(&[u8], u64)> for SectorBuffer {
     fn from(value: (&[u8], u64)) -> Self {
         Self {
             slice: Box::from(value.0),
-            modified: false,
             stored_sector: value.1,
         }
     }
