@@ -3,7 +3,7 @@ use super::*;
 use core::{cmp, num, ops};
 
 #[cfg(not(feature = "std"))]
-use alloc::{string::String, vec::Vec};
+use alloc::{borrow::ToOwned, string::String, vec::Vec};
 use time::{Date, PrimitiveDateTime};
 
 use crate::error::{IOError, IOErrorKind};
