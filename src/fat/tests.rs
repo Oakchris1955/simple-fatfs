@@ -601,7 +601,7 @@ fn check_file_timestamps() {
     assert_eq!(
         Some((
             datetime!(2024-07-11 13:02:38.15),
-            DateTimeResolution::Millisecond
+            DateTimeResolution::HundredthOfSecond
         )),
         file.created
     );

@@ -1675,7 +1675,7 @@ where
                 sfn: CURRENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-                created: Some((datetime, DateTimeResolution::Millisecond)),
+                created: Some((datetime, DateTimeResolution::HundredthOfSecond)),
                 modified: datetime,
                 accessed: Some(datetime.date()),
                 file_size: 0,
@@ -1686,7 +1686,7 @@ where
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-                created: Some((datetime, DateTimeResolution::Millisecond)),
+                created: Some((datetime, DateTimeResolution::HundredthOfSecond)),
                 modified: datetime,
                 accessed: Some(datetime.date()),
                 file_size: 0,
@@ -2114,7 +2114,7 @@ where
             sfn,
             // this needs to be set when creating a file
             attributes: RawAttributes::empty() | RawAttributes::ARCHIVE,
-            created: Some((now, DateTimeResolution::Millisecond)),
+            created: Some((now, DateTimeResolution::HundredthOfSecond)),
             modified: now,
             accessed: Some(now.date()),
             file_size: 0,
@@ -2163,7 +2163,7 @@ where
             name: file_name.into(),
             sfn,
             attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-            created: Some((now, DateTimeResolution::Millisecond)),
+            created: Some((now, DateTimeResolution::HundredthOfSecond)),
             modified: now,
             accessed: Some(now.date()),
             file_size: 0,
@@ -2244,7 +2244,7 @@ where
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-                created: Some((now, DateTimeResolution::Millisecond)),
+                created: Some((now, DateTimeResolution::HundredthOfSecond)),
                 modified: now,
                 accessed: Some(now.date()),
                 file_size: 0,
@@ -2278,7 +2278,7 @@ where
             name: Box::from(to_filename),
             sfn,
             attributes: old_props.attributes,
-            created: Some((now, DateTimeResolution::Millisecond)),
+            created: Some((now, DateTimeResolution::HundredthOfSecond)),
             modified: now,
             accessed: Some(now.date()),
             file_size: old_props.file_size,

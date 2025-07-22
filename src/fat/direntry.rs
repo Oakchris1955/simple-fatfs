@@ -244,7 +244,7 @@ impl TryFrom<EntryCreationTime> for Option<(PrimitiveDateTime, DateTimeResolutio
 
                         match value.hundredths_of_second {
                             Some(hundredths_of_second) => {
-                                res = DateTimeResolution::Millisecond;
+                                res = DateTimeResolution::HundredthOfSecond;
 
                                 let new_seconds = time.second() + hundredths_of_second / 100;
                                 let milliseconds = u16::from(hundredths_of_second) % 100 * 10;
@@ -277,9 +277,10 @@ impl TryFrom<EntryCreationTime> for Option<(PrimitiveDateTime, DateTimeResolutio
 impl From<(PrimitiveDateTime, DateTimeResolution)> for EntryCreationTime {
     fn from((datetime, res): (PrimitiveDateTime, DateTimeResolution)) -> Self {
         Self {
-            hundredths_of_second: (res == DateTimeResolution::Millisecond)
+            hundredths_of_second: (res == DateTimeResolution::HundredthOfSecond)
                 .then(|| (datetime.second() % 2) * 100 + (datetime.millisecond() / 10) as u8),
-            time: (res == DateTimeResolution::Millisecond || res == DateTimeResolution::DualSecond)
+            time: (res == DateTimeResolution::HundredthOfSecond
+                || res == DateTimeResolution::DualSecond)
                 .then(|| datetime.time().into()),
             date: Some(datetime.date().into()),
         }
@@ -396,8 +397,8 @@ pub enum DateTimeResolution {
     ///
     /// [`PrimitiveDateTime::millisecond()`] should return 0
     DualSecond,
-    /// Accurate down to the millisecond
-    Millisecond,
+    /// Accurate down to 10 milliseconds
+    HundredthOfSecond,
 }
 
 // a directory entry occupies 32 bytes
