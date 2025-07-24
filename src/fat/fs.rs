@@ -1993,7 +1993,7 @@ where
 
         Ok(RWFile {
             ro_file,
-            timestamp_modified: false,
+            entry_modified: false,
         })
     }
 }

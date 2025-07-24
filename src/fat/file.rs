@@ -278,7 +278,7 @@ where
 {
     pub(crate) ro_file: ROFile<'a, S>,
     /// Represents whether or not the file has been written to
-    pub(crate) timestamp_modified: bool,
+    pub(crate) entry_modified: bool,
 }
 
 impl<'a, S> ops::Deref for RWFile<'a, S>
@@ -310,21 +310,21 @@ where
     pub fn set_accessed(&mut self, accessed: Date) {
         self.accessed = Some(accessed);
 
-        self.timestamp_modified = true;
+        self.entry_modified = true;
     }
 
     /// Set the creation [`DateTime`](PrimitiveDateTime) attributes of this file
     pub fn set_created(&mut self, created: PrimitiveDateTime, resolution: DateTimeResolution) {
         self.created = Some((created, resolution));
 
-        self.timestamp_modified = true;
+        self.entry_modified = true;
     }
 
     /// Set the last modified [`DateTime`](PrimitiveDateTime) attributes of this file
     pub fn set_modified(&mut self, modified: PrimitiveDateTime) {
         self.modified = modified;
 
-        self.timestamp_modified = true;
+        self.entry_modified = true;
     }
 
     /// Truncates the file to a given size, deleting everything past the new EOF
@@ -378,6 +378,8 @@ where
             self.file_size
         );
 
+        self.entry_modified = true;
+
         Ok(())
     }
 
@@ -405,8 +407,8 @@ impl<S> RWFile<'_, S>
 where
     S: Read + Write + Seek,
 {
-    fn sync_timestamps(&mut self) -> FSResult<(), S::Error> {
-        if self.timestamp_modified {
+    fn sync_entry(&mut self) -> FSResult<(), S::Error> {
+        if self.entry_modified {
             let direntry = FATDirEntry::from(MinProperties::from(self.props.entry.clone()));
             let mut bytes = [0; DIRENTRY_SIZE];
             bincode::encode_into_slice(direntry, &mut bytes, bincode_config())?;
@@ -435,7 +437,7 @@ where
             self.fs.sector_buffer[offset..(offset + DIRENTRY_SIZE)].clone_from_slice(&bytes);
             self.fs.set_modified();
 
-            self.timestamp_modified = false;
+            self.entry_modified = false;
         }
 
         Ok(())
@@ -449,7 +451,7 @@ where
             *accessed = now.date();
         }
 
-        self.timestamp_modified = true;
+        self.entry_modified = true;
     }
 
     #[inline]
@@ -461,7 +463,7 @@ where
         }
         self.modified = now;
 
-        self.timestamp_modified = true;
+        self.entry_modified = true;
     }
 }
 
@@ -649,6 +651,6 @@ where
 {
     fn drop(&mut self) {
         // nothing to do if this errors out while dropping
-        let _ = self.sync_timestamps();
+        let _ = self.sync_entry();
     }
 }
