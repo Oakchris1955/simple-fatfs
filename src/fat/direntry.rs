@@ -181,30 +181,32 @@ impl TryFrom<DateAttribute> for Date {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct EntryCreationTime {
-    pub(crate) hundredths_of_second: Option<u8>,
-    pub(crate) time: Option<TimeAttribute>,
-    pub(crate) date: Option<DateAttribute>,
+pub(crate) struct EntryCreationTime(Option<CreationTime>);
+
+#[derive(Encode, Decode, Debug, Clone, Copy)]
+pub(crate) struct CreationTime {
+    pub(crate) hundredths_of_second: u8,
+    pub(crate) time: TimeAttribute,
+    pub(crate) date: DateAttribute,
 }
 
 impl<Context> bincode::Decode<Context> for EntryCreationTime {
     fn decode<D: bincode::de::Decoder<Context = Context>>(
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
-        Ok(Self {
-            hundredths_of_second: {
-                let bits = <u8 as bincode::Decode<Context>>::decode(decoder)?;
-                (bits != 0).then_some(bits)
-            },
-            time: {
-                let bits = <u16 as bincode::Decode<Context>>::decode(decoder)?;
-                (bits != 0).then_some(TimeAttribute::from_bits(bits))
-            },
-            date: {
-                let bits = <u16 as bincode::Decode<Context>>::decode(decoder)?;
-                (bits != 0).then_some(DateAttribute::from_bits(bits))
-            },
-        })
+        let hundredths_of_second = <u8 as bincode::Decode<Context>>::decode(decoder)?;
+        let time = <u16 as bincode::Decode<Context>>::decode(decoder)?;
+        let date = <u16 as bincode::Decode<Context>>::decode(decoder)?;
+
+        Ok(Self(if time == 0 || date == 0 {
+            None
+        } else {
+            Some(CreationTime {
+                hundredths_of_second,
+                time: TimeAttribute::from_bits(time),
+                date: DateAttribute::from_bits(date),
+            })
+        }))
     }
 }
 
@@ -215,88 +217,63 @@ impl bincode::Encode for EntryCreationTime {
         &self,
         encoder: &mut E,
     ) -> Result<(), bincode::error::EncodeError> {
-        akin! {
-            let &field_name = [hundredths_of_second, time, date];
-            let &field_type = [u8, u16, u16];
+        match self.0 {
+            Some(creation_time) => {
+                bincode::Encode::encode(&creation_time, encoder)?;
+            }
+            None => {
+                akin! {
+                    let &field_type = [u8, u16, u16];
 
-            match self.*field_name {
-                Some(*field_name) => bincode::Encode::encode(&*field_name, encoder)?,
-                None => bincode::Encode::encode(&0_~*field_type, encoder)?,
-            };
+                    bincode::Encode::encode(&0_~*field_type, encoder)?;
+                };
+            }
         }
 
         Ok(())
     }
 }
 
-impl TryFrom<EntryCreationTime> for Option<(PrimitiveDateTime, DateTimeResolution)> {
+impl TryFrom<EntryCreationTime> for Option<PrimitiveDateTime> {
     type Error = ();
 
     fn try_from(value: EntryCreationTime) -> Result<Self, Self::Error> {
-        let res: DateTimeResolution;
+        match value.0 {
+            Some(creation_time) => {
+                let mut time: Time = creation_time.time.try_into()?;
 
-        Ok(match value.date {
-            Some(date) => {
-                let date: Date = date.try_into()?;
+                let new_seconds = time.second() + creation_time.hundredths_of_second / 100;
+                let milliseconds = u16::from(creation_time.hundredths_of_second) % 100 * 10;
+                time = time
+                    .replace_second(new_seconds)
+                    .map_err(|_| ())?
+                    .replace_millisecond(milliseconds)
+                    .map_err(|_| ())?;
 
-                let time = match value.time {
-                    Some(time) => {
-                        let time: Time = time.try_into()?;
+                let date: Date = creation_time.date.try_into()?;
 
-                        match value.hundredths_of_second {
-                            Some(hundredths_of_second) => {
-                                res = DateTimeResolution::HundredthOfSecond;
-
-                                let new_seconds = time.second() + hundredths_of_second / 100;
-                                let milliseconds = u16::from(hundredths_of_second) % 100 * 10;
-                                time.replace_second(new_seconds)
-                                    .map_err(|_| ())?
-                                    .replace_millisecond(milliseconds)
-                                    .map_err(|_| ())?
-                            }
-                            None => {
-                                res = DateTimeResolution::DualSecond;
-
-                                time
-                            }
-                        }
-                    }
-                    None => {
-                        res = DateTimeResolution::Date;
-
-                        Time::MIDNIGHT
-                    }
-                };
-
-                Some((PrimitiveDateTime::new(date, time), res))
+                Ok(Some(PrimitiveDateTime::new(date, time)))
             }
-            None => None,
-        })
-    }
-}
-
-impl From<(PrimitiveDateTime, DateTimeResolution)> for EntryCreationTime {
-    fn from((datetime, res): (PrimitiveDateTime, DateTimeResolution)) -> Self {
-        Self {
-            hundredths_of_second: (res == DateTimeResolution::HundredthOfSecond)
-                .then(|| (datetime.second() % 2) * 100 + (datetime.millisecond() / 10) as u8),
-            time: (res == DateTimeResolution::HundredthOfSecond
-                || res == DateTimeResolution::DualSecond)
-                .then(|| datetime.time().into()),
-            date: Some(datetime.date().into()),
+            None => Ok(None),
         }
     }
 }
 
-impl From<Option<(PrimitiveDateTime, DateTimeResolution)>> for EntryCreationTime {
-    fn from(value: Option<(PrimitiveDateTime, DateTimeResolution)>) -> Self {
+impl From<PrimitiveDateTime> for EntryCreationTime {
+    fn from(value: PrimitiveDateTime) -> Self {
+        Self(Some(CreationTime {
+            hundredths_of_second: (value.second() % 2) * 100 + (value.millisecond() / 10) as u8,
+            time: value.time().into(),
+            date: value.date().into(),
+        }))
+    }
+}
+
+impl From<Option<PrimitiveDateTime>> for EntryCreationTime {
+    fn from(value: Option<PrimitiveDateTime>) -> Self {
         match value {
             Some(value) => value.into(),
-            None => Self {
-                hundredths_of_second: None,
-                time: None,
-                date: None,
-            },
+            None => Self(None),
         }
     }
 }
@@ -383,23 +360,6 @@ impl From<Option<Date>> for EntryLastAccessedTime {
             None => Self(None),
         }
     }
-}
-
-/// What the nomimal date and time resolution of a [`PrimitiveDateTime`] is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DateTimeResolution {
-    /// Accurate down to the date.
-    ///
-    /// [`PrimitiveDateTime::time()`] should return [`Time::MIDNIGHT`]
-    Date,
-    /// Accurate down to an even second.
-    ///
-    /// [`PrimitiveDateTime::second()`] should return an odd number.
-    ///
-    /// [`PrimitiveDateTime::millisecond()`] should return 0
-    DualSecond,
-    /// Accurate down to 10 milliseconds
-    HundredthOfSecond,
 }
 
 // a directory entry occupies 32 bytes

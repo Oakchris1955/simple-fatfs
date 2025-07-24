@@ -314,8 +314,8 @@ where
     }
 
     /// Set the creation [`DateTime`](PrimitiveDateTime) attributes of this file
-    pub fn set_created(&mut self, created: PrimitiveDateTime, resolution: DateTimeResolution) {
-        self.created = Some((created, resolution));
+    pub fn set_created(&mut self, created: PrimitiveDateTime) {
+        self.created = Some(created);
 
         self.entry_modified = true;
     }

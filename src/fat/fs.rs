@@ -181,7 +181,7 @@ pub(crate) struct MinProperties {
     pub(crate) name: Box<str>,
     pub(crate) sfn: Sfn,
     pub(crate) attributes: RawAttributes,
-    pub(crate) created: Option<(PrimitiveDateTime, DateTimeResolution)>,
+    pub(crate) created: Option<PrimitiveDateTime>,
     pub(crate) modified: PrimitiveDateTime,
     pub(crate) accessed: Option<Date>,
     pub(crate) file_size: u32,
@@ -222,7 +222,7 @@ pub(crate) struct RawProperties {
     pub(crate) sfn: Sfn,
     pub(crate) is_dir: bool,
     pub(crate) attributes: RawAttributes,
-    pub(crate) created: Option<(PrimitiveDateTime, DateTimeResolution)>,
+    pub(crate) created: Option<PrimitiveDateTime>,
     pub(crate) modified: PrimitiveDateTime,
     pub(crate) accessed: Option<Date>,
     pub(crate) file_size: u32,
@@ -270,7 +270,7 @@ pub struct Properties {
     pub(crate) sfn: Sfn,
     pub(crate) is_dir: bool,
     pub(crate) attributes: Attributes,
-    pub(crate) created: Option<(PrimitiveDateTime, DateTimeResolution)>,
+    pub(crate) created: Option<PrimitiveDateTime>,
     pub(crate) modified: PrimitiveDateTime,
     pub(crate) accessed: Option<Date>,
     pub(crate) file_size: u32,
@@ -317,23 +317,8 @@ impl Properties {
     ///
     /// Returns an [`Option`] containing a [`PrimitiveDateTime`] from the [`time`] crate,
     /// since that field is specified as optional in the FAT32 specification
-    pub fn creation_time(&self) -> Option<&PrimitiveDateTime> {
-        match &self.created {
-            Some((datetime, _res)) => Some(datetime),
-            None => None,
-        }
-    }
-
-    #[inline]
-    /// Get the resolution of the [`creation_time()`](Self::creation_time()),
-    /// if it exists
-    ///
-    /// Returns an [`Option`] containing a [`DateTimeResolution`]
-    pub fn creation_resolution(&self) -> Option<&DateTimeResolution> {
-        match &self.created {
-            Some((_datetime, res)) => Some(res),
-            None => None,
-        }
+    pub fn creation_time(&self) -> &Option<PrimitiveDateTime> {
+        &self.created
     }
 
     #[inline]
@@ -1689,7 +1674,7 @@ where
                 sfn: CURRENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-                created: Some((datetime, DateTimeResolution::HundredthOfSecond)),
+                created: Some(datetime),
                 modified: datetime,
                 accessed: Some(datetime.date()),
                 file_size: 0,
@@ -1700,7 +1685,7 @@ where
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-                created: Some((datetime, DateTimeResolution::HundredthOfSecond)),
+                created: Some(datetime),
                 modified: datetime,
                 accessed: Some(datetime.date()),
                 file_size: 0,
@@ -2131,7 +2116,7 @@ where
             sfn,
             // this needs to be set when creating a file
             attributes: RawAttributes::empty() | RawAttributes::ARCHIVE,
-            created: Some((now, DateTimeResolution::HundredthOfSecond)),
+            created: Some(now),
             modified: now,
             accessed: Some(now.date()),
             file_size: 0,
@@ -2180,7 +2165,7 @@ where
             name: file_name.into(),
             sfn,
             attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-            created: Some((now, DateTimeResolution::HundredthOfSecond)),
+            created: Some(now),
             modified: now,
             accessed: Some(now.date()),
             file_size: 0,
@@ -2261,7 +2246,7 @@ where
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
-                created: Some((now, DateTimeResolution::HundredthOfSecond)),
+                created: Some(now),
                 modified: now,
                 accessed: Some(now.date()),
                 file_size: 0,
@@ -2295,7 +2280,7 @@ where
             name: Box::from(to_filename),
             sfn,
             attributes: old_props.attributes,
-            created: Some((now, DateTimeResolution::HundredthOfSecond)),
+            created: Some(now),
             modified: now,
             accessed: Some(now.date()),
             file_size: old_props.file_size,
