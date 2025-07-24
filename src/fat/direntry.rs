@@ -692,10 +692,12 @@ impl EntryLocationUnit {
     where
         S: Read + Seek,
     {
-        match self {
+        let unit_size = match self {
             EntryLocationUnit::DataCluster(_) => fs.props.cluster_size,
-            EntryLocationUnit::RootDirSector(_) => fs.props.sector_size.into(),
-        }
+            EntryLocationUnit::RootDirSector(_) => fs.props.sector_size as u64,
+        };
+
+        unit_size / DIRENTRY_SIZE as u64
     }
 
     pub(crate) fn get_entry_sector<S>(&self, fs: &mut FileSystem<S>) -> u64
@@ -780,7 +782,7 @@ impl EntryLocation {
     where
         S: Read + Seek,
     {
-        let entry_sector = self.unit.get_entry_sector(fs);
+        let entry_sector = self.get_entry_sector(fs);
         fs.load_nth_sector(entry_sector)?;
 
         let byte_offset = self.get_sector_byte_offset(fs);
@@ -796,7 +798,9 @@ impl EntryLocation {
     where
         S: Read + Seek,
     {
-        self.unit.get_entry_sector(fs)
+        let sector_offset = self.index as u64 * DIRENTRY_SIZE as u64 / fs.sector_size() as u64;
+
+        self.unit.get_entry_sector(fs) + sector_offset
     }
 
     #[inline]

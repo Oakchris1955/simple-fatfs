@@ -1586,6 +1586,14 @@ where
                 break;
             }
 
+            // we also break if we have reached the end of the cluster chain
+            // or else the MalformedEntryChain below will kick in
+            if last_entry.unit.get_next_unit(self)?.is_none()
+                && last_entry.index + 1 >= last_entry.unit.get_max_offset(self) as u32
+            {
+                break;
+            }
+
             last_entry = last_entry
                 .next_entry(self)?
                 .ok_or(FSError::InternalFSError(
@@ -1637,6 +1645,12 @@ where
                         num::NonZero::new(clusters_to_allocate).expect("this should be at least 1"),
                         Some(cluster),
                     )?;
+
+                    // the entry chain begins in the newly allocated clusters
+                    if chain_len == 0 {
+                        first_entry.unit = EntryLocationUnit::DataCluster(first_cluster);
+                        first_entry.index = 0;
+                    }
 
                     // before we return, we should zero those sectors according to the FAT spec
                     for cluster in first_cluster..(first_cluster + clusters_to_allocate) {
