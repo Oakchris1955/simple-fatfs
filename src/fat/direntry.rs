@@ -217,10 +217,11 @@ impl bincode::Encode for EntryCreationTime {
     ) -> Result<(), bincode::error::EncodeError> {
         akin! {
             let &field_name = [hundredths_of_second, time, date];
+            let &field_type = [u8, u16, u16];
 
             match self.*field_name {
                 Some(*field_name) => bincode::Encode::encode(&*field_name, encoder)?,
-                None => bincode::Encode::encode(&0, encoder)?,
+                None => bincode::Encode::encode(&0_~*field_type, encoder)?,
             };
         }
 
