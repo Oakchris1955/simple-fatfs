@@ -216,6 +216,30 @@ fn create_subdir_file() {
 }
 
 #[test]
+fn create_lots_of_files() {
+    use std::io::Cursor;
+
+    const FILE_COUNT: usize = 1_000;
+
+    let mut storage = Cursor::new(FAT16.to_owned());
+    let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+
+    for i in 1..=FILE_COUNT {
+        let name = PathBuf::from(&format!("/another root directory/{i}.txt"));
+        fs.create_file(&name).unwrap();
+
+        let mut file = fs.get_rw_file(&name).unwrap();
+        file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
+        file.rewind().unwrap();
+
+        drop(file);
+
+        let mut file = fs.get_ro_file(&name).unwrap();
+        assert_file_is_i_dont_need_a_badge(&mut file);
+    }
+}
+
+#[test]
 fn create_directory_in_root_and_file() {
     use std::io::Cursor;
 
