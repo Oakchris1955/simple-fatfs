@@ -1,3 +1,18 @@
+# removed feature
+5a218bdbe29ad911aabdedd0587886ea2b802a42
+
+# fix commit for `no-std` contexts
+4941c8ce703892a86a67d9b79098f7620cc872a9
+
+# reverted commit
+ef8089a2086fd04208b793b0fe0e74bf3c0487a4
+
+# style change
+4552d6ff38cd53a01a13f9f9e7238d4265192a0c
+
+# documentation-related
+87d21e205b5090f0ac81158cf62fe3bf69e59910
+
 # reverted commit
 a98ce8999c079f23c6687bd46706229311659e56
 
