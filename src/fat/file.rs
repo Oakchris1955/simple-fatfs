@@ -53,6 +53,16 @@ where
     }
 }
 
+// Constructors
+impl<'a, S> ROFile<'a, S>
+where
+    S: Read + Seek,
+{
+    pub(crate) fn from_props(props: FileProps, fs: &'a mut FileSystem<S>) -> Self {
+        Self { fs, props }
+    }
+}
+
 // Internal functions
 impl<S> ROFile<'_, S>
 where
@@ -298,6 +308,19 @@ where
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.ro_file
+    }
+}
+
+// Constructors
+impl<'a, S> RWFile<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    pub(crate) fn from_props(props: FileProps, fs: &'a mut FileSystem<S>) -> Self {
+        Self {
+            ro_file: ROFile::from_props(props, fs),
+            entry_modified: false,
+        }
     }
 }
 

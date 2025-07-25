@@ -244,6 +244,21 @@ impl RawProperties {
             entry: Properties::from((self, entry_path)),
         }
     }
+
+    pub(crate) fn from_chain(props: MinProperties, chain: DirEntryChain) -> Self {
+        Self {
+            name: String::from(props.name),
+            sfn: props.sfn,
+            is_dir: props.attributes.contains(RawAttributes::DIRECTORY),
+            attributes: props.attributes,
+            created: props.created,
+            modified: props.modified,
+            accessed: props.accessed,
+            file_size: props.file_size,
+            data_cluster: props.data_cluster,
+            chain,
+        }
+    }
 }
 
 impl From<Properties> for RawProperties {
@@ -1554,7 +1569,7 @@ where
     /// Allocate room for at least `n` contiguous [`FATDirEntries`](FATDirEntry)
     /// in the current directory entry chain
     ///
-    /// This may or may not allocate new clusters
+    /// This may or may not allocate new clusters.
     pub(crate) fn allocate_nth_entries(&mut self, n: u32) -> FSResult<EntryLocation, S::Error> {
         // navigate to the cached directory, if we aren't already there
         self._go_to_cached_dir()?;
@@ -1736,11 +1751,13 @@ where
         Ok(dir_cluster)
     }
 
-    // Insert the provided `entries` to the cluster chain of the current cached directory
+    /// Insert the provided `entries` to the cluster chain of the current cached directory
+    ///
+    /// Returns the corresponding [`DirEntryChain`]
     pub(crate) fn insert_to_entry_chain(
         &mut self,
         entries: Box<[MinProperties]>,
-    ) -> FSResult<(), S::Error> {
+    ) -> FSResult<DirEntryChain, S::Error> {
         let mut entries_needed = 0;
 
         self._go_to_cached_dir()?;
@@ -1753,7 +1770,7 @@ where
 
         let mut entries_iter = EntryComposer::from(entries);
 
-        let mut current_entry = first_entry;
+        let mut current_entry = first_entry.clone();
         let mut entry_bytes = entries_iter
             .next()
             .expect("this iterator is guaranteed to return at least once");
@@ -1777,7 +1794,10 @@ where
                 .expect("This entry chain should be valid, we just generated it");
         }
 
-        Ok(())
+        Ok(DirEntryChain {
+            len: entries_needed,
+            location: first_entry,
+        })
     }
 
     /// Mark the individual entries of a contiguous FAT entry chain as unused
@@ -2136,11 +2156,20 @@ where
             data_cluster: file_cluster,
         };
 
-        let entries = [raw_properties];
-        self.insert_to_entry_chain(Box::new(entries))?;
+        let entries = [raw_properties.clone()];
+        let chain = self.insert_to_entry_chain(Box::new(entries))?;
 
-        // TODO: we know everything about that file, construct it and return it here
-        self.get_rw_file(path)
+        Ok(RWFile::from_props(
+            FileProps {
+                current_cluster: raw_properties.data_cluster,
+                entry: Properties::from((
+                    RawProperties::from_chain(raw_properties, chain),
+                    path.to_owned(),
+                )),
+                offset: 0,
+            },
+            self,
+        ))
     }
 
     /// Create a new directory
