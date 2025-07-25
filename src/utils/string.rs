@@ -26,6 +26,15 @@ pub(crate) fn as_sfn(string: &str) -> Option<Sfn> {
         return None;
     }
 
+    // all alphabetic characters must be capitalized
+    if !string
+        .chars()
+        .filter(|c| c.is_alphabetic())
+        .all(|c| c.is_uppercase())
+    {
+        return None;
+    }
+
     // a file can still not have an extension
     let (name, ext) = string.split_once('.').unwrap_or((string, ""));
 
