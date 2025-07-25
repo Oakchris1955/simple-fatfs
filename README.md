@@ -29,13 +29,13 @@ A fully-working FAT driver that covers the following criteria:
 
 - [x] FAT12 support (just handle entries between 2 sectors)
 - [x] Distinguish between dirs and files in paths (this must also be verified by the filesystem, just like in the `std`)
-- [ ] Check whether system endianness matters (FAT is little-endian)
+- [x] Check whether system endianness matters (FAT is little-endian)
+    PS: it does in fact matter. [bincode](https://crates.io/crates/bincode), which we use for (de)serialization allows us to configure the default endianess
 - [ ] Handle non-printable characters in names of files and directories
 - [ ] ExFAT support
-- [ ] when [feature(error_in_core)](https://github.com/rust-lang/rust/issues/103765) gets released to stable, bump MSRV & use the `core::error::Error` trait instead of our custom `error::Error`
-
-[crates.io]: https://crates.io
-[rafalh's rust-fatfs]: https://github.com/rafalh/rust-fatfs
+- [x] ~~when [feature(error_in_core)](https://github.com/rust-lang/rust/issues/103765) gets released to stable, bump MSRV & use the `core::error::Error` trait instead of our custom `error::Error`~~
+    this feature is now stabilized. However, [after a couple of community recommendations](https://www.reddit.com/r/rust/comments/1ejukow/comment/lgg3dtb/), we will be switching to [embedded-io] in the near future, which has its own `Error` trait, so that means...
+- [ ] replace custom `io` implementation with the [embedded-io] crate
 
 ## Acknowledgements
 
@@ -44,3 +44,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ## License
 
 [MIT](LICENSE)
+
+[crates.io]: https://crates.io
+[rafalh's rust-fatfs]: https://github.com/rafalh/rust-fatfs
+[embedded-io]: https://crates.io/crates/embedded-io

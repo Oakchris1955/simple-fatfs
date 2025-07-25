@@ -10,7 +10,7 @@
 //! - Auto-`impl`s for [`std::io`] traits and structs
 //! - Easy-to-implement [`io`] traits
 //!
-//! # Examples
+//! ## Examples
 //! ```
 //! # // this test fails on a no_std environment, don't run it in such a case
 //! extern crate simple_fatfs;
@@ -22,26 +22,27 @@
 //! fn main() {
 //!     let mut cursor = std::io::Cursor::new(FAT_IMG.to_owned());
 //!
-//!     // We can either pass by value of by (mutable) reference
+//!     // We can either pass by value or by (mutable) reference
+//!     // (Yes, the storage medium might be Read-Only, but reading is a mutable action)
 //!     let mut fs = FileSystem::from_storage(&mut cursor).unwrap();
 //!
-//!     // Let's see what entries are in the root directory
+//!     // Let's see what entries there are in the root directory
 //!     for entry in fs.read_dir(PathBuf::from("/")).unwrap() {
-//!         if entry.path().is_dir() {
+//!         if entry.is_dir() {
 //!             println!("Directory: {}", entry.path())
-//!         } else if entry.path().is_file() {
+//!         } else if entry.is_file() {
 //!             println!("File: {}", entry.path())
 //!         } else {
 //!             unreachable!()
 //!         }
 //!     }
 //!
-//!     // the image we currently use has a file named "root.txt"
+//!     // the disk image we currently use has a file named "root.txt"
 //!     // in the root directory. Let's read it
 //!
-//!     // please keep in mind that opening a `File` borrows
-//!     // the parent `FileSystem` until that `File` is dropped
-//!     let mut file = fs.get_file(PathBuf::from("/root.txt")).unwrap();
+//!     // please keep in mind that opening a `ROFile` or `RWFile` borrows
+//!     // the parent `FileSystem` until that `ROFile` or `RWFile` is dropped
+//!     let mut file = fs.get_ro_file(PathBuf::from("/root.txt")).unwrap();
 //!     let mut string = String::new();
 //!     file.read_to_string(&mut string);
 //!     println!("root.txt contents:\n{}", string);
@@ -51,25 +52,32 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 // Even inside unsafe functions, we must acknowlegde the usage of unsafe code
 #![deny(deprecated)]
-#![deny(elided_lifetimes_in_paths)]
 #![deny(macro_use_extern_crate)]
-#![deny(missing_copy_implementations)]
-#![deny(missing_debug_implementations)]
-#![deny(missing_docs)]
-#![deny(non_ascii_idents)]
-#![deny(trivial_numeric_casts)]
-#![deny(single_use_lifetimes)]
+#![deny(private_bounds)]
+#![deny(private_interfaces)]
 #![deny(unsafe_op_in_unsafe_fn)]
-#![deny(unused_import_braces)]
-#![deny(unused_lifetimes)]
+#![warn(missing_copy_implementations)]
+#![warn(missing_debug_implementations)]
+#![warn(missing_docs)]
+#![warn(non_ascii_idents)]
+#![warn(trivial_numeric_casts)]
+#![warn(single_use_lifetimes)]
+#![warn(unused_import_braces)]
+#![warn(unused_lifetimes)]
+// clippy attributes
+#![warn(clippy::derive_partial_eq_without_eq)]
+#![warn(clippy::redundant_clone)]
 
 extern crate alloc;
 
 mod error;
-mod fs;
+mod fat;
 pub mod io;
 mod path;
+mod time;
+mod utils;
 
 pub use error::*;
-pub use fs::*;
+pub use fat::*;
 pub use path::*;
+pub use time::*;

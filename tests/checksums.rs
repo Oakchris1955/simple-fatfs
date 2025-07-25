@@ -31,7 +31,7 @@ fn verify_checksums() {
     }
 }
 
-fn sha256sum(file: &std::path::PathBuf) -> std::process::ExitStatus {
+fn sha256sum(file: &std::path::Path) -> std::process::ExitStatus {
     Command::new("sha256sum")
         .args(["--status", "-c", file.as_os_str().to_str().unwrap()])
         .status()

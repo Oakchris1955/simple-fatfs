@@ -12,12 +12,10 @@
 //! - [`Write`] allows for writing bytes to a sink.
 //! - [`Seek`] provides a cursor which can be moved within a stream of bytes
 
-#[cfg(not(feature = "std"))]
-use core::*;
-#[cfg(feature = "std")]
-use std::*;
+use core::str;
 
-use ::alloc::{string::String, vec::Vec};
+#[cfg(not(feature = "std"))]
+use alloc::{string::String, vec::Vec};
 
 use crate::error::{IOError, IOErrorKind};
 
@@ -141,6 +139,11 @@ pub trait Read: IOBase {
 }
 
 /// A simplified version of [`std::io::Write`] for use within a `no_std` context
+///
+/// Even if the storage medium doesn't have [`Write`] functionality, it should implement
+/// this trait and return an [`IOErrorKind`] of type `Unsupported` for all methods.
+/// This way, in case a [`Write`]-related method is called for a [`FileSystem`](crate::FileSystem),
+/// it will return that error.
 pub trait Write: IOBase {
     /// Write a buffer into this writer, returning how many bytes were written.
     ///
@@ -267,7 +270,13 @@ pub trait Seek: IOBase {
     /// Seeking can fail, for example because it might involve flushing a buffer.
     ///
     /// Seeking to a negative offset is considered an error.
-    /// Seeking beyond the end of the stream should also be considered an error.
+    ///
+    /// Seeking beyond the end of the stream behaviour depends on the implementation.
+    /// If [`self`] can be extended (because it's a [`File`](crate::ROFile) for example), this shouldn't error out.
+    /// In the case that a stream is being extended or if the stream can't be extended,
+    /// this should return an [`IOError`] with an [`IOErrorKind`] of `UnexpectedEOF`.
+    /// The [`seek`](Seek::seek) operation should be considered partially successfull, since some clusters were allocated.
+    /// In general, for suchs cases, it is recommended that the user first checks if there's enough storage and then perform the action
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error>;
 
     /// Rewind to the beginning of a stream.
