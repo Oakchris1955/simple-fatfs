@@ -384,6 +384,10 @@ impl From<(RawProperties, PathBuf)> for Properties {
 struct DirInfo {
     path: PathBuf,
     chain_start: EntryLocationUnit,
+    /// Indicates the [`EntryLocation`] of the last known allocated or removed [`DirEntry`]
+    ///
+    /// [`None`] if it is not known
+    chain_end: Option<EntryLocation>,
 }
 
 impl DirInfo {
@@ -401,6 +405,7 @@ impl DirInfo {
                 },
                 BootRecord::ExFAT(_boot_record_exfat) => todo!(),
             },
+            chain_end: None,
         }
     }
 }
@@ -1101,6 +1106,7 @@ where
 
             self.dir_info.path = parent_pathbuf;
             self.dir_info.chain_start = EntryLocationUnit::DataCluster(parent_entry.data_cluster);
+            self.dir_info.chain_end = None;
         } else {
             self._go_to_root_directory();
         }
@@ -1125,6 +1131,7 @@ where
 
         self.dir_info.path.push(&child_entry.name);
         self.dir_info.chain_start = EntryLocationUnit::DataCluster(child_entry.data_cluster);
+        self.dir_info.chain_end = None;
 
         Ok(())
     }
@@ -1577,10 +1584,13 @@ where
 
         // we may not even need to allocate new entries.
         // let's check if there is a chain of unused entries big enough to be used
-        let mut first_entry = EntryLocation::from_partition_sector(
-            self.sector_buffer.stored_sector.try_into().unwrap(),
-            self,
-        );
+        let mut first_entry = self.dir_info.chain_end.clone().unwrap_or_else(|| {
+            EntryLocation::from_partition_sector(
+                self.sector_buffer.stored_sector.try_into().unwrap(),
+                self,
+            )
+        });
+
         let mut last_entry = first_entry.clone();
 
         let mut chain_len = 0;
@@ -1618,6 +1628,9 @@ where
                 first_entry = last_entry.clone();
             }
         }
+
+        // let's set the last-known dir entry
+        self.dir_info.chain_end = Some(last_entry.clone());
 
         // we have broken out of the loop, that means we reached the end of the chain
         // of the already-allocated entries
