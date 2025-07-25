@@ -626,7 +626,7 @@ impl Iterator for LFNEntryGenerator {
 impl iter::FusedIterator for LFNEntryGenerator {}
 
 /// The root directory sector or data cluster a [`FATDirEntry`] belongs too
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntryLocationUnit {
     /// Sector offset from the start of the root directory region (FAT12/16)
     RootDirSector(u16),

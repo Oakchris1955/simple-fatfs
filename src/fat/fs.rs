@@ -413,6 +413,8 @@ struct EntryParser {
     lfn_buf: Vec<String>,
     lfn_checksum: Option<u8>,
     current_chain: Option<DirEntryChain>,
+    last_location_unit: Option<EntryLocationUnit>,
+    sector_index: u32,
 }
 
 impl EntryParser {
@@ -439,11 +441,19 @@ impl EntryParser {
 
         let entry_location_unit = EntryLocationUnit::from_partition_sector(sector, fs);
 
-        for (index, chunk) in fs
-            .load_nth_sector(sector.into())?
-            .chunks(DIRENTRY_SIZE)
-            .enumerate()
-        {
+        match self.last_location_unit {
+            Some(ref mut last_location_unit) => {
+                if *last_location_unit != entry_location_unit {
+                    *last_location_unit = entry_location_unit;
+                    self.sector_index = 0;
+                }
+            }
+            None => self.last_location_unit = Some(entry_location_unit),
+        }
+
+        fs.load_nth_sector(sector.into())?;
+
+        for (index, chunk) in fs.sector_buffer.chunks(DIRENTRY_SIZE).enumerate() {
             match chunk[0] {
                 LAST_AND_UNUSED_ENTRY => return Ok(true),
                 UNUSED_ENTRY => continue,
@@ -462,7 +472,8 @@ impl EntryParser {
                 None => {
                     self.current_chain = Some(DirEntryChain {
                         location: EntryLocation {
-                            index: index as u32,
+                            index: index as u32
+                                + self.sector_index * (fs.sector_size() / DIRENTRY_SIZE as u32),
                             unit: entry_location_unit,
                         },
                         len: 1,
@@ -541,6 +552,8 @@ impl EntryParser {
                 })
             }
         }
+
+        self.sector_index += 1;
 
         Ok(false)
     }
