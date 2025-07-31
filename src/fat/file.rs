@@ -421,6 +421,11 @@ where
         let current_cluster = self.ro_file.props.current_cluster;
         self.ro_file.fs.free_cluster_chain(current_cluster)?;
 
+        // we are removing the file, no reason to sync it back to the filesystem
+        // (apart from that, we also won't overwrite the UNUSED_ENTRY flag
+        // on our dir entry assigned by the remove_entry_chain call above
+        self.entry_modified = false;
+
         Ok(())
     }
 }
