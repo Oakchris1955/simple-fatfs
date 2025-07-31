@@ -481,7 +481,8 @@ impl fmt::Display for Sfn {
 }
 
 const LAST_LFN_ENTRY_MASK: u8 = 0x40;
-const CHARS_PER_LFN_ENTRY: usize = 13;
+pub(crate) const LFN_CHAR_LIMIT: usize = 255; // not including the trailing null
+pub(crate) const CHARS_PER_LFN_ENTRY: usize = 13;
 const LONG_ENTRY_TYPE: u8 = 0;
 
 #[derive(Debug, Encode, Decode)]

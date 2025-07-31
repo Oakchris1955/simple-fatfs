@@ -28,6 +28,9 @@
 //!
 //!     // Let's see what entries there are in the root directory
 //!     for entry in fs.read_dir(PathBuf::from("/")).unwrap() {
+//!         // in a real world example, you probably don't wanna unwrap this
+//!         let entry = entry.unwrap();
+//!
 //!         if entry.is_dir() {
 //!             println!("Directory: {}", entry.path())
 //!         } else if entry.is_file() {

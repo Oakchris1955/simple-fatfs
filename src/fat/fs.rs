@@ -428,165 +428,7 @@ impl ops::Deref for DirEntry {
 pub(crate) const UNUSED_ENTRY: u8 = 0xE5;
 pub(crate) const LAST_AND_UNUSED_ENTRY: u8 = 0x00;
 
-#[derive(Debug, Default)]
-struct EntryParser {
-    entries: Vec<RawProperties>,
-    lfn_buf: Vec<String>,
-    lfn_checksum: Option<u8>,
-    current_chain: Option<DirEntryChain>,
-    last_location_unit: Option<EntryLocationUnit>,
-    sector_index: u32,
-}
-
-impl EntryParser {
-    #[inline]
-    fn _decrement_parsed_entries_counter(&mut self) {
-        if let Some(current_chain) = &mut self.current_chain {
-            current_chain.len -= 1
-        }
-    }
-
-    /// Parses a sector of 8.3 & LFN entries
-    ///
-    /// Returns a [`Result<bool>`] indicating whether or not
-    /// this sector was the last one in the chain containing entries
-    fn parse_sector<S>(
-        &mut self,
-        sector: u32,
-        fs: &mut FileSystem<S>,
-    ) -> Result<bool, <S as IOBase>::Error>
-    where
-        S: Read + Seek,
-    {
-        use utils::bincode::bincode_config;
-
-        let entry_location_unit = EntryLocationUnit::from_partition_sector(sector, fs);
-
-        match self.last_location_unit {
-            Some(ref mut last_location_unit) => {
-                if *last_location_unit != entry_location_unit {
-                    *last_location_unit = entry_location_unit;
-                    self.sector_index = 0;
-                }
-            }
-            None => self.last_location_unit = Some(entry_location_unit),
-        }
-
-        fs.load_nth_sector(sector.into())?;
-
-        for (index, chunk) in fs.sector_buffer.chunks(DIRENTRY_SIZE).enumerate() {
-            match chunk[0] {
-                LAST_AND_UNUSED_ENTRY => return Ok(true),
-                UNUSED_ENTRY => continue,
-                _ => (),
-            };
-
-            let Ok(entry) = bincode::decode_from_slice::<FATDirEntry, _>(chunk, bincode_config())
-                .map(|(v, _)| v)
-            else {
-                continue;
-            };
-
-            // update current entry chain data
-            match &mut self.current_chain {
-                Some(current_chain) => current_chain.len += 1,
-                None => {
-                    self.current_chain = Some(DirEntryChain {
-                        location: EntryLocation {
-                            index: index as u32
-                                + self.sector_index * (fs.sector_size() / DIRENTRY_SIZE as u32),
-                            unit: entry_location_unit,
-                        },
-                        len: 1,
-                    })
-                }
-            }
-
-            if entry.attributes.contains(RawAttributes::LFN) {
-                // TODO: perhaps there is a way to utilize the `order` field?
-                let Ok((lfn_entry, _)) =
-                    bincode::decode_from_slice::<LFNEntry, _>(chunk, bincode_config())
-                else {
-                    self._decrement_parsed_entries_counter();
-                    continue;
-                };
-
-                // If the signature verification fails, consider this entry corrupted
-                if !lfn_entry.verify_signature() {
-                    self._decrement_parsed_entries_counter();
-                    continue;
-                }
-
-                match self.lfn_checksum {
-                    Some(checksum) => {
-                        if checksum != lfn_entry.checksum {
-                            self.lfn_checksum = None;
-                            self.lfn_buf.clear();
-                            self.current_chain = None;
-                            continue;
-                        }
-                    }
-                    None => self.lfn_checksum = Some(lfn_entry.checksum),
-                }
-
-                let char_arr = lfn_entry.get_byte_slice();
-                if let Ok(temp_str) = utils::string::string_from_lfn(&char_arr) {
-                    self.lfn_buf.push(temp_str);
-                }
-
-                continue;
-            }
-
-            let filename = if !self.lfn_buf.is_empty()
-                && self
-                    .lfn_checksum
-                    .is_some_and(|checksum| checksum == entry.sfn.gen_checksum())
-            {
-                // for efficiency reasons, we store the LFN string sequences as we read them
-                let parsed_str: String = self.lfn_buf.iter().cloned().rev().collect();
-                self.lfn_buf.clear();
-                self.lfn_checksum = None;
-                parsed_str
-            } else {
-                entry.sfn.to_string()
-            };
-
-            if let (Ok(created), Ok(modified), Ok(accessed)) = (
-                entry.created.try_into(),
-                entry.modified.try_into(),
-                entry.accessed.try_into(),
-            ) {
-                self.entries.push(RawProperties {
-                    name: filename,
-                    sfn: entry.sfn,
-                    is_dir: entry.attributes.contains(RawAttributes::DIRECTORY),
-                    attributes: entry.attributes,
-                    created,
-                    modified,
-                    accessed,
-                    file_size: entry.file_size,
-                    data_cluster: ((entry.cluster_high as u32) << 16) + entry.cluster_low as u32,
-                    chain: self
-                        .current_chain
-                        .take()
-                        .expect("at this point, this shouldn't be None"),
-                })
-            }
-        }
-
-        self.sector_index += 1;
-
-        Ok(false)
-    }
-
-    /// Consumes [`Self`](EntryParser) & returns a [`Box<[RawProperties]>`][Box]
-    /// of the parsed entries
-    fn finish(self) -> Box<[RawProperties]> {
-        self.entries.into_boxed_slice()
-    }
-}
-
-/// This is essentially the reverse of [`EntryParser`]
+/// Serialize `MinProperties` into bytes
 #[derive(Debug)]
 struct EntryComposer {
     entries: Box<[MinProperties]>,
@@ -666,6 +508,245 @@ impl Iterator for EntryComposer {
 }
 
 impl iter::FusedIterator for EntryComposer {}
+
+#[derive(Debug)]
+struct ReadDirInt<'a, S>
+where
+    S: Read + Seek,
+{
+    lfn_buf: Vec<String>,
+    lfn_checksum: Option<u8>,
+    current_chain: Option<DirEntryChain>,
+
+    // if `None`, we have exhausted the iterator
+    entry_location: Option<EntryLocation>,
+
+    fs: &'a mut FileSystem<S>,
+}
+
+impl<'a, S> ReadDirInt<'a, S>
+where
+    S: Read + Seek,
+{
+    fn new(fs: &'a mut FileSystem<S>) -> Self {
+        Self {
+            lfn_buf: Vec::with_capacity(LFN_CHAR_LIMIT.div_ceil(CHARS_PER_LFN_ENTRY)),
+            lfn_checksum: None,
+            current_chain: None,
+
+            entry_location: Some(EntryLocation {
+                unit: fs.dir_info.chain_start,
+                index: 0,
+            }),
+
+            fs,
+        }
+    }
+
+    fn _next(&mut self) -> Result<Option<RawProperties>, S::Error> {
+        use utils::bincode::bincode_config;
+
+        // if this is `None`, the iterator has been exhausted
+        let entry_location = match &mut self.entry_location {
+            Some(entry_location) => entry_location,
+            None => return Ok(None),
+        };
+
+        // load the sector of the current entry
+        let entry_sector = entry_location.get_entry_sector(self.fs);
+        let sector_offset = entry_location.get_sector_byte_offset(self.fs);
+        self.fs.load_nth_sector(entry_sector)?;
+
+        let chunk = &self.fs.sector_buffer[sector_offset..(sector_offset + DIRENTRY_SIZE)];
+
+        match chunk[0] {
+            LAST_AND_UNUSED_ENTRY => {
+                self.entry_location = None;
+                // we have exhausted this directory
+                return Ok(None);
+            }
+            UNUSED_ENTRY => {
+                self.entry_location = entry_location.clone().next_entry(self.fs)?;
+                return Ok(None);
+            }
+            _ => (),
+        };
+
+        let Ok(entry) =
+            bincode::decode_from_slice::<FATDirEntry, _>(chunk, bincode_config()).map(|(v, _)| v)
+        else {
+            // FIXME: handle such error cases or panic
+            return Ok(None);
+        };
+
+        // update current entry chain data
+        match &mut self.current_chain {
+            Some(current_chain) => current_chain.len += 1,
+            None => {
+                self.current_chain = Some(DirEntryChain {
+                    location: entry_location.clone(),
+                    len: 1,
+                })
+            }
+        }
+
+        'outer: {
+            if entry.attributes.contains(RawAttributes::LFN) {
+                // TODO: perhaps there is a way to utilize the `order` field?
+                let Ok((lfn_entry, _)) =
+                    bincode::decode_from_slice::<LFNEntry, _>(chunk, bincode_config())
+                else {
+                    if let Some(current_chain) = &mut self.current_chain {
+                        current_chain.len -= 1
+                    }
+                    // FIXME: handle such error cases or panic
+                    break 'outer;
+                };
+
+                // If the signature verification fails, consider this entry corrupted
+                if !lfn_entry.verify_signature() {
+                    if let Some(current_chain) = &mut self.current_chain {
+                        current_chain.len -= 1
+                    }
+                    break 'outer;
+                }
+
+                match self.lfn_checksum {
+                    Some(checksum) => {
+                        if checksum != lfn_entry.checksum {
+                            self.lfn_checksum = None;
+                            self.lfn_buf.clear();
+                            self.current_chain = None;
+                            break 'outer;
+                        }
+                    }
+                    None => self.lfn_checksum = Some(lfn_entry.checksum),
+                }
+
+                let char_arr = lfn_entry.get_byte_slice();
+                if let Ok(temp_str) = utils::string::string_from_lfn(&char_arr) {
+                    self.lfn_buf.push(temp_str);
+                }
+            } else {
+                let filename = if !self.lfn_buf.is_empty()
+                    && self
+                        .lfn_checksum
+                        .is_some_and(|checksum| checksum == entry.sfn.gen_checksum())
+                {
+                    // for efficiency reasons, we store the LFN string sequences as we read them
+                    let parsed_str: String = self.lfn_buf.iter().cloned().rev().collect();
+                    self.lfn_buf.clear();
+                    self.lfn_checksum = None;
+                    parsed_str
+                } else {
+                    entry.sfn.to_string()
+                };
+
+                if let (Ok(created), Ok(modified), Ok(accessed)) = (
+                    entry.created.try_into(),
+                    entry.modified.try_into(),
+                    entry.accessed.try_into(),
+                ) {
+                    self.entry_location = entry_location.clone().next_entry(self.fs)?;
+
+                    return Ok(Some(RawProperties {
+                        name: filename,
+                        sfn: entry.sfn,
+                        is_dir: entry.attributes.contains(RawAttributes::DIRECTORY),
+                        attributes: entry.attributes,
+                        created,
+                        modified,
+                        accessed,
+                        file_size: entry.file_size,
+                        data_cluster: ((entry.cluster_high as u32) << 16)
+                            + entry.cluster_low as u32,
+                        chain: self
+                            .current_chain
+                            .take()
+                            .expect("at this point, this shouldn't be None"),
+                    }));
+                }
+            }
+        }
+
+        self.entry_location = entry_location.clone().next_entry(self.fs)?;
+
+        Ok(None)
+    }
+}
+
+impl<S> Iterator for ReadDirInt<'_, S>
+where
+    S: Read + Seek,
+{
+    type Item = Result<RawProperties, S::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // we want what we are doing here to be clear
+            #[allow(clippy::question_mark)]
+            if self.entry_location.is_none() {
+                return None;
+            }
+
+            match self._next().transpose() {
+                Some(result) => return Some(result),
+
+                None => continue,
+            }
+        }
+    }
+}
+
+impl<S> iter::FusedIterator for ReadDirInt<'_, S> where S: Read + Seek {}
+
+/// Iterator over the entries in a directory.
+///
+/// The order in which this iterator returns entries can vary
+/// and shouldn't be relied upon
+#[derive(Debug)]
+pub struct ReadDir<'a, S>(ReadDirInt<'a, S>)
+where
+    S: Read + Seek;
+
+impl<'a, S> From<ReadDirInt<'a, S>> for ReadDir<'a, S>
+where
+    S: Read + Seek,
+{
+    fn from(value: ReadDirInt<'a, S>) -> Self {
+        Self(value)
+    }
+}
+impl<S> Iterator for ReadDir<'_, S>
+where
+    S: Read + Seek,
+{
+    type Item = Result<DirEntry, S::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.0.next() {
+                Some(res) => match res {
+                    Ok(value) => {
+                        if self.0.fs.filter.filter(&value)
+                            // we shouldn't expose the special entries to the user
+                            && ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
+                                .contains(&value.name.as_str())
+                        {
+                            return Some(Ok(value.into_dir_entry(&self.0.fs.dir_info.path)));
+                        } else {
+                            continue;
+                        }
+                    }
+                    Err(err) => return Some(Err(err)),
+                },
+                None => return None,
+            }
+        }
+    }
+}
+
+impl<S> iter::FusedIterator for ReadDir<'_, S> where S: Read + Seek {}
 
 pub(crate) trait OffsetConversions {
     fn sector_size(&self) -> u32;
@@ -795,7 +876,7 @@ impl From<&BootRecord> for FSProperties {
 
 /// Filter (or not) things like hidden files/directories
 /// for FileSystem operations
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct FileFilter {
     show_hidden: bool,
     show_systen: bool,
@@ -1016,75 +1097,8 @@ impl<S> FileSystem<S>
 where
     S: Read + Seek,
 {
-    fn _process_root_dir(&mut self) -> FSResult<Box<[RawProperties]>, S::Error> {
-        match self.boot_record {
-            BootRecord::Fat(boot_record_fat) => match boot_record_fat.ebr {
-                Ebr::FAT12_16(_ebr_fat12_16) => {
-                    let mut entry_parser = EntryParser::default();
-
-                    let root_dir_sector = boot_record_fat.first_root_dir_sector();
-                    let sector_count = boot_record_fat.root_dir_sectors();
-
-                    for sector in root_dir_sector..(root_dir_sector + sector_count) {
-                        if entry_parser.parse_sector(sector.into(), self)? {
-                            break;
-                        }
-                    }
-
-                    Ok(entry_parser.finish())
-                }
-                Ebr::FAT32(ebr_fat32, _) => {
-                    let cluster = ebr_fat32.root_cluster;
-                    self._process_normal_dir(cluster)
-                }
-            },
-            BootRecord::ExFAT(_boot_record_exfat) => todo!(),
-        }
-    }
-
-    fn _process_normal_dir(
-        &mut self,
-        mut data_cluster: u32,
-    ) -> FSResult<Box<[RawProperties]>, S::Error> {
-        let mut entry_parser = EntryParser::default();
-
-        'outer: loop {
-            // FAT specification, section 6.7
-            let first_sector_of_cluster = self.data_cluster_to_partition_sector(data_cluster);
-            for sector in first_sector_of_cluster
-                ..(first_sector_of_cluster + self.sectors_per_cluster() as u32)
-            {
-                if entry_parser.parse_sector(sector, self)? {
-                    break 'outer;
-                }
-            }
-
-            // Read corresponding FAT entry
-            let current_fat_entry = self.read_nth_FAT_entry(data_cluster)?;
-
-            match current_fat_entry {
-                // we are done here, break the loop
-                FATEntry::Eof => break,
-                // this cluster chain goes on, follow it
-                FATEntry::Allocated(next_cluster) => data_cluster = next_cluster,
-                // any other case (whether a bad, reserved or free cluster) is invalid, consider this cluster chain malformed
-                _ => {
-                    log::error!("Cluster chain of directory is malformed");
-                    return Err(FSError::InternalFSError(
-                        InternalFSError::MalformedClusterChain,
-                    ));
-                }
-            }
-        }
-
-        Ok(entry_parser.finish())
-    }
-
-    fn process_current_dir(&mut self) -> FSResult<Box<[RawProperties]>, S::Error> {
-        match self.dir_info.chain_start {
-            EntryLocationUnit::RootDirSector(_) => self._process_root_dir(),
-            EntryLocationUnit::DataCluster(data_cluster) => self._process_normal_dir(data_cluster),
-        }
+    fn process_current_dir(&mut self) -> ReadDirInt<S> {
+        ReadDirInt::new(self)
     }
 
     /// Goes to the parent directory.
@@ -1094,12 +1108,14 @@ where
         if let Some(parent_path) = self.dir_info.path.parent() {
             let parent_pathbuf = parent_path.to_path_buf();
 
-            let entries = self.process_current_dir()?;
+            let mut entries = self.process_current_dir();
 
+            // the PARENT DIR entry is always second on a directory
+            // other than the root directory
             let parent_entry = entries
-                .iter()
-                .filter(|entry| entry.is_dir)
-                .find(|entry| entry.name == path_consts::PARENT_DIR_STR)
+                .nth(NONROOT_MIN_DIRENTRIES - 1)
+                .transpose()?
+                .filter(|entry| entry.is_dir && entry.name == path_consts::PARENT_DIR_STR)
                 .ok_or(FSError::InternalFSError(
                     InternalFSError::MalformedEntryChain,
                 ))?;
@@ -1118,12 +1134,15 @@ where
     ///
     /// If it doesn't exist, the encapsulated [`Option`] will be `None`
     fn _go_to_child_dir(&mut self, name: &str) -> FSResult<(), S::Error> {
-        let entries = self.process_current_dir()?;
+        let mut entries = self.process_current_dir();
 
-        let child_entry = entries
-            .iter()
-            .find(|entry| entry.name == name)
-            .ok_or(FSError::NotFound)?;
+        let child_entry = loop {
+            let entry = entries.next().ok_or(FSError::NotFound)??;
+
+            if entry.name == name {
+                break entry;
+            }
+        };
 
         if !child_entry.is_dir {
             return Err(FSError::NotADirectory);
@@ -2035,10 +2054,10 @@ impl<S> FileSystem<S>
 where
     S: Read + Seek,
 {
-    /// Read all the entries of a directory ([`PathBuf`]) into [`Box<[DirEntry]>`][Box]
+    /// Read all the entries of a directory ([`PathBuf`]) into [`ReadDirInt`]
     ///
     /// Fails if `path` doesn't represent a directory, or if that directory doesn't exist
-    pub fn read_dir<P: AsRef<Path>>(&mut self, path: P) -> FSResult<Box<[DirEntry]>, S::Error> {
+    pub fn read_dir<P: AsRef<Path>>(&mut self, path: P) -> FSResult<ReadDir<'_, S>, S::Error> {
         // normalize the given path
         let path = path.as_ref();
 
@@ -2050,21 +2069,10 @@ where
 
         self.go_to_dir(&path)?;
 
-        let entries = self.process_current_dir()?;
+        let entries = self.process_current_dir();
 
-        // let's map the entries vector to DirEntries and return
-        Ok(
-            IntoIterator::into_iter(entries) // don't ask, I don't know either (https://doc.rust-lang.org/std/boxed/index.html#editions)
-                .filter(|x| self.filter.filter(x))
-                // we shouldn't expose the special entries to the user
-                .filter(|x| {
-                    ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
-                        .contains(&x.name.as_str())
-                })
-                .map(|rawentry| rawentry.into_dir_entry(&path))
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
-        )
+        // let's map the private ReadDirInt to the public ReadDir and return
+        Ok(ReadDir::from(entries))
     }
 
     /// Get a corresponding [`ROFile`] object from a [`PathBuf`]
@@ -2086,19 +2094,30 @@ where
             )?;
 
             // don't ask, I don't know either (https://doc.rust-lang.org/std/boxed/index.html#editions)
-            match IntoIterator::into_iter(parent_dir).find(|direntry| {
-                direntry
+            let mut entry = None;
+
+            for dir_entry in parent_dir {
+                let dir_entry = dir_entry?;
+
+                if dir_entry
                     .path()
                     .file_name()
                     .is_some_and(|entry_name| entry_name == file_name)
-            }) {
-                Some(direntry) => {
+                {
+                    entry = Some(dir_entry.entry);
+
+                    break;
+                }
+            }
+
+            match entry {
+                Some(entry) => {
                     let mut file = ROFile {
                         fs: self,
                         props: FileProps {
                             offset: 0,
-                            current_cluster: direntry.entry.data_cluster,
-                            entry: direntry.entry,
+                            current_cluster: entry.data_cluster,
+                            entry,
                         },
                     };
 
@@ -2113,6 +2132,7 @@ where
                 }
                 None => {
                     log::error!("ROFile {} not found", path);
+
                     Err(FSError::NotFound)
                 }
             }
@@ -2264,21 +2284,32 @@ where
             None => return Err(FSError::PermissionDenied),
         };
 
-        // don't ask, I don't know either (https://doc.rust-lang.org/std/boxed/index.html#editions)
-        let entry_from = match IntoIterator::into_iter(self.read_dir(parent_from)?)
-            .find(|entry| *entry.path() == from)
-        {
-            Some(entry) => entry,
-            None => return Err(FSError::NotFound),
+        let entry_from = {
+            let mut entry_from = None;
+
+            for entry in self.read_dir(parent_from)? {
+                let entry = entry?;
+
+                if *entry.path() == from {
+                    entry_from = Some(entry);
+
+                    break;
+                }
+            }
+
+            match entry_from {
+                Some(entry) => entry,
+                None => return Err(FSError::NotFound),
+            }
         };
 
-        if self
-            .read_dir(parent_to)?
-            .iter()
-            .any(|entry| *entry.path() == to)
-        {
-            return Err(FSError::AlreadyExists);
-        };
+        for entry in self.read_dir(parent_to)? {
+            let entry = entry?;
+
+            if *entry.path() == to {
+                return Err(FSError::AlreadyExists);
+            }
+        }
 
         // if the entry is a file, everything is way more simple,
         // we just need to remove this entry a create a new one at
@@ -2393,9 +2424,7 @@ where
             .into());
         }
 
-        let dir_entries = self.read_dir(path)?;
-
-        if dir_entries.len() > NONROOT_MIN_DIRENTRIES {
+        if self.read_dir(path)?.next().is_some() {
             return Err(FSError::DirectoryNotEmpty);
         }
 
@@ -2405,10 +2434,21 @@ where
 
         let parent_dir_entries = self.read_dir(parent_path)?;
 
-        let entry = parent_dir_entries
-            .iter()
-            .find(|entry| entry.path == path)
-            .ok_or(FSError::NotFound)?;
+        let entry = {
+            let mut entry = None;
+
+            for ent in parent_dir_entries {
+                let ent = ent?;
+
+                if ent.path() == path {
+                    entry = Some(ent);
+
+                    break;
+                }
+            }
+
+            entry.ok_or(FSError::NotFound)?
+        };
 
         // we first clear the corresponding entry chain in the parent directory
         self.remove_entry_chain(&entry.chain)?;
@@ -2455,11 +2495,17 @@ where
             return Err(FSError::MalformedPath);
         }
 
-        for entry in self.read_dir(path)? {
+        let mut read_dir = self.read_dir(path)?;
+        loop {
+            let entry = match read_dir.next() {
+                Some(entry) => entry?,
+                None => break,
+            };
+
             if entry.is_dir() {
-                self.remove_dir_all(&entry.path)?;
+                read_dir.0.fs.remove_dir_all(&entry.path)?;
             } else if entry.is_file() {
-                self.remove_file_unchecked(&entry.path)?;
+                read_dir.0.fs.remove_file_unchecked(&entry.path)?;
             } else {
                 unreachable!()
             }
@@ -2484,9 +2530,16 @@ where
             return Err(FSError::MalformedPath);
         }
 
-        for entry in self.read_dir(path)? {
+        let mut read_dir = self.read_dir(path)?;
+
+        loop {
+            let entry = match read_dir.next() {
+                Some(entry) => entry?,
+                None => break,
+            };
+
             let read_only_found = if entry.is_dir() {
-                self.check_for_readonly_files(&entry.path)?
+                read_dir.0.fs.check_for_readonly_files(&entry.path)?
             } else if entry.is_file() {
                 entry.attributes.read_only
             } else {

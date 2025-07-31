@@ -155,14 +155,17 @@ where
 
     let generator = SfnGenerator::new(string);
 
-    for sfn in generator {
-        if !fs
-            .read_dir(&target_dir)?
-            .iter()
-            .any(|entry| entry.sfn == sfn)
-        {
-            return Ok(sfn);
+    // FIXME: this is bad, has best-case O(n) time complexity
+    'outer: for sfn in generator {
+        for entry in fs.read_dir(&target_dir)? {
+            let entry = entry?;
+
+            if *entry.sfn() == sfn {
+                continue 'outer;
+            }
         }
+
+        return Ok(sfn);
     }
 
     unreachable!(concat!(
