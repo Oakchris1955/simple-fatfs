@@ -1048,7 +1048,7 @@ where
 
         // verify boot record signature
         let fat_type = boot_record.fat_type();
-        log::info!("The FAT type of the filesystem is {:?}", fat_type);
+        log::info!("The FAT type of the filesystem is {fat_type:?}");
 
         match boot_record {
             BootRecord::Fat(boot_record_fat) => {
@@ -1916,9 +1916,7 @@ where
                     self.write_nth_FAT_entry(next_free_cluster, FATEntry::Eof)?;
                     if let Some(last_cluster_in_chain) = last_cluster_in_chain {
                         log::trace!(
-                            "cluster {} now points to {}",
-                            last_cluster_in_chain,
-                            next_free_cluster
+                            "cluster {last_cluster_in_chain} now points to {next_free_cluster}"
                         );
                     }
                     // now the next free cluster i the last allocated one
@@ -2131,7 +2129,7 @@ where
                     }
                 }
                 None => {
-                    log::error!("ROFile {} not found", path);
+                    log::error!("ROFile {path} not found");
 
                     Err(FSError::NotFound)
                 }

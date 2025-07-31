@@ -182,10 +182,7 @@ where
                     self.fs.sector_size() as usize - start_index,
                 );
                 log::debug!(
-                    "Gonna read {} bytes from sector {} starting at byte {}",
-                    bytes_to_read,
-                    sector,
-                    start_index
+                    "Gonna read {bytes_to_read} bytes from sector {sector} starting at byte {start_index}"
                 );
 
                 buf[bytes_read..bytes_read + bytes_to_read].copy_from_slice(
@@ -637,10 +634,7 @@ where
                 - (self.file_size as u64).next_multiple_of(self.fs.cluster_size()))
             .div_ceil(self.fs.cluster_size())
                 + 1;
-            log::debug!(
-                "Seeking beyond EOF, allocating {} more clusters",
-                clusters_to_allocate
-            );
+            log::debug!("Seeking beyond EOF, allocating {clusters_to_allocate} more clusters");
 
             let last_cluster_in_chain = self.last_cluster_in_chain()?;
 

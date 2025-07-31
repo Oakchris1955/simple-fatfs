@@ -636,6 +636,8 @@ pub(crate) enum EntryLocationUnit {
 }
 
 impl EntryLocationUnit {
+    // I will leave this here in case it is needed in the future
+    #[allow(unused)]
     pub(crate) fn from_partition_sector<S>(sector: u32, fs: &mut FileSystem<S>) -> Self
     where
         S: Read + Seek,
