@@ -237,12 +237,10 @@ impl RawProperties {
     where
         P: AsRef<Path>,
     {
-        let mut entry_path = path.as_ref().to_path_buf();
-
-        entry_path.push(PathBuf::from(&self.name));
+        let entry_path = path.as_ref().join(&self.name);
 
         DirEntry {
-            entry: Properties::from((self, entry_path)),
+            entry: Properties::from((self, entry_path.into())),
         }
     }
 
@@ -282,7 +280,7 @@ impl From<Properties> for RawProperties {
 /// A container for file/directory properties
 #[derive(Clone, Debug)]
 pub struct Properties {
-    pub(crate) path: PathBuf,
+    pub(crate) path: Box<Path>,
     pub(crate) sfn: Sfn,
     pub(crate) is_dir: bool,
     pub(crate) attributes: Attributes,
@@ -299,8 +297,8 @@ pub struct Properties {
 /// Getter methods
 impl Properties {
     #[inline]
-    /// Get the corresponding [`PathBuf`] to this entry
-    pub fn path(&self) -> &PathBuf {
+    /// Get the corresponding [`Path`] to this entry
+    pub fn path(&self) -> &Path {
         &self.path
     }
 
@@ -363,8 +361,8 @@ impl Properties {
     }
 }
 
-impl From<(RawProperties, PathBuf)> for Properties {
-    fn from((raw, path): (RawProperties, PathBuf)) -> Self {
+impl From<(RawProperties, Box<Path>)> for Properties {
+    fn from((raw, path): (RawProperties, Box<Path>)) -> Self {
         Properties {
             path,
             sfn: raw.sfn,
@@ -2052,7 +2050,7 @@ impl<S> FileSystem<S>
 where
     S: Read + Seek,
 {
-    /// Read all the entries of a directory ([`PathBuf`]) into [`ReadDirInt`]
+    /// Read all the entries of a directory ([`Path`]) into [`ReadDirInt`]
     ///
     /// Fails if `path` doesn't represent a directory, or if that directory doesn't exist
     pub fn read_dir<P: AsRef<Path>>(&mut self, path: P) -> FSResult<ReadDir<'_, S>, S::Error> {
@@ -2073,7 +2071,7 @@ where
         Ok(ReadDir::from(entries))
     }
 
-    /// Get a corresponding [`ROFile`] object from a [`PathBuf`]
+    /// Get a corresponding [`ROFile`] object from a [`Path`]
     ///
     /// Borrows `&mut self` until that [`ROFile`] object is dropped, effectively locking `self` until that file closed
     ///
@@ -2196,7 +2194,7 @@ where
                 current_cluster: raw_properties.data_cluster,
                 entry: Properties::from((
                     RawProperties::from_chain(raw_properties, chain),
-                    path.to_owned(),
+                    path.into(),
                 )),
                 offset: 0,
             },
@@ -2554,7 +2552,7 @@ where
         Ok(false)
     }
 
-    /// Get a corresponding [`RWFile`] object from a [`PathBuf`]
+    /// Get a corresponding [`RWFile`] object from a [`Path`]
     ///
     /// Borrows `&mut self` until that [`RWFile`] object is dropped, effectively locking `self` until that file closed
     ///
