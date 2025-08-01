@@ -704,6 +704,7 @@ impl EntryLocationUnit {
             },
             EntryLocationUnit::DataCluster(cluster) => Ok(fs
                 .get_next_cluster(*cluster)?
+                .filter(|cluster| *cluster < fs.props.total_clusters)
                 .map(EntryLocationUnit::DataCluster)),
         }
     }

@@ -1368,6 +1368,14 @@ where
     ///
     /// This function also returns an immutable reference to [`self.sector_buffer`](Self::sector_buffer)
     pub(crate) fn load_nth_sector(&mut self, n: u64) -> Result<&[u8], S::Error> {
+        // FIXME: don't rely just on the filesystem for the device storage size
+        if n >= self.props.total_sectors as u64 {
+            return Err(IOError::new(
+                <S::Error as IOError>::Kind::new_unexpected_eof(),
+                "seeked past end of storage device",
+            ));
+        }
+
         // nothing to do if the sector we wanna read is already cached
         if n != self.sector_buffer.stored_sector {
             // let's sync the current sector first

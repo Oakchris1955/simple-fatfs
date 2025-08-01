@@ -115,8 +115,7 @@ impl BootRecordFAT {
     #[inline]
     /// The total number of data sectors
     pub(crate) fn total_data_sectors(&self) -> u32 {
-        self.total_sectors() - (self.bpb.table_count as u32 * self.fat_sector_size())
-            + self.root_dir_sectors() as u32
+        self.total_sectors() - (self.first_data_sector() + 1) as u32
     }
 
     #[inline]
