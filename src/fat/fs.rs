@@ -2173,9 +2173,18 @@ where
             .file_name()
             .expect("the path is normalized and it isn't the root directory either");
 
-        let file_cluster = self.allocate_clusters(num::NonZero::new(1).expect("1 != 0"), None)?;
-
         self.go_to_dir(parent_dir)?;
+
+        // check if there is already a file or directory with the same name
+        for entry in self.process_current_dir() {
+            let entry = entry?;
+
+            if entry.name == file_name {
+                return Err(FSError::AlreadyExists);
+            }
+        }
+
+        let file_cluster = self.allocate_clusters(num::NonZero::new(1).expect("1 != 0"), None)?;
 
         let sfn = utils::string::gen_sfn(file_name, self, parent_dir)?;
 
@@ -2230,6 +2239,15 @@ where
         let file_name = target
             .file_name()
             .expect("the path is normalized and it isn't the root directory either");
+
+        // check if there is already a file or directory with the same name
+        for entry in self.process_current_dir() {
+            let entry = entry?;
+
+            if entry.name == file_name {
+                return Err(FSError::AlreadyExists);
+            }
+        }
 
         let now = self.clock.now();
 

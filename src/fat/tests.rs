@@ -264,7 +264,7 @@ fn create_directory_in_subdir_and_file() {
     let mut storage = Cursor::new(FAT16.to_owned());
     let mut fs = FileSystem::from_storage(&mut storage).unwrap();
 
-    fs.create_dir(PathBuf::from("/another root directory"))
+    fs.create_dir(PathBuf::from("/another root directory2"))
         .unwrap();
     let mut file = fs
         .create_file(PathBuf::from(
