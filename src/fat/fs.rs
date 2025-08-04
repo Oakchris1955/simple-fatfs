@@ -551,7 +551,7 @@ impl<S> FileSystem<S>
 where
     S: Read + Seek,
 {
-    fn process_current_dir(&mut self) -> ReadDirInt<S> {
+    pub(crate) fn process_current_dir(&mut self) -> ReadDirInt<S> {
         ReadDirInt::new(self)
     }
 

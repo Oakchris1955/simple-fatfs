@@ -149,8 +149,19 @@ where
     P: AsRef<Path>,
 {
     // we first check if this string is a valid short filename
-    if let Some(sfn) = as_sfn(string) {
-        return Ok(sfn);
+    'outer: {
+        if let Some(sfn) = as_sfn(string) {
+            // don't forget to check if that SFN already exists
+            for entry in fs.process_current_dir() {
+                let entry = entry?;
+
+                if entry.sfn == sfn {
+                    break 'outer;
+                }
+            }
+
+            return Ok(sfn);
+        }
     }
 
     let generator = SfnGenerator::new(string);
