@@ -447,7 +447,7 @@ where
     /// Fails if the storage is way too small to support a FAT filesystem.
     /// For most use cases, that shouldn't be an issue, you can just call [`.unwrap()`](Result::unwrap)
     pub fn from_storage(mut storage: S) -> FSResult<Self, S::Error> {
-        use utils::bincode::bincode_config;
+        use utils::bincode::BINCODE_CONFIG;
 
         // Begin by reading the boot record
         // We don't know the sector size yet, so we just go with the biggest possible one for now
@@ -461,12 +461,12 @@ where
         }
 
         let bpb: BpbFat =
-            bincode::decode_from_slice(&buffer[..BPBFAT_SIZE], bincode_config()).map(|(v, _)| v)?;
+            bincode::decode_from_slice(&buffer[..BPBFAT_SIZE], BINCODE_CONFIG).map(|(v, _)| v)?;
 
         let ebr = if bpb.table_size_16 == 0 {
             let ebr_fat32: EBRFAT32 = bincode::decode_from_slice(
                 &buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE],
-                bincode_config(),
+                BINCODE_CONFIG,
             )
             .map(|(v, _)| v)?;
 
@@ -477,7 +477,7 @@ where
             storage.read_exact(&mut buffer[..bpb.bytes_per_sector as usize])?;
             let fsinfo: FSInfoFAT32 = bincode::decode_from_slice(
                 &buffer[..bpb.bytes_per_sector as usize],
-                bincode_config(),
+                BINCODE_CONFIG,
             )
             .map(|(v, _)| v)?;
 
@@ -491,7 +491,7 @@ where
             Ebr::FAT12_16(
                 bincode::decode_from_slice(
                     &buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE],
-                    bincode_config(),
+                    BINCODE_CONFIG,
                 )
                 .map(|(v, _)| v)?,
             )
@@ -1459,14 +1459,14 @@ where
     /// Sync the [`FSInfoFAT32`] back to the storage medium
     /// if this is FAT32
     pub(crate) fn sync_fsinfo(&mut self) -> FSResult<(), S::Error> {
-        use utils::bincode::bincode_config;
+        use utils::bincode::BINCODE_CONFIG;
 
         if self.fsinfo_modified {
             if let BootRecord::Fat(boot_record_fat) = self.boot_record {
                 if let Ebr::FAT32(ebr_fat32, fsinfo) = boot_record_fat.ebr {
                     self.load_nth_sector(ebr_fat32.fat_info.into())?;
 
-                    bincode::encode_into_slice(fsinfo, &mut self.sector_buffer, bincode_config())?;
+                    bincode::encode_into_slice(fsinfo, &mut self.sector_buffer, BINCODE_CONFIG)?;
                 }
             }
 
@@ -1804,7 +1804,7 @@ where
                 },
             };
 
-            use utils::bincode::bincode_config;
+            use utils::bincode::BINCODE_CONFIG;
 
             self._go_to_cached_dir()?;
             let mut bytes: [u8; DIRENTRY_SIZE] = [0; DIRENTRY_SIZE];
@@ -1812,7 +1812,7 @@ where
             bincode::encode_into_slice(
                 FATDirEntry::from(parent_entry),
                 &mut bytes,
-                bincode_config(),
+                BINCODE_CONFIG,
             )?;
 
             self.sector_buffer[DIRENTRY_SIZE..(DIRENTRY_SIZE * 2)].copy_from_slice(&bytes);

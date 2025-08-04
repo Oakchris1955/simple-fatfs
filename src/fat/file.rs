@@ -8,7 +8,7 @@ use time::{Date, PrimitiveDateTime};
 
 use crate::error::{IOError, IOErrorKind};
 use crate::io::prelude::*;
-use crate::utils::bincode::bincode_config;
+use crate::utils::bincode::BINCODE_CONFIG;
 use crate::{FSError, FSResult, InternalFSError};
 
 #[derive(Debug)]
@@ -436,7 +436,7 @@ where
         if self.entry_modified {
             let direntry = FATDirEntry::from(MinProperties::from(self.props.entry.clone()));
             let mut bytes = [0; DIRENTRY_SIZE];
-            bincode::encode_into_slice(direntry, &mut bytes, bincode_config())?;
+            bincode::encode_into_slice(direntry, &mut bytes, BINCODE_CONFIG)?;
 
             let chain_start = self.props.entry.chain.location.clone();
             let file_name = self

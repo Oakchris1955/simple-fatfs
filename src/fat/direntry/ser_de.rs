@@ -189,7 +189,7 @@ impl Iterator for EntryComposer {
     type Item = [u8; DIRENTRY_SIZE];
 
     fn next(&mut self) -> Option<Self::Item> {
-        use utils::bincode::bincode_config;
+        use utils::bincode::BINCODE_CONFIG;
 
         let mut item: Self::Item = [0; DIRENTRY_SIZE];
 
@@ -202,7 +202,7 @@ impl Iterator for EntryComposer {
         match &mut self.lfn_iter {
             Some(lfn_iter) => match lfn_iter.next() {
                 Some(lfn_entry) => {
-                    bincode::encode_into_slice(lfn_entry, &mut item, bincode_config())
+                    bincode::encode_into_slice(lfn_entry, &mut item, BINCODE_CONFIG)
                         .expect("these are completely valid data, this shouldn't panic");
                 }
                 None => {
@@ -213,7 +213,7 @@ impl Iterator for EntryComposer {
                     bincode::encode_into_slice(
                         FATDirEntry::from(current_entry.clone()),
                         &mut item,
-                        bincode_config(),
+                        BINCODE_CONFIG,
                     )
                     .expect("these are completely valid data, this shouldn't panic");
                 }
@@ -226,7 +226,7 @@ impl Iterator for EntryComposer {
                     bincode::encode_into_slice(
                         FATDirEntry::from(current_entry.clone()),
                         &mut item,
-                        bincode_config(),
+                        BINCODE_CONFIG,
                     )
                     .expect("these are completely valid data, this shouldn't panic");
                 } else {
@@ -281,7 +281,7 @@ where
     }
 
     fn _next(&mut self) -> Result<Option<RawProperties>, S::Error> {
-        use utils::bincode::bincode_config;
+        use utils::bincode::BINCODE_CONFIG;
 
         // if this is `None`, the iterator has been exhausted
         let entry_location = match &mut self.entry_location {
@@ -310,7 +310,7 @@ where
         };
 
         let Ok(entry) =
-            bincode::decode_from_slice::<FATDirEntry, _>(chunk, bincode_config()).map(|(v, _)| v)
+            bincode::decode_from_slice::<FATDirEntry, _>(chunk, BINCODE_CONFIG).map(|(v, _)| v)
         else {
             // FIXME: handle such error cases or panic
             return Ok(None);
@@ -331,7 +331,7 @@ where
             if entry.attributes.contains(RawAttributes::LFN) {
                 // TODO: perhaps there is a way to utilize the `order` field?
                 let Ok((lfn_entry, _)) =
-                    bincode::decode_from_slice::<LFNEntry, _>(chunk, bincode_config())
+                    bincode::decode_from_slice::<LFNEntry, _>(chunk, BINCODE_CONFIG)
                 else {
                     if let Some(current_chain) = &mut self.current_chain {
                         current_chain.len -= 1
