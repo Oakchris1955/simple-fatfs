@@ -1964,7 +1964,7 @@ where
             };
 
             if entry.is_dir() {
-                read_dir.0.fs.remove_dir_all(&entry.path)?;
+                read_dir.0.fs.remove_dir_all_unchecked(&entry.path)?;
             } else if entry.is_file() {
                 read_dir.0.fs.remove_file_unchecked(&entry.path)?;
             } else {
