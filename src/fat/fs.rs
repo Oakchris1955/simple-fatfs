@@ -1964,9 +1964,9 @@ where
             };
 
             if entry.is_dir() {
-                read_dir.0.fs.remove_dir_all_unchecked(&entry.path)?;
+                read_dir.get_fs().remove_dir_all_unchecked(&entry.path)?;
             } else if entry.is_file() {
-                read_dir.0.fs.remove_file_unchecked(&entry.path)?;
+                read_dir.get_fs().remove_file_unchecked(&entry.path)?;
             } else {
                 unreachable!()
             }
@@ -2000,7 +2000,7 @@ where
             };
 
             let read_only_found = if entry.is_dir() {
-                read_dir.0.fs.check_for_readonly_files(&entry.path)?
+                read_dir.get_fs().check_for_readonly_files(&entry.path)?
             } else if entry.is_file() {
                 entry.attributes.read_only
             } else {

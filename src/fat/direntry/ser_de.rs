@@ -280,6 +280,11 @@ where
         }
     }
 
+    #[inline]
+    pub(crate) fn get_fs(&mut self) -> &mut FileSystem<S> {
+        self.fs
+    }
+
     fn _next(&mut self) -> Result<Option<RawProperties>, S::Error> {
         use utils::bincode::BINCODE_CONFIG;
 
@@ -446,6 +451,16 @@ pub struct ReadDir<'a, S>(pub(crate) ReadDirInt<'a, S>)
 where
     S: Read + Seek;
 
+impl<S> ReadDir<'_, S>
+where
+    S: Read + Seek,
+{
+    #[inline]
+    pub(crate) fn get_fs(&mut self) -> &mut FileSystem<S> {
+        self.0.get_fs()
+    }
+}
+
 impl<'a, S> From<ReadDirInt<'a, S>> for ReadDir<'a, S>
 where
     S: Read + Seek,
@@ -454,6 +469,7 @@ where
         Self(value)
     }
 }
+
 impl<S> Iterator for ReadDir<'_, S>
 where
     S: Read + Seek,
@@ -465,12 +481,12 @@ where
             match self.0.next() {
                 Some(res) => match res {
                     Ok(value) => {
-                        if self.0.fs.filter.filter(&value)
+                        if self.get_fs().filter.filter(&value)
                             // we shouldn't expose the special entries to the user
                             && ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
                                 .contains(&value.name.as_str())
                         {
-                            return Some(Ok(value.into_dir_entry(&self.0.fs.dir_info.path)));
+                            return Some(Ok(value.into_dir_entry(&self.get_fs().dir_info.path)));
                         } else {
                             continue;
                         }
