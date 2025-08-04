@@ -7,9 +7,9 @@ mod storage;
 #[cfg(all(test, feature = "std"))]
 mod tests;
 
-use bpb::*;
+pub(crate) use bpb::*;
 pub use consts::*;
 pub use direntry::*;
 pub use file::*;
 pub use fs::*;
-use storage::*;
+pub(crate) use storage::*;

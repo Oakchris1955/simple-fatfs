@@ -1,0 +1,240 @@
+use super::*;
+
+use core::{fmt, ops};
+
+use crate::*;
+
+#[cfg(not(feature = "std"))]
+use alloc::{borrow::ToOwned, boxed::Box, string::String};
+
+use ::time;
+use bincode::{Decode, Encode};
+use time::{Date, PrimitiveDateTime};
+
+/// A list of the various attributes specified for a file/directory
+#[derive(Debug, Clone, Copy)]
+pub struct Attributes {
+    /// This is a read-only file
+    pub read_only: bool,
+    /// This file is to be hidden unless a request is issued
+    /// explicitly requesting inclusion of “hidden files”
+    pub hidden: bool,
+    /// This is a system file and shouldn't be listed unless a request
+    /// is issued explicitly requesting inclusion of ”system files”
+    pub system: bool,
+    /// This file has been modified since last archival
+    /// or has never been archived.
+    ///
+    /// This field should only concern archival software
+    pub archive: bool,
+}
+
+impl From<RawAttributes> for Attributes {
+    fn from(value: RawAttributes) -> Self {
+        Attributes {
+            read_only: value.contains(RawAttributes::READ_ONLY),
+            hidden: value.contains(RawAttributes::HIDDEN),
+            system: value.contains(RawAttributes::SYSTEM),
+            archive: value.contains(RawAttributes::ARCHIVE),
+        }
+    }
+}
+
+// a directory entry occupies 32 bytes
+pub(crate) const DIRENTRY_SIZE: usize = 32;
+
+pub(crate) const SFN_NAME_LEN: usize = 8;
+pub(crate) const SFN_EXT_LEN: usize = 3;
+pub(crate) const SFN_LEN: usize = SFN_NAME_LEN + SFN_EXT_LEN;
+
+#[derive(Encode, Decode, Debug, Clone, Copy, PartialEq, Eq)]
+/// The short filename of an entry
+///
+/// In FAT, each file has 2 filenames: one long and one short filename.
+/// The short filename is retained for backwards-compatibility reasons
+/// by the FAT specification and shouldn't concern most users.
+pub struct Sfn {
+    pub(crate) name: [u8; SFN_NAME_LEN],
+    pub(crate) ext: [u8; SFN_EXT_LEN],
+}
+
+pub(crate) const CURRENT_DIR_SFN: Sfn = Sfn {
+    name: {
+        use typed_path::constants::windows::CURRENT_DIR;
+
+        // not pretty, but it works
+        let mut s = [b' '; SFN_NAME_LEN];
+        // apparently, subslicing a const slice is not const, nice!
+        s[0] = CURRENT_DIR[0];
+        s
+    },
+    ext: [b' '; SFN_EXT_LEN],
+};
+
+pub(crate) const PARENT_DIR_SFN: Sfn = Sfn {
+    name: {
+        use typed_path::constants::windows::PARENT_DIR;
+
+        // not pretty, but it works
+        let mut s = [b' '; SFN_NAME_LEN];
+        // apparently, subslicing a const slice is not const, nice!
+        s[0] = PARENT_DIR[0];
+        s[1] = PARENT_DIR[1];
+        s
+    },
+    ext: [b' '; SFN_EXT_LEN],
+};
+
+impl Sfn {
+    fn get_byte_slice(&self) -> [u8; SFN_LEN] {
+        let mut slice = [0; SFN_LEN];
+
+        slice[..SFN_NAME_LEN].copy_from_slice(&self.name);
+        slice[SFN_NAME_LEN..].copy_from_slice(&self.ext);
+
+        slice
+    }
+
+    pub(crate) fn gen_checksum(&self) -> u8 {
+        let mut sum = 0;
+
+        for c in self.get_byte_slice() {
+            sum = (if (sum & 1) != 0 { 0x80_u8 } else { 0_u8 })
+                .wrapping_add(sum >> 1)
+                .wrapping_add(c)
+        }
+
+        sum
+    }
+}
+
+impl fmt::Display for Sfn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // we begin by writing the name (even if it is padded with spaces, they will be trimmed, so we don't care)
+        write!(f, "{}", String::from_utf8_lossy(&self.name).trim())?;
+
+        // then, if the extension isn't empty (padded with zeroes), we write it too
+        let ext = String::from_utf8_lossy(&self.ext).trim().to_owned();
+        if !ext.is_empty() {
+            write!(f, ".{ext}")?;
+        };
+
+        Ok(())
+    }
+}
+
+/// A container for file/directory properties
+#[derive(Clone, Debug)]
+pub struct Properties {
+    pub(crate) path: Box<Path>,
+    pub(crate) sfn: Sfn,
+    pub(crate) is_dir: bool,
+    pub(crate) attributes: Attributes,
+    pub(crate) created: Option<PrimitiveDateTime>,
+    pub(crate) modified: PrimitiveDateTime,
+    pub(crate) accessed: Option<Date>,
+    pub(crate) file_size: u32,
+    pub(crate) data_cluster: u32,
+
+    // internal fields
+    pub(crate) chain: DirEntryChain,
+}
+
+/// Getter methods
+impl Properties {
+    #[inline]
+    /// Get the corresponding [`Path`] to this entry
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    #[inline]
+    /// Get the corresponding [short filename](`Sfn`) for this entry
+    pub fn sfn(&self) -> &Sfn {
+        &self.sfn
+    }
+
+    #[inline]
+    /// Check whether this entry belongs to a directory
+    pub fn is_dir(&self) -> bool {
+        self.is_dir
+    }
+
+    #[inline]
+    /// Check whether this entry belongs to a file
+    pub fn is_file(&self) -> bool {
+        !self.is_dir()
+    }
+
+    #[inline]
+    /// Get the corresponding [`Attributes`] to this entry
+    pub fn attributes(&self) -> &Attributes {
+        &self.attributes
+    }
+
+    #[inline]
+    /// Find out when this entry was created (max resolution: 1ms)
+    ///
+    /// Returns an [`Option`] containing a [`PrimitiveDateTime`] from the [`time`] crate,
+    /// since that field is specified as optional in the FAT32 specification
+    pub fn creation_time(&self) -> &Option<PrimitiveDateTime> {
+        &self.created
+    }
+
+    #[inline]
+    /// Find out when this entry was last modified (max resolution: 2 secs)
+    ///
+    /// Returns a [`PrimitiveDateTime`] from the [`time`] crate
+    pub fn modification_time(&self) -> &PrimitiveDateTime {
+        &self.modified
+    }
+
+    #[inline]
+    /// Find out when this entry was last accessed (max resolution: 1 day)
+    ///
+    /// Returns an [`Option`] containing a [`Date`] from the [`time`] crate,
+    /// since that field is specified as optional in the FAT32 specification
+    pub fn last_accessed_date(&self) -> &Option<Date> {
+        &self.accessed
+    }
+
+    #[inline]
+    /// Find out the size of this entry
+    ///
+    /// Always returns `0` for directories
+    pub fn file_size(&self) -> u32 {
+        self.file_size
+    }
+}
+
+impl From<(RawProperties, Box<Path>)> for Properties {
+    fn from((raw, path): (RawProperties, Box<Path>)) -> Self {
+        Properties {
+            path,
+            sfn: raw.sfn,
+            is_dir: raw.is_dir,
+            attributes: raw.attributes.into(),
+            created: raw.created,
+            modified: raw.modified,
+            accessed: raw.accessed,
+            file_size: raw.file_size,
+            data_cluster: raw.data_cluster,
+            chain: raw.chain,
+        }
+    }
+}
+
+/// A thin wrapper for [`Properties`] representing a directory entry
+#[derive(Debug)]
+pub struct DirEntry {
+    pub(crate) entry: Properties,
+}
+
+impl ops::Deref for DirEntry {
+    type Target = Properties;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.entry
+    }
+}

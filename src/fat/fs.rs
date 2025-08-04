@@ -5,16 +5,10 @@ use crate::{error::*, io::prelude::*, path::*, time::*, utils};
 use core::{cmp, iter, num, ops};
 
 #[cfg(not(feature = "std"))]
-use alloc::{
-    borrow::ToOwned,
-    boxed::Box,
-    string::{String, ToString},
-    vec,
-    vec::Vec,
-};
+use alloc::{boxed::Box, string::ToString, vec, vec::Vec};
 
 use ::time;
-use time::{Date, PrimitiveDateTime};
+use time::PrimitiveDateTime;
 
 /// An enum representing different variants of the FAT filesystem
 ///
@@ -176,220 +170,18 @@ impl FATSectorProps {
     }
 }
 
-/// A less-detailed version of [`RawProperties`]
 #[derive(Debug, Clone)]
-pub(crate) struct MinProperties {
-    pub(crate) name: Box<str>,
-    pub(crate) sfn: Sfn,
-    pub(crate) attributes: RawAttributes,
-    pub(crate) created: Option<PrimitiveDateTime>,
-    pub(crate) modified: PrimitiveDateTime,
-    pub(crate) accessed: Option<Date>,
-    pub(crate) file_size: u32,
-    pub(crate) data_cluster: u32,
-}
-
-impl From<RawProperties> for MinProperties {
-    fn from(value: RawProperties) -> Self {
-        Self {
-            name: Box::from(value.name),
-            sfn: value.sfn,
-            attributes: value.attributes,
-            created: value.created,
-            modified: value.modified,
-            accessed: value.accessed,
-            file_size: value.file_size,
-            data_cluster: value.data_cluster,
-        }
-    }
-}
-
-impl From<Properties> for MinProperties {
-    fn from(value: Properties) -> Self {
-        Self::from(RawProperties::from(value))
-    }
-}
-
-impl From<DirEntry> for MinProperties {
-    fn from(value: DirEntry) -> Self {
-        Self::from(value.entry)
-    }
-}
-
-/// A resolved file/directory entry (for internal usage only)
-#[derive(Debug, Clone)]
-pub(crate) struct RawProperties {
-    pub(crate) name: String,
-    pub(crate) sfn: Sfn,
-    pub(crate) is_dir: bool,
-    pub(crate) attributes: RawAttributes,
-    pub(crate) created: Option<PrimitiveDateTime>,
-    pub(crate) modified: PrimitiveDateTime,
-    pub(crate) accessed: Option<Date>,
-    pub(crate) file_size: u32,
-    pub(crate) data_cluster: u32,
-
-    pub(crate) chain: DirEntryChain,
-}
-
-impl RawProperties {
-    pub(crate) fn into_dir_entry<P>(self, path: P) -> DirEntry
-    where
-        P: AsRef<Path>,
-    {
-        let entry_path = path.as_ref().join(&self.name);
-
-        DirEntry {
-            entry: Properties::from((self, entry_path.into())),
-        }
-    }
-
-    pub(crate) fn from_chain(props: MinProperties, chain: DirEntryChain) -> Self {
-        Self {
-            name: String::from(props.name),
-            sfn: props.sfn,
-            is_dir: props.attributes.contains(RawAttributes::DIRECTORY),
-            attributes: props.attributes,
-            created: props.created,
-            modified: props.modified,
-            accessed: props.accessed,
-            file_size: props.file_size,
-            data_cluster: props.data_cluster,
-            chain,
-        }
-    }
-}
-
-impl From<Properties> for RawProperties {
-    fn from(value: Properties) -> Self {
-        Self {
-            name: String::from(value.path.file_name().expect("the path is normalized")),
-            sfn: value.sfn,
-            is_dir: value.is_dir,
-            attributes: (value.attributes, value.is_dir).into(),
-            created: value.created,
-            modified: value.modified,
-            accessed: value.accessed,
-            file_size: value.file_size,
-            data_cluster: value.data_cluster,
-            chain: value.chain,
-        }
-    }
-}
-
-/// A container for file/directory properties
-#[derive(Clone, Debug)]
-pub struct Properties {
-    pub(crate) path: Box<Path>,
-    pub(crate) sfn: Sfn,
-    pub(crate) is_dir: bool,
-    pub(crate) attributes: Attributes,
-    pub(crate) created: Option<PrimitiveDateTime>,
-    pub(crate) modified: PrimitiveDateTime,
-    pub(crate) accessed: Option<Date>,
-    pub(crate) file_size: u32,
-    pub(crate) data_cluster: u32,
-
-    // internal fields
-    pub(crate) chain: DirEntryChain,
-}
-
-/// Getter methods
-impl Properties {
-    #[inline]
-    /// Get the corresponding [`Path`] to this entry
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    #[inline]
-    /// Get the corresponding [short filename](`Sfn`) for this entry
-    pub fn sfn(&self) -> &Sfn {
-        &self.sfn
-    }
-
-    #[inline]
-    /// Check whether this entry belongs to a directory
-    pub fn is_dir(&self) -> bool {
-        self.is_dir
-    }
-
-    #[inline]
-    /// Check whether this entry belongs to a file
-    pub fn is_file(&self) -> bool {
-        !self.is_dir()
-    }
-
-    #[inline]
-    /// Get the corresponding [`Attributes`] to this entry
-    pub fn attributes(&self) -> &Attributes {
-        &self.attributes
-    }
-
-    #[inline]
-    /// Find out when this entry was created (max resolution: 1ms)
-    ///
-    /// Returns an [`Option`] containing a [`PrimitiveDateTime`] from the [`time`] crate,
-    /// since that field is specified as optional in the FAT32 specification
-    pub fn creation_time(&self) -> &Option<PrimitiveDateTime> {
-        &self.created
-    }
-
-    #[inline]
-    /// Find out when this entry was last modified (max resolution: 2 secs)
-    ///
-    /// Returns a [`PrimitiveDateTime`] from the [`time`] crate
-    pub fn modification_time(&self) -> &PrimitiveDateTime {
-        &self.modified
-    }
-
-    #[inline]
-    /// Find out when this entry was last accessed (max resolution: 1 day)
-    ///
-    /// Returns an [`Option`] containing a [`Date`] from the [`time`] crate,
-    /// since that field is specified as optional in the FAT32 specification
-    pub fn last_accessed_date(&self) -> &Option<Date> {
-        &self.accessed
-    }
-
-    #[inline]
-    /// Find out the size of this entry
-    ///
-    /// Always returns `0` for directories
-    pub fn file_size(&self) -> u32 {
-        self.file_size
-    }
-}
-
-impl From<(RawProperties, Box<Path>)> for Properties {
-    fn from((raw, path): (RawProperties, Box<Path>)) -> Self {
-        Properties {
-            path,
-            sfn: raw.sfn,
-            is_dir: raw.is_dir,
-            attributes: raw.attributes.into(),
-            created: raw.created,
-            modified: raw.modified,
-            accessed: raw.accessed,
-            file_size: raw.file_size,
-            data_cluster: raw.data_cluster,
-            chain: raw.chain,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct DirInfo {
-    path: PathBuf,
-    chain_start: EntryLocationUnit,
+pub(crate) struct DirInfo {
+    pub(crate) path: PathBuf,
+    pub(crate) chain_start: EntryLocationUnit,
     /// Indicates the [`EntryLocation`] of the last known allocated or removed [`DirEntry`]
     ///
     /// [`None`] if it is not known
-    chain_end: Option<EntryLocation>,
+    pub(crate) chain_end: Option<EntryLocation>,
 }
 
 impl DirInfo {
-    fn at_root_dir(boot_record: &BootRecord) -> Self {
+    pub(crate) fn at_root_dir(boot_record: &BootRecord) -> Self {
         DirInfo {
             // this is basically the root directory
             path: PathBuf::from(path_consts::SEPARATOR_STR),
@@ -404,342 +196,6 @@ impl DirInfo {
                 BootRecord::ExFAT(_boot_record_exfat) => todo!(),
             },
             chain_end: None,
-        }
-    }
-}
-
-/// A thin wrapper for [`Properties`] representing a directory entry
-#[derive(Debug)]
-pub struct DirEntry {
-    pub(crate) entry: Properties,
-}
-
-impl ops::Deref for DirEntry {
-    type Target = Properties;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.entry
-    }
-}
-
-pub(crate) const UNUSED_ENTRY: u8 = 0xE5;
-pub(crate) const LAST_AND_UNUSED_ENTRY: u8 = 0x00;
-
-/// Serialize `MinProperties` into bytes
-#[derive(Debug)]
-struct EntryComposer {
-    entries: Box<[MinProperties]>,
-    entry_index: usize,
-
-    lfn_iter: Option<LFNEntryGenerator>,
-}
-
-impl From<Box<[MinProperties]>> for EntryComposer {
-    fn from(value: Box<[MinProperties]>) -> Self {
-        Self {
-            entries: value,
-            entry_index: 0,
-
-            lfn_iter: None,
-        }
-    }
-}
-
-impl Iterator for EntryComposer {
-    type Item = [u8; DIRENTRY_SIZE];
-
-    fn next(&mut self) -> Option<Self::Item> {
-        use utils::bincode::bincode_config;
-
-        let mut item: Self::Item = [0; DIRENTRY_SIZE];
-
-        if self.entry_index >= self.entries.len() {
-            return None;
-        }
-
-        let current_entry = &self.entries[self.entry_index];
-
-        match &mut self.lfn_iter {
-            Some(lfn_iter) => match lfn_iter.next() {
-                Some(lfn_entry) => {
-                    bincode::encode_into_slice(lfn_entry, &mut item, bincode_config())
-                        .expect("these are completely valid data, this shouldn't panic");
-                }
-                None => {
-                    // this LFN generator has been exhausted, return the SFN entry
-                    self.lfn_iter = None;
-                    self.entry_index += 1;
-
-                    bincode::encode_into_slice(
-                        FATDirEntry::from(current_entry.clone()),
-                        &mut item,
-                        bincode_config(),
-                    )
-                    .expect("these are completely valid data, this shouldn't panic");
-                }
-            },
-            None => {
-                // no reason to generate a SFN if the filename is already a valid one
-                if *current_entry.sfn.to_string() == *current_entry.name {
-                    self.entry_index += 1;
-
-                    bincode::encode_into_slice(
-                        FATDirEntry::from(current_entry.clone()),
-                        &mut item,
-                        bincode_config(),
-                    )
-                    .expect("these are completely valid data, this shouldn't panic");
-                } else {
-                    self.lfn_iter = Some(LFNEntryGenerator::new(
-                        &current_entry.name,
-                        current_entry.sfn.gen_checksum(),
-                    ));
-
-                    return self.next();
-                }
-            }
-        }
-
-        Some(item)
-    }
-}
-
-impl iter::FusedIterator for EntryComposer {}
-
-#[derive(Debug)]
-struct ReadDirInt<'a, S>
-where
-    S: Read + Seek,
-{
-    lfn_buf: Vec<String>,
-    lfn_checksum: Option<u8>,
-    current_chain: Option<DirEntryChain>,
-
-    // if `None`, we have exhausted the iterator
-    entry_location: Option<EntryLocation>,
-
-    fs: &'a mut FileSystem<S>,
-}
-
-impl<'a, S> ReadDirInt<'a, S>
-where
-    S: Read + Seek,
-{
-    fn new(fs: &'a mut FileSystem<S>) -> Self {
-        Self {
-            lfn_buf: Vec::with_capacity(LFN_CHAR_LIMIT.div_ceil(CHARS_PER_LFN_ENTRY)),
-            lfn_checksum: None,
-            current_chain: None,
-
-            entry_location: Some(EntryLocation {
-                unit: fs.dir_info.chain_start,
-                index: 0,
-            }),
-
-            fs,
-        }
-    }
-
-    fn _next(&mut self) -> Result<Option<RawProperties>, S::Error> {
-        use utils::bincode::bincode_config;
-
-        // if this is `None`, the iterator has been exhausted
-        let entry_location = match &mut self.entry_location {
-            Some(entry_location) => entry_location,
-            None => return Ok(None),
-        };
-
-        // load the sector of the current entry
-        let entry_sector = entry_location.get_entry_sector(self.fs);
-        let sector_offset = entry_location.get_sector_byte_offset(self.fs);
-        self.fs.load_nth_sector(entry_sector)?;
-
-        let chunk = &self.fs.sector_buffer[sector_offset..(sector_offset + DIRENTRY_SIZE)];
-
-        match chunk[0] {
-            LAST_AND_UNUSED_ENTRY => {
-                self.entry_location = None;
-                // we have exhausted this directory
-                return Ok(None);
-            }
-            UNUSED_ENTRY => {
-                self.entry_location = entry_location.clone().next_entry(self.fs)?;
-                return Ok(None);
-            }
-            _ => (),
-        };
-
-        let Ok(entry) =
-            bincode::decode_from_slice::<FATDirEntry, _>(chunk, bincode_config()).map(|(v, _)| v)
-        else {
-            // FIXME: handle such error cases or panic
-            return Ok(None);
-        };
-
-        // update current entry chain data
-        match &mut self.current_chain {
-            Some(current_chain) => current_chain.len += 1,
-            None => {
-                self.current_chain = Some(DirEntryChain {
-                    location: entry_location.clone(),
-                    len: 1,
-                })
-            }
-        }
-
-        'outer: {
-            if entry.attributes.contains(RawAttributes::LFN) {
-                // TODO: perhaps there is a way to utilize the `order` field?
-                let Ok((lfn_entry, _)) =
-                    bincode::decode_from_slice::<LFNEntry, _>(chunk, bincode_config())
-                else {
-                    if let Some(current_chain) = &mut self.current_chain {
-                        current_chain.len -= 1
-                    }
-                    // FIXME: handle such error cases or panic
-                    break 'outer;
-                };
-
-                // If the signature verification fails, consider this entry corrupted
-                if !lfn_entry.verify_signature() {
-                    if let Some(current_chain) = &mut self.current_chain {
-                        current_chain.len -= 1
-                    }
-                    break 'outer;
-                }
-
-                match self.lfn_checksum {
-                    Some(checksum) => {
-                        if checksum != lfn_entry.checksum {
-                            self.lfn_checksum = None;
-                            self.lfn_buf.clear();
-                            self.current_chain = None;
-                            break 'outer;
-                        }
-                    }
-                    None => self.lfn_checksum = Some(lfn_entry.checksum),
-                }
-
-                let char_arr = lfn_entry.get_byte_slice();
-                if let Ok(temp_str) = utils::string::string_from_lfn(&char_arr) {
-                    self.lfn_buf.push(temp_str);
-                }
-            } else {
-                let filename = if !self.lfn_buf.is_empty()
-                    && self
-                        .lfn_checksum
-                        .is_some_and(|checksum| checksum == entry.sfn.gen_checksum())
-                {
-                    // for efficiency reasons, we store the LFN string sequences as we read them
-                    let parsed_str: String = self.lfn_buf.iter().cloned().rev().collect();
-                    self.lfn_buf.clear();
-                    self.lfn_checksum = None;
-                    parsed_str
-                } else {
-                    entry.sfn.to_string()
-                };
-
-                if let (Ok(created), Ok(modified), Ok(accessed)) = (
-                    entry.created.try_into(),
-                    entry.modified.try_into(),
-                    entry.accessed.try_into(),
-                ) {
-                    self.entry_location = entry_location.clone().next_entry(self.fs)?;
-
-                    return Ok(Some(RawProperties {
-                        name: filename,
-                        sfn: entry.sfn,
-                        is_dir: entry.attributes.contains(RawAttributes::DIRECTORY),
-                        attributes: entry.attributes,
-                        created,
-                        modified,
-                        accessed,
-                        file_size: entry.file_size,
-                        data_cluster: ((entry.cluster_high as u32) << 16)
-                            + entry.cluster_low as u32,
-                        chain: self
-                            .current_chain
-                            .take()
-                            .expect("at this point, this shouldn't be None"),
-                    }));
-                }
-            }
-        }
-
-        self.entry_location = entry_location.clone().next_entry(self.fs)?;
-
-        Ok(None)
-    }
-}
-
-impl<S> Iterator for ReadDirInt<'_, S>
-where
-    S: Read + Seek,
-{
-    type Item = Result<RawProperties, S::Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            // we want what we are doing here to be clear
-            #[allow(clippy::question_mark)]
-            if self.entry_location.is_none() {
-                return None;
-            }
-
-            match self._next().transpose() {
-                Some(result) => return Some(result),
-
-                None => continue,
-            }
-        }
-    }
-}
-
-impl<S> iter::FusedIterator for ReadDirInt<'_, S> where S: Read + Seek {}
-
-/// Iterator over the entries in a directory.
-///
-/// The order in which this iterator returns entries can vary
-/// and shouldn't be relied upon
-#[derive(Debug)]
-pub struct ReadDir<'a, S>(ReadDirInt<'a, S>)
-where
-    S: Read + Seek;
-
-impl<'a, S> From<ReadDirInt<'a, S>> for ReadDir<'a, S>
-where
-    S: Read + Seek,
-{
-    fn from(value: ReadDirInt<'a, S>) -> Self {
-        Self(value)
-    }
-}
-impl<S> Iterator for ReadDir<'_, S>
-where
-    S: Read + Seek,
-{
-    type Item = Result<DirEntry, S::Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match self.0.next() {
-                Some(res) => match res {
-                    Ok(value) => {
-                        if self.0.fs.filter.filter(&value)
-                            // we shouldn't expose the special entries to the user
-                            && ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
-                                .contains(&value.name.as_str())
-                        {
-                            return Some(Ok(value.into_dir_entry(&self.0.fs.dir_info.path)));
-                        } else {
-                            continue;
-                        }
-                    }
-                    Err(err) => return Some(Err(err)),
-                },
-                None => return None,
-            }
         }
     }
 }
@@ -875,13 +331,13 @@ impl From<&BootRecord> for FSProperties {
 /// Filter (or not) things like hidden files/directories
 /// for FileSystem operations
 #[derive(Debug, Clone)]
-struct FileFilter {
+pub(crate) struct FileFilter {
     show_hidden: bool,
     show_systen: bool,
 }
 
 impl FileFilter {
-    fn filter(&self, item: &RawProperties) -> bool {
+    pub(crate) fn filter(&self, item: &RawProperties) -> bool {
         let is_hidden = item.attributes.contains(RawAttributes::HIDDEN);
         let is_system = item.attributes.contains(RawAttributes::SYSTEM);
         let should_filter = !self.show_hidden && is_hidden || !self.show_systen && is_system;
@@ -917,7 +373,7 @@ where
     pub(crate) sector_buffer: SectorBuffer,
     fsinfo_modified: bool,
 
-    dir_info: DirInfo,
+    pub(crate) dir_info: DirInfo,
 
     sync_f: Option<SyncSectorBufferFn<S>>,
     unmount_f: Option<UnmountFn<S>>,
@@ -932,7 +388,7 @@ where
     // that if we want to figure that out, we should start from this cluster
     first_free_cluster: u32,
 
-    filter: FileFilter,
+    pub(crate) filter: FileFilter,
 }
 
 /// Getter functions
