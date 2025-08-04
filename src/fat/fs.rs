@@ -1426,8 +1426,6 @@ where
     }
 
     pub(crate) fn sync_sector_buffer(&mut self) -> Result<(), S::Error> {
-        self._raise_io_rw_result()?;
-
         // If this is called, we assume the sector buffer has been modified
         if let Some(fat_sector_props) = FATSectorProps::new(self.sector_buffer.stored_sector, self)
         {
@@ -1478,19 +1476,6 @@ where
         Ok(())
     }
 
-    /// Returns an `Err` of `Unexpected [`IOErrorKind`]
-    /// if the device medium is read-only
-    fn _raise_io_rw_result(&mut self) -> Result<(), S::Error> {
-        if !utils::io::storage_medium_is_rw(&mut self.storage)? {
-            return Err(S::Error::new(
-                <S::Error as IOError>::Kind::new_unsupported(),
-                "the storage medium is read-only",
-            ));
-        }
-
-        Ok(())
-    }
-
     /// Like [`Self::get_rw_file`], but will ignore the read-only flag (if it is present)
     ///
     /// This is a private function for obvious reasons
@@ -1498,8 +1483,6 @@ where
         &mut self,
         path: P,
     ) -> FSResult<RWFile<'_, S>, S::Error> {
-        self._raise_io_rw_result()?;
-
         let ro_file = self.get_ro_file(path)?;
 
         Ok(RWFile {
