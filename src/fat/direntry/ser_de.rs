@@ -18,14 +18,17 @@ use bincode::{Decode, Encode};
 
 const LAST_LFN_ENTRY_MASK: u8 = 0x40;
 pub(crate) const LFN_CHAR_LIMIT: usize = 255; // not including the trailing null
-pub(crate) const CHARS_PER_LFN_ENTRY: usize = 13;
+const LFN_FIRST_CHARS: usize = 5;
+const LFN_MID_CHARS: usize = 6;
+const LFN_LAST_CHARS: usize = 2;
+pub(crate) const CHARS_PER_LFN_ENTRY: usize = LFN_FIRST_CHARS + LFN_MID_CHARS + LFN_LAST_CHARS;
 const LONG_ENTRY_TYPE: u8 = 0;
 
 #[derive(Debug, Encode, Decode)]
 pub(crate) struct LFNEntry {
     /// masked with 0x40 if this is the last entry
     pub(crate) order: u8,
-    pub(crate) first_chars: [u8; 10],
+    pub(crate) first_chars: [u8; LFN_FIRST_CHARS * 2],
     /// Always equals 0x0F
     pub(crate) _lfn_attribute: u8,
     /// Both OSDev and the FAT specification say this is always 0
@@ -35,20 +38,21 @@ pub(crate) struct LFNEntry {
     /// A [`LFNEntry`] will be marked as corrupt even if it isn't, if the Sfn is modifed by a legacy system,
     /// since the new Sfn's signature and the one on this field won't (probably) match
     pub(crate) checksum: u8,
-    pub(crate) mid_chars: [u8; 12],
+    pub(crate) mid_chars: [u8; LFN_MID_CHARS * 2],
     pub(crate) _zeroed: [u8; 2],
-    pub(crate) last_chars: [u8; 4],
+    pub(crate) last_chars: [u8; LFN_LAST_CHARS * 2],
 }
 
 impl LFNEntry {
-    pub(crate) fn get_byte_slice(&self) -> [u16; 13] {
-        let mut slice = [0_u8; 13 * mem::size_of::<u16>()];
+    pub(crate) fn get_byte_slice(&self) -> [u16; CHARS_PER_LFN_ENTRY] {
+        let mut slice = [0_u8; CHARS_PER_LFN_ENTRY * mem::size_of::<u16>()];
 
-        slice[..10].copy_from_slice(&self.first_chars);
-        slice[10..22].copy_from_slice(&self.mid_chars);
-        slice[22..].copy_from_slice(&self.last_chars);
+        slice[..LFN_FIRST_CHARS * 2].copy_from_slice(&self.first_chars);
+        slice[LFN_FIRST_CHARS * 2..(LFN_FIRST_CHARS + LFN_MID_CHARS) * 2]
+            .copy_from_slice(&self.mid_chars);
+        slice[(LFN_FIRST_CHARS + LFN_MID_CHARS) * 2..].copy_from_slice(&self.last_chars);
 
-        let mut out_slice = [0_u16; 13];
+        let mut out_slice = [0_u16; CHARS_PER_LFN_ENTRY];
         for (i, chunk) in slice.chunks(mem::size_of::<u16>()).enumerate() {
             out_slice[i] = u16::from_le_bytes(chunk.try_into().unwrap());
         }
