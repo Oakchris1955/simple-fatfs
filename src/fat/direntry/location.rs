@@ -11,47 +11,49 @@ pub(crate) enum EntryLocationUnit {
     /// Sector offset from the start of the root directory region (FAT12/16)
     RootDirSector(u16),
     /// Cluster offset from the start of the data region
-    DataCluster(u32),
+    DataCluster(ClusterIndex),
 }
 
 impl EntryLocationUnit {
     // I will leave this here in case it is needed in the future
     #[allow(unused)]
-    pub(crate) fn from_partition_sector<S>(sector: u32, fs: &mut FileSystem<S>) -> Self
+    pub(crate) fn from_partition_sector<S>(sector: SectorIndex, fs: &mut FileSystem<S>) -> Self
     where
         S: Read + Seek,
     {
         if sector < fs.first_data_sector() {
             EntryLocationUnit::RootDirSector(
-                (sector - fs.props.first_root_dir_sector as u32) as u16,
+                u16::try_from(sector - fs.props.first_root_dir_sector)
+                    .expect("this should be a valid root dir sector"),
             )
         } else {
             EntryLocationUnit::DataCluster(fs.partition_sector_to_data_cluster(sector))
         }
     }
 
-    pub(crate) fn get_max_offset<S>(&self, fs: &mut FileSystem<S>) -> u64
+    pub(crate) fn get_max_offset<S>(&self, fs: &mut FileSystem<S>) -> u16
     where
         S: Read + Seek,
     {
         let unit_size = match self {
             EntryLocationUnit::DataCluster(_) => fs.props.cluster_size,
-            EntryLocationUnit::RootDirSector(_) => fs.props.sector_size as u64,
+            EntryLocationUnit::RootDirSector(_) => fs.props.sector_size.into(),
         };
 
-        unit_size / DIRENTRY_SIZE as u64
+        u16::try_from(unit_size / u32::try_from(DIRENTRY_SIZE).expect("32 can fit to u32"))
+            .expect("a cluster can have a max of ~16k entries")
     }
 
-    pub(crate) fn get_entry_sector<S>(&self, fs: &mut FileSystem<S>) -> u64
+    pub(crate) fn get_entry_sector<S>(&self, fs: &mut FileSystem<S>) -> SectorIndex
     where
         S: Read + Seek,
     {
         match self {
             EntryLocationUnit::RootDirSector(root_dir_sector) => {
-                (root_dir_sector + fs.props.first_root_dir_sector).into()
+                SectorCount::from(*root_dir_sector) + fs.props.first_root_dir_sector
             }
             EntryLocationUnit::DataCluster(data_cluster) => {
-                fs.data_cluster_to_partition_sector(*data_cluster).into()
+                fs.data_cluster_to_partition_sector(*data_cluster)
             }
         }
     }
@@ -71,8 +73,9 @@ impl EntryLocationUnit {
                     "in which case we won't even be reading root directory sectors, since it doesn't exist"))
                     }
 
-                    if *sector
-                        >= fs.props.first_root_dir_sector + boot_record_fat.root_dir_sectors()
+                    if SectorIndex::from(*sector)
+                        >= fs.props.first_root_dir_sector
+                            + SectorCount::from(boot_record_fat.root_dir_sectors())
                     {
                         Ok(None)
                     } else {
@@ -102,21 +105,15 @@ pub(crate) struct EntryLocation {
     /// the location of the first corresponding entry's data unit
     pub(crate) unit: EntryLocationUnit,
     /// the first entry's index/offset from the start of the data unit
-    pub(crate) index: u32,
+    pub(crate) index: EntryIndex,
 }
 
 impl EntryLocation {
-    pub(crate) fn from_partition_sector<S>(sector: u32, fs: &mut FileSystem<S>) -> Self
+    pub(crate) fn from_partition_sector<S>(sector: SectorIndex, fs: &mut FileSystem<S>) -> Self
     where
         S: Read + Seek,
     {
-        let unit = if sector < fs.first_data_sector() {
-            EntryLocationUnit::RootDirSector(
-                (sector - fs.props.first_root_dir_sector as u32) as u16,
-            )
-        } else {
-            EntryLocationUnit::DataCluster(fs.partition_sector_to_data_cluster(sector))
-        };
+        let unit = EntryLocationUnit::from_partition_sector(sector, fs);
 
         Self { unit, index: 0 }
     }
@@ -137,11 +134,13 @@ impl EntryLocation {
     }
 
     #[inline]
-    pub(crate) fn get_entry_sector<S>(&self, fs: &mut FileSystem<S>) -> u64
+    pub(crate) fn get_entry_sector<S>(&self, fs: &mut FileSystem<S>) -> SectorIndex
     where
         S: Read + Seek,
     {
-        let sector_offset = self.index as u64 * DIRENTRY_SIZE as u64 / fs.sector_size() as u64;
+        let sector_offset: SectorCount = SectorCount::from(self.index)
+            * SectorCount::try_from(DIRENTRY_SIZE).expect("32 can fit into a u32")
+            / SectorCount::from(fs.sector_size());
 
         self.unit.get_entry_sector(fs) + sector_offset
     }
@@ -151,7 +150,7 @@ impl EntryLocation {
     where
         S: Read + Seek,
     {
-        (self.index as usize * DIRENTRY_SIZE) % fs.props.sector_size as usize
+        (usize::from(self.index) * DIRENTRY_SIZE) % usize::from(fs.props.sector_size)
     }
 
     pub(crate) fn free_entry<S>(&self, fs: &mut FileSystem<S>) -> Result<(), S::Error>
@@ -178,7 +177,7 @@ impl EntryLocation {
         self.index += 1;
 
         // we haven't advanced to a new unit, we return immediately
-        if u64::from(self.index) < self.unit.get_max_offset(fs) {
+        if self.index < self.unit.get_max_offset(fs) {
             return Ok(Some(self));
         }
 
@@ -195,7 +194,7 @@ impl EntryLocation {
     pub(crate) fn nth_entry<S>(
         self,
         fs: &mut FileSystem<S>,
-        n: num::NonZero<u32>,
+        n: num::NonZero<EntryIndex>,
     ) -> Result<Option<EntryLocation>, S::Error>
     where
         S: Read + Seek,
@@ -219,5 +218,5 @@ pub(crate) struct DirEntryChain {
     /// the location of the first corresponding entry
     pub(crate) location: EntryLocation,
     /// how many (contiguous) entries this entry chain has
-    pub(crate) len: u32,
+    pub(crate) len: u16,
 }

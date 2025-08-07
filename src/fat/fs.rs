@@ -55,20 +55,20 @@ impl FATType {
 
     #[inline]
     /// How many bytes this [`FATType`] spans across
-    fn entry_size(&self) -> u32 {
-        self.bits_per_entry().next_power_of_two() as u32 / 8
+    fn entry_size(&self) -> u8 {
+        self.bits_per_entry().next_power_of_two() / 8
     }
 }
 
 // the first 2 entries are reserved
-const RESERVED_FAT_ENTRIES: u32 = 2;
+const RESERVED_FAT_ENTRIES: FATEntryCount = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum FATEntry {
     /// This cluster is free
     Free,
     /// This cluster is allocated and the next cluster is the contained value
-    Allocated(u32),
+    Allocated(ClusterIndex),
     /// This cluster is reserved
     Reserved,
     /// This is a bad (defective) cluster
@@ -77,20 +77,20 @@ pub(crate) enum FATEntry {
     Eof,
 }
 
-impl From<FATEntry> for u32 {
+impl From<FATEntry> for FATEntryValue {
     fn from(value: FATEntry) -> Self {
         Self::from(&value)
     }
 }
 
-impl From<&FATEntry> for u32 {
+impl From<&FATEntry> for FATEntryValue {
     fn from(value: &FATEntry) -> Self {
         match value {
-            FATEntry::Free => u32::MIN,
+            FATEntry::Free => FATEntryValue::MIN,
             FATEntry::Allocated(cluster) => *cluster,
             FATEntry::Reserved => 0xFFFFFF6,
             FATEntry::Bad => 0xFFFFFF7,
-            FATEntry::Eof => u32::MAX,
+            FATEntry::Eof => FATEntryValue::MAX,
         }
     }
 }
@@ -98,20 +98,25 @@ impl From<&FATEntry> for u32 {
 /// Properties about the position of a [`FATEntry`] inside the FAT region
 struct FATEntryProps {
     /// Each `n`th element of the vector points at the corrensponding sector at the (first) active FAT table
-    fat_sector: u32,
+    fat_sector: SectorIndex,
     sector_offset: usize,
 }
 
 impl FATEntryProps {
     /// Get the [`FATEntryProps`] of the `n`-th [`FATEntry`] of a [`FileSystem`]
-    pub fn new<S>(n: u32, fs: &FileSystem<S>) -> Self
+    pub fn new<S>(n: FATEntryIndex, fs: &FileSystem<S>) -> Self
     where
         S: Read + Seek,
     {
-        let fat_byte_offset: u32 = n * fs.fat_type.bits_per_entry() as u32 / 8;
-        let fat_sector =
-            u32::from(fs.props.first_fat_sector) + fat_byte_offset / fs.props.sector_size;
-        let sector_offset: usize = (fat_byte_offset % fs.props.sector_size) as usize;
+        let fat_byte_offset: u64 = u64::from(n) * u64::from(fs.fat_type.bits_per_entry()) / 8;
+        let fat_sector = SectorIndex::try_from(
+            u64::from(fs.props.first_fat_sector)
+                + fat_byte_offset / u64::from(fs.props.sector_size),
+        )
+        .expect("this should fit into a u32");
+        let sector_offset: usize =
+            usize::try_from(fat_byte_offset % u64::from(fs.props.sector_size))
+                .expect("this should fit into a usize");
 
         FATEntryProps {
             fat_sector,
@@ -120,18 +125,21 @@ impl FATEntryProps {
     }
 }
 
+/// the BPB_NumFATs field is 1 byte wide (u8)
+pub(crate) type FATOffset = u8;
+
 /// Properties about the position of a sector within the FAT
 struct FATSectorProps {
     /// the sector belongs to this FAT copy
     #[allow(unused)]
-    fat_offset: u8,
+    fat_offset: FATOffset,
     /// the sector is that many away from the start of the FAT copy
-    sector_offset: u32,
+    sector_offset: SectorIndex,
 }
 
 impl FATSectorProps {
     /// Returns [`None`] if this sector doesn't belong to a FAT table
-    pub fn new<S>(sector: u64, fs: &FileSystem<S>) -> Option<Self>
+    pub fn new<S>(sector: SectorIndex, fs: &FileSystem<S>) -> Option<Self>
     where
         S: Read + Seek,
     {
@@ -139,10 +147,11 @@ impl FATSectorProps {
             return None;
         }
 
-        let sector_offset_from_first_fat: u64 = sector - u64::from(fs.props.first_fat_sector);
-        let fat_offset = (sector_offset_from_first_fat / u64::from(fs.props.fat_sector_size)) as u8;
-        let sector_offset =
-            (sector_offset_from_first_fat % u64::from(fs.props.fat_sector_size)) as u32;
+        let sector_offset_from_first_fat = sector - SectorIndex::from(fs.props.first_fat_sector);
+        let fat_offset =
+            FATOffset::try_from(sector_offset_from_first_fat / fs.props.fat_sector_size)
+                .expect("this should fit in a u89");
+        let sector_offset = sector_offset_from_first_fat % fs.props.fat_sector_size;
 
         Some(FATSectorProps {
             fat_offset,
@@ -151,7 +160,7 @@ impl FATSectorProps {
     }
 
     #[allow(non_snake_case)]
-    pub fn get_corresponding_FAT_sectors<S>(&self, fs: &FileSystem<S>) -> Box<[u64]>
+    pub fn get_corresponding_FAT_sectors<S>(&self, fs: &FileSystem<S>) -> Box<[SectorIndex]>
     where
         S: Read + Seek,
     {
@@ -159,10 +168,9 @@ impl FATSectorProps {
 
         for i in 0..fs.props.fat_table_count {
             vec.push(
-                (u32::from(fs.props.first_fat_sector)
-                    + u32::from(i) * fs.props.fat_sector_size
-                    + self.sector_offset)
-                    .into(),
+                SectorIndex::from(fs.props.first_fat_sector)
+                    + SectorCount::from(i) * fs.props.fat_sector_size
+                    + self.sector_offset,
             )
         }
 
@@ -203,35 +211,35 @@ impl DirInfo {
 impl<S> iter::FusedIterator for ReadDir<'_, S> where S: Read + Seek {}
 
 pub(crate) trait OffsetConversions {
-    fn sector_size(&self) -> u32;
-    fn cluster_size(&self) -> u64;
-    fn first_data_sector(&self) -> u32;
+    fn sector_size(&self) -> u16;
+    fn cluster_size(&self) -> u32;
+    fn first_data_sector(&self) -> SectorIndex;
 
     #[inline]
-    fn cluster_to_sector(&self, cluster: u64) -> u32 {
-        (cluster * self.cluster_size() / self.sector_size() as u64)
+    fn cluster_to_sector(&self, cluster: ClusterIndex) -> SectorIndex {
+        cluster * ClusterIndex::from(self.sectors_per_cluster())
+    }
+
+    #[inline]
+    fn sectors_per_cluster(&self) -> u8 {
+        (self.cluster_size() / u32::from(self.sector_size()))
             .try_into()
-            .unwrap()
+            .expect("the SecPerClus field is 1 byte long (u8)")
     }
 
     #[inline]
-    fn sectors_per_cluster(&self) -> u64 {
-        self.cluster_size() / self.sector_size() as u64
+    fn sector_to_partition_offset(&self, sector: SectorIndex) -> u64 {
+        u64::from(sector) * u64::from(self.sector_size())
     }
 
     #[inline]
-    fn sector_to_partition_offset(&self, sector: u32) -> u32 {
-        sector * self.sector_size()
+    fn data_cluster_to_partition_sector(&self, cluster: ClusterIndex) -> SectorIndex {
+        self.cluster_to_sector(cluster - RESERVED_FAT_ENTRIES) + self.first_data_sector()
     }
 
     #[inline]
-    fn data_cluster_to_partition_sector(&self, cluster: u32) -> u32 {
-        self.cluster_to_sector((cluster - RESERVED_FAT_ENTRIES).into()) + self.first_data_sector()
-    }
-
-    #[inline]
-    fn partition_sector_to_data_cluster(&self, sector: u32) -> u32 {
-        (sector - self.first_data_sector()) / self.sectors_per_cluster() as u32
+    fn partition_sector_to_data_cluster(&self, sector: SectorIndex) -> ClusterIndex {
+        (sector - self.first_data_sector()) / ClusterIndex::from(self.sectors_per_cluster())
             + RESERVED_FAT_ENTRIES
     }
 }
@@ -241,49 +249,59 @@ where
     S: Read + Seek,
 {
     #[inline]
-    fn sector_size(&self) -> u32 {
+    fn sector_size(&self) -> u16 {
         self.props.sector_size
     }
 
     #[inline]
-    fn cluster_size(&self) -> u64 {
+    fn cluster_size(&self) -> u32 {
         self.props.cluster_size
     }
 
     #[inline]
-    fn first_data_sector(&self) -> u32 {
+    fn first_data_sector(&self) -> SectorIndex {
         self.props.first_data_sector
+    }
+
+    #[inline]
+    fn sectors_per_cluster(&self) -> u8 {
+        self.props.sec_per_clus
     }
 }
 
 /// Some generic properties common across all FAT versions, like a sector's size, are cached here
 #[derive(Debug)]
 pub(crate) struct FSProperties {
-    pub(crate) sector_size: u32,
-    pub(crate) cluster_size: u64,
-    pub(crate) total_sectors: u32,
-    pub(crate) total_clusters: u32,
+    pub(crate) sector_size: u16,
+    pub(crate) cluster_size: u32,
+    pub(crate) sec_per_clus: u8,
+    pub(crate) total_sectors: SectorCount,
+    pub(crate) total_clusters: ClusterCount,
     /// sector offset of the FAT
     pub(crate) fat_table_count: u8,
     pub(crate) fat_sector_size: u32,
     pub(crate) first_fat_sector: u16,
-    pub(crate) first_root_dir_sector: u16,
-    pub(crate) first_data_sector: u32,
+    pub(crate) first_root_dir_sector: SectorIndex,
+    pub(crate) first_data_sector: SectorIndex,
 }
 
 impl From<&BootRecord> for FSProperties {
     fn from(value: &BootRecord) -> Self {
         let sector_size = match value {
-            BootRecord::Fat(boot_record_fat) => boot_record_fat.bpb.bytes_per_sector.into(),
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.bpb.bytes_per_sector,
             BootRecord::ExFAT(boot_record_exfat) => 1 << boot_record_exfat.sector_shift,
         };
         let cluster_size = match value {
             BootRecord::Fat(boot_record_fat) => {
-                (boot_record_fat.bpb.sectors_per_cluster as u32 * sector_size).into()
+                u32::from(boot_record_fat.bpb.sectors_per_cluster) * u32::from(sector_size)
             }
             BootRecord::ExFAT(boot_record_exfat) => {
                 1 << (boot_record_exfat.sector_shift + boot_record_exfat.cluster_shift)
             }
+        };
+        let sec_per_clus = match value {
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.bpb.sectors_per_cluster,
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
         let total_sectors = match value {
             BootRecord::Fat(boot_record_fat) => boot_record_fat.total_sectors(),
@@ -310,13 +328,14 @@ impl From<&BootRecord> for FSProperties {
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
         let first_data_sector = match value {
-            BootRecord::Fat(boot_record_fat) => boot_record_fat.first_data_sector().into(),
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.first_data_sector(),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
         };
 
         FSProperties {
             sector_size,
             cluster_size,
+            sec_per_clus,
             fat_table_count,
             fat_sector_size,
             first_fat_sector,
@@ -386,7 +405,7 @@ where
     pub(crate) props: FSProperties,
     // this doesn't mean that this is the first free cluster, it just means
     // that if we want to figure that out, we should start from this cluster
-    first_free_cluster: u32,
+    first_free_cluster: ClusterIndex,
 
     pub(crate) filter: FileFilter,
 }
@@ -471,12 +490,12 @@ where
             .map(|(v, _)| v)?;
 
             storage.seek(SeekFrom::Start(
-                ebr_fat32.fat_info as u64 * bpb.bytes_per_sector as u64,
+                u64::from(ebr_fat32.fat_info) * u64::from(bpb.bytes_per_sector),
             ))?;
             stored_sector = ebr_fat32.fat_info.into();
-            storage.read_exact(&mut buffer[..bpb.bytes_per_sector as usize])?;
+            storage.read_exact(&mut buffer[..usize::from(bpb.bytes_per_sector)])?;
             let fsinfo: FSInfoFAT32 = bincode::decode_from_slice(
-                &buffer[..bpb.bytes_per_sector as usize],
+                &buffer[..usize::from(bpb.bytes_per_sector)],
                 BINCODE_CONFIG,
             )
             .map(|(v, _)| v)?;
@@ -521,7 +540,7 @@ where
         let mut fs = Self {
             storage,
             sector_buffer: SectorBuffer::from((
-                &buffer[..props.sector_size as usize],
+                &buffer[..usize::from(props.sector_size)],
                 stored_sector,
             )),
             fsinfo_modified: false,
@@ -712,7 +731,7 @@ where
 
     /// Gets the next free cluster. Returns an IO [`Result`]
     /// If the [`Result`] returns [`Ok`] that contains a [`None`], the drive is full
-    pub(crate) fn next_free_cluster(&mut self) -> Result<Option<u32>, S::Error> {
+    pub(crate) fn next_free_cluster(&mut self) -> Result<Option<ClusterIndex>, S::Error> {
         let start_cluster = match self.boot_record {
             BootRecord::Fat(boot_record_fat) => {
                 let mut first_free_cluster = self.first_free_cluster;
@@ -721,7 +740,7 @@ where
                     // a value of u32::MAX denotes unawareness of the first free cluster
                     // we also do a bit of range checking
                     // TODO: if this is unknown, figure it out and write it to the FSInfo structure
-                    if fsinfo.first_free_cluster != u32::MAX
+                    if fsinfo.first_free_cluster != ClusterIndex::MAX
                         && fsinfo.first_free_cluster <= self.props.total_sectors
                     {
                         first_free_cluster =
@@ -760,7 +779,10 @@ where
     }
 
     /// Get the next cluster in a cluster chain, otherwise return [`None`]
-    pub(crate) fn get_next_cluster(&mut self, cluster: u32) -> Result<Option<u32>, S::Error> {
+    pub(crate) fn get_next_cluster(
+        &mut self,
+        cluster: ClusterIndex,
+    ) -> Result<Option<ClusterIndex>, S::Error> {
         Ok(match self.read_nth_FAT_entry(cluster)? {
             FATEntry::Allocated(next_cluster) => Some(next_cluster),
             // when a `ROFile` is created, `cluster_chain_is_healthy` is called, if it fails, that ROFile is dropped
@@ -790,13 +812,19 @@ where
             let mut tables: Vec<Vec<u8>> = Vec::new();
 
             for i in 0..self.props.fat_table_count {
-                let fat_start =
-                    self.sector_to_partition_offset(self.boot_record.nth_FAT_table_sector(i));
+                let fat_start = u32::try_from(
+                    self.sector_to_partition_offset(self.boot_record.nth_FAT_table_sector(i)),
+                )
+                .expect("there's no way the FAT is more that 4GBs away from the start of the storage medium");
                 let current_offset = fat_start + nth_iteration * MAX_PROBE_SIZE;
                 let bytes_left = fat_byte_size - nth_iteration * MAX_PROBE_SIZE;
 
                 self.storage.seek(SeekFrom::Start(current_offset.into()))?;
-                let mut buf = vec![0_u8; cmp::min(MAX_PROBE_SIZE, bytes_left) as usize];
+                let mut buf = vec![
+                    0_u8;
+                    usize::try_from(cmp::min(MAX_PROBE_SIZE, bytes_left))
+                        .unwrap_or(usize::MAX)
+                ];
                 self.storage.read_exact(buf.as_mut_slice())?;
                 tables.push(buf);
             }
@@ -811,10 +839,10 @@ where
     }
 
     #[allow(non_snake_case)]
-    pub(crate) fn sector_belongs_to_FAT(&self, sector: u64) -> bool {
+    pub(crate) fn sector_belongs_to_FAT(&self, sector: SectorIndex) -> bool {
         match self.boot_record {
             BootRecord::Fat(boot_record_fat) => (boot_record_fat.first_fat_sector().into()
-                ..boot_record_fat.first_root_dir_sector().into())
+                ..boot_record_fat.first_root_dir_sector())
                 .contains(&sector),
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
         }
@@ -823,9 +851,9 @@ where
     /// Read the nth sector from the partition's beginning and store it in [`self.sector_buffer`](Self::sector_buffer)
     ///
     /// This function also returns an immutable reference to [`self.sector_buffer`](Self::sector_buffer)
-    pub(crate) fn load_nth_sector(&mut self, n: u64) -> Result<&[u8], S::Error> {
+    pub(crate) fn load_nth_sector(&mut self, n: SectorIndex) -> Result<&[u8], S::Error> {
         // FIXME: don't rely just on the filesystem for the device storage size
-        if n >= self.props.total_sectors as u64 {
+        if n >= self.props.total_sectors {
             return Err(IOError::new(
                 <S::Error as IOError>::Kind::new_unexpected_eof(),
                 "seeked past end of storage device",
@@ -844,9 +872,8 @@ where
                 // to sync it again if there have been no changes
                 self.sync_f = None;
             }
-            self.storage.seek(SeekFrom::Start(
-                self.sector_to_partition_offset(n as u32).into(),
-            ))?;
+            self.storage
+                .seek(SeekFrom::Start(self.sector_to_partition_offset(n)))?;
             self.storage.read_exact(&mut self.sector_buffer)?;
             self.storage
                 .seek(SeekFrom::Current(-i64::from(self.props.sector_size)))?;
@@ -858,17 +885,17 @@ where
     }
 
     #[allow(non_snake_case)]
-    pub(crate) fn read_nth_FAT_entry(&mut self, n: u32) -> Result<FATEntry, S::Error> {
+    pub(crate) fn read_nth_FAT_entry(&mut self, n: FATEntryIndex) -> Result<FATEntry, S::Error> {
         // the size of an entry rounded up to bytes
         let entry_size = self.fat_type.entry_size();
         let entry_props = FATEntryProps::new(n, self);
 
-        self.load_nth_sector(entry_props.fat_sector.into())?;
+        self.load_nth_sector(entry_props.fat_sector)?;
 
         let mut value_bytes = [0_u8; 4];
         let bytes_to_read: usize = cmp::min(
-            entry_props.sector_offset + entry_size as usize,
-            self.sector_size() as usize,
+            entry_props.sector_offset + usize::from(entry_size),
+            usize::from(self.sector_size()),
         ) - entry_props.sector_offset;
         value_bytes[..bytes_to_read].copy_from_slice(
             &self.sector_buffer
@@ -876,14 +903,14 @@ where
         ); // this shouldn't panic
 
         // in FAT12, FAT entries may be split between two different sectors
-        if self.fat_type == FATType::FAT12 && (bytes_to_read as u32) < entry_size {
-            self.load_nth_sector((entry_props.fat_sector + 1).into())?;
+        if self.fat_type == FATType::FAT12 && bytes_to_read < usize::from(entry_size) {
+            self.load_nth_sector(entry_props.fat_sector + 1)?;
 
-            value_bytes[bytes_to_read..entry_size as usize]
-                .copy_from_slice(&self.sector_buffer[..(entry_size as usize - bytes_to_read)]);
+            value_bytes[bytes_to_read..usize::from(entry_size)]
+                .copy_from_slice(&self.sector_buffer[..(usize::from(entry_size) - bytes_to_read)]);
         };
 
-        let mut value = u32::from_le_bytes(value_bytes);
+        let mut value = FATEntryValue::from_le_bytes(value_bytes);
         match self.fat_type {
             // FAT12 entries are split between different bytes
             FATType::FAT12 => {
@@ -956,14 +983,18 @@ where
     S: Read + Write + Seek,
 {
     #[allow(non_snake_case)]
-    pub(crate) fn write_nth_FAT_entry(&mut self, n: u32, entry: FATEntry) -> Result<(), S::Error> {
+    pub(crate) fn write_nth_FAT_entry(
+        &mut self,
+        n: FATEntryIndex,
+        entry: FATEntry,
+    ) -> Result<(), S::Error> {
         // the size of an entry rounded up to bytes
         let entry_size = self.fat_type.entry_size();
         let entry_props = FATEntryProps::new(n, self);
 
         // the previous solution would overflow, here's a correct implementation
         let mask = utils::bits::setbits_u32(self.fat_type.bits_per_entry());
-        let mut value: u32 = u32::from(entry.clone()) & mask;
+        let mut value: FATEntryValue = FATEntryValue::from(entry.clone()) & mask;
 
         if self.fat_type == FATType::FAT32 {
             // in FAT32, the high 4 bits are unused
@@ -978,7 +1009,7 @@ where
                     value <<= 4;
                 }
 
-                self.load_nth_sector(entry_props.fat_sector.into())?;
+                self.load_nth_sector(entry_props.fat_sector)?;
 
                 let value_bytes = value.to_le_bytes();
 
@@ -996,18 +1027,18 @@ where
                 self.set_modified();
 
                 let bytes_left_on_sector: usize = cmp::min(
-                    entry_size as usize,
-                    self.sector_size() as usize - entry_props.sector_offset,
+                    usize::from(entry_size),
+                    usize::from(self.sector_size()) - entry_props.sector_offset,
                 );
 
-                if bytes_left_on_sector < entry_size as usize {
+                if bytes_left_on_sector < entry_size.into() {
                     // looks like this FAT12 entry spans multiple sectors, we must also update the other one
-                    self.load_nth_sector((entry_props.fat_sector + 1).into())?;
+                    self.load_nth_sector(entry_props.fat_sector + 1)?;
                 }
 
                 let mut second_byte = value_bytes[1];
                 let second_byte_index =
-                    (entry_props.sector_offset + 1) % self.sector_size() as usize;
+                    (entry_props.sector_offset + 1) % usize::from(self.sector_size());
                 if !should_shift {
                     let mut old_byte = self.sector_buffer[second_byte_index];
                     // ignore the low 4 bytes of the old entry
@@ -1020,13 +1051,13 @@ where
                 self.set_modified();
             }
             FATType::FAT16 | FATType::FAT32 => {
-                self.load_nth_sector(entry_props.fat_sector.into())?;
+                self.load_nth_sector(entry_props.fat_sector)?;
 
                 let value_bytes = value.to_le_bytes();
 
-                self.sector_buffer
-                    [entry_props.sector_offset..entry_props.sector_offset + entry_size as usize]
-                    .copy_from_slice(&value_bytes[..entry_size as usize]); // this shouldn't panic
+                self.sector_buffer[entry_props.sector_offset
+                    ..entry_props.sector_offset + usize::from(entry_size)]
+                    .copy_from_slice(&value_bytes[..usize::from(entry_size)]); // this shouldn't panic
                 self.set_modified();
             }
             FATType::ExFAT => todo!("ExFAT not yet implemented"),
@@ -1059,17 +1090,17 @@ where
     /// in the current directory entry chain
     ///
     /// This may or may not allocate new clusters.
-    pub(crate) fn allocate_nth_entries(&mut self, n: u32) -> FSResult<EntryLocation, S::Error> {
+    pub(crate) fn allocate_nth_entries(
+        &mut self,
+        n: EntryCount,
+    ) -> FSResult<EntryLocation, S::Error> {
         // navigate to the cached directory, if we aren't already there
         self._go_to_cached_dir()?;
 
         // we may not even need to allocate new entries.
         // let's check if there is a chain of unused entries big enough to be used
         let mut first_entry = self.dir_info.chain_end.clone().unwrap_or_else(|| {
-            EntryLocation::from_partition_sector(
-                self.sector_buffer.stored_sector.try_into().unwrap(),
-                self,
-            )
+            EntryLocation::from_partition_sector(self.sector_buffer.stored_sector, self)
         });
 
         let mut last_entry = first_entry.clone();
@@ -1094,7 +1125,7 @@ where
             // we also break if we have reached the end of the cluster chain
             // or else the MalformedEntryChain below will kick in
             if last_entry.unit.get_next_unit(self)?.is_none()
-                && last_entry.index + 1 >= last_entry.unit.get_max_offset(self) as u32
+                && last_entry.index + 1 >= last_entry.unit.get_max_offset(self)
             {
                 break;
             }
@@ -1117,18 +1148,24 @@ where
         // of the already-allocated entries
         match last_entry.unit {
             EntryLocationUnit::RootDirSector(_) => {
-                let remaining_sectors: u32 = match self.boot_record {
+                let remaining_sectors: SectorCount = match self.boot_record {
                     BootRecord::Fat(boot_record_fat) => {
-                        boot_record_fat.first_root_dir_sector() as u32
-                            + boot_record_fat.root_dir_sectors() as u32
-                            - last_entry.unit.get_entry_sector(self) as u32
+                        boot_record_fat.first_root_dir_sector()
+                            + SectorCount::from(boot_record_fat.root_dir_sectors())
+                            - last_entry.unit.get_entry_sector(self)
                     }
                     BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
                 };
 
-                let entries_per_sector = self.props.sector_size / DIRENTRY_SIZE as u32;
-                let remaining_entries = remaining_sectors * entries_per_sector
-                    + (entries_per_sector - last_entry.index + 1);
+                let entries_per_sector = self.props.sector_size
+                    / u16::try_from(DIRENTRY_SIZE).expect("32 can fit in a u16");
+                let remaining_entries = EntryCount::try_from(
+                    remaining_sectors * SectorCount::from(entries_per_sector)
+                        + (SectorCount::from(entries_per_sector)
+                            - SectorCount::from(last_entry.index)
+                            + 1),
+                )
+                .unwrap();
 
                 if remaining_entries < n - chain_len {
                     Err(FSError::RootDirectoryFull)
@@ -1138,8 +1175,11 @@ where
             }
             EntryLocationUnit::DataCluster(cluster) => {
                 // first, we check how many clusters need to be allocated (if any)
-                let entries_per_cluster: u32 =
-                    self.props.cluster_size as u32 / DIRENTRY_SIZE as u32;
+                let entries_per_cluster = u16::try_from(
+                    self.props.cluster_size
+                        / u32::try_from(DIRENTRY_SIZE).expect("32 can fit into u32"),
+                )
+                .expect("a cluster can have a max of ~16k entries");
 
                 let entries_left = n - chain_len;
                 let free_entries_on_current_cluster = entries_per_cluster - (last_entry.index + 1);
@@ -1150,7 +1190,8 @@ where
                         .div_ceil(entries_per_cluster);
 
                     let first_cluster = self.allocate_clusters(
-                        num::NonZero::new(clusters_to_allocate).expect("this should be at least 1"),
+                        num::NonZero::new(clusters_to_allocate.into())
+                            .expect("this should be at least 1"),
                         Some(cluster),
                     )?;
 
@@ -1161,13 +1202,15 @@ where
                     }
 
                     // before we return, we should zero those sectors according to the FAT spec
-                    for cluster in first_cluster..(first_cluster + clusters_to_allocate) {
-                        let first_sector = self.cluster_to_sector(cluster.into());
+                    for cluster in
+                        first_cluster..(first_cluster + ClusterCount::from(clusters_to_allocate))
+                    {
+                        let first_sector = self.cluster_to_sector(cluster);
 
-                        for sector in
-                            first_sector..(first_sector + self.sectors_per_cluster() as u32)
+                        for sector in first_sector
+                            ..(first_sector + SectorCount::from(self.sectors_per_cluster()))
                         {
-                            self.load_nth_sector(sector.into())?;
+                            self.load_nth_sector(sector)?;
                             self.sector_buffer.fill(0);
                             self.set_modified();
                         }
@@ -1222,7 +1265,7 @@ where
         // this composer will ALWAYS generate 2 entries
         let entries_iter = EntryComposer::from(entries);
 
-        self.load_nth_sector(self.data_cluster_to_partition_sector(dir_cluster).into())?;
+        self.load_nth_sector(self.data_cluster_to_partition_sector(dir_cluster))?;
 
         // we zero the current sector
         self.sector_buffer.fill(0);
@@ -1236,7 +1279,7 @@ where
 
         // we also zero everything else in the cluster
         for sector in (self.sector_buffer.stored_sector + 1)
-            ..(self.sector_buffer.stored_sector + self.sectors_per_cluster())
+            ..(self.sector_buffer.stored_sector + SectorCount::from(self.sectors_per_cluster()))
         {
             self.load_nth_sector(sector)?;
             self.sector_buffer.fill(0);
@@ -1349,9 +1392,9 @@ where
     /// that this cluster should point to the newly allocated cluster chain
     pub(crate) fn allocate_clusters(
         &mut self,
-        n: num::NonZero<u32>,
-        first_cluster: Option<u32>,
-    ) -> FSResult<u32, S::Error> {
+        n: num::NonZero<ClusterCount>,
+        first_cluster: Option<ClusterIndex>,
+    ) -> FSResult<ClusterIndex, S::Error> {
         let mut last_cluster_in_chain = first_cluster;
         let mut first_allocated_cluster = first_cluster;
 
@@ -1409,8 +1452,9 @@ where
         let current_offset = self.storage.stream_position()?;
 
         for sector in fat_sector_props.get_corresponding_FAT_sectors(self) {
-            self.storage
-                .seek(SeekFrom::Start(sector * u64::from(self.props.sector_size)))?;
+            self.storage.seek(SeekFrom::Start(u64::from(
+                sector * u32::from(self.props.sector_size),
+            )))?;
             self.storage.write_all(&self.sector_buffer)?;
         }
 

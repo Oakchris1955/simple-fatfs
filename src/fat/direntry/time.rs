@@ -45,7 +45,10 @@ impl From<Date> for DateAttribute {
         Self::new()
             .with_day(value.day())
             .with_month(value.month().into())
-            .with_year((value.year() - EPOCH.year()) as u8)
+            .with_year(
+                u8::try_from(value.year() - EPOCH.year())
+                    .expect("TODO: proper time handling for such a case"),
+            )
     }
 }
 
@@ -157,7 +160,8 @@ impl TryFrom<EntryCreationTime> for Option<PrimitiveDateTime> {
 impl From<PrimitiveDateTime> for EntryCreationTime {
     fn from(value: PrimitiveDateTime) -> Self {
         Self(Some(CreationTime {
-            hundredths_of_second: (value.second() % 2) * 100 + (value.millisecond() / 10) as u8,
+            hundredths_of_second: (value.second() % 2) * 100
+                + u8::try_from(value.millisecond() / 10).expect("this will be in the range 0..100"),
             time: value.time().into(),
             date: value.date().into(),
         }))

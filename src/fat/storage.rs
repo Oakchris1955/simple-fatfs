@@ -1,3 +1,5 @@
+use super::*;
+
 use core::ops::{Deref, DerefMut};
 
 #[cfg(not(feature = "std"))]
@@ -6,11 +8,11 @@ use alloc::boxed::Box;
 #[derive(Debug)]
 pub(crate) struct SectorBuffer {
     pub(crate) slice: Box<[u8]>,
-    pub(crate) stored_sector: u64,
+    pub(crate) stored_sector: SectorIndex,
 }
 
-impl From<(&[u8], u64)> for SectorBuffer {
-    fn from(value: (&[u8], u64)) -> Self {
+impl From<(&[u8], SectorIndex)> for SectorBuffer {
+    fn from(value: (&[u8], SectorIndex)) -> Self {
         Self {
             slice: Box::from(value.0),
             stored_sector: value.1,

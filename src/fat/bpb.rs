@@ -26,16 +26,17 @@ impl BootRecord {
     }
 
     #[allow(non_snake_case)]
-    pub(crate) fn nth_FAT_table_sector(&self, n: u8) -> u32 {
+    pub(crate) fn nth_FAT_table_sector(&self, n: u8) -> SectorIndex {
         match self {
             BootRecord::Fat(boot_record_fat) => {
-                boot_record_fat.first_fat_sector() as u32
-                    + n as u32 * boot_record_fat.fat_sector_size()
+                SectorIndex::from(boot_record_fat.first_fat_sector())
+                    + SectorIndex::from(n) * boot_record_fat.fat_sector_size()
             }
             BootRecord::ExFAT(boot_record_exfat) => {
                 // this should work, but ExFAT is not yet implemented, so...
                 todo!("ExFAT not yet implemented");
-                boot_record_exfat.fat_count as u32 + n as u32 * boot_record_exfat.fat_len
+                SectorIndex::from(boot_record_exfat.fat_count)
+                    + SectorIndex::from(n) * boot_record_exfat.fat_len
             }
         }
     }
@@ -70,11 +71,11 @@ impl BootRecordFAT {
 
     #[inline]
     /// Total sectors in volume (including VBR)s
-    pub(crate) fn total_sectors(&self) -> u32 {
+    pub(crate) fn total_sectors(&self) -> SectorCount {
         if self.bpb.total_sectors_16 == 0 {
             self.bpb.total_sectors_32
         } else {
-            self.bpb.total_sectors_16 as u32
+            self.bpb.total_sectors_16.into()
         }
     }
 
@@ -91,7 +92,8 @@ impl BootRecordFAT {
     /// The size of the root directory (unless we have FAT32, in which case the size will be 0)
     /// This calculation will round up
     pub(crate) fn root_dir_sectors(&self) -> u16 {
-        (self.bpb.root_entry_count * DIRENTRY_SIZE as u16).div_ceil(self.bpb.bytes_per_sector)
+        (self.bpb.root_entry_count * u16::try_from(DIRENTRY_SIZE).expect("32 can fit to u16"))
+            .div_ceil(self.bpb.bytes_per_sector)
     }
 
     #[inline]
@@ -102,26 +104,27 @@ impl BootRecordFAT {
 
     #[inline]
     /// The first sector of the root directory (returns the first data sector on FAT32)
-    pub(crate) fn first_root_dir_sector(&self) -> u16 {
-        self.first_fat_sector() + self.bpb.table_count as u16 * self.fat_sector_size() as u16
+    pub(crate) fn first_root_dir_sector(&self) -> SectorIndex {
+        SectorIndex::from(self.first_fat_sector())
+            + SectorIndex::from(self.bpb.table_count) * self.fat_sector_size()
     }
 
     #[inline]
     /// The first data sector (that is, the first sector in which directories and files may be stored)
-    pub(crate) fn first_data_sector(&self) -> u16 {
-        self.first_root_dir_sector() + self.root_dir_sectors()
+    pub(crate) fn first_data_sector(&self) -> SectorIndex {
+        self.first_root_dir_sector() + SectorIndex::from(self.root_dir_sectors())
     }
 
     #[inline]
     /// The total number of data sectors
-    pub(crate) fn total_data_sectors(&self) -> u32 {
-        self.total_sectors() - (self.first_data_sector() + 1) as u32
+    pub(crate) fn total_data_sectors(&self) -> SectorCount {
+        self.total_sectors() - SectorCount::from(self.first_data_sector()) + 1
     }
 
     #[inline]
     /// The total number of clusters
-    pub(crate) fn total_clusters(&self) -> u32 {
-        self.total_data_sectors() / self.bpb.sectors_per_cluster as u32
+    pub(crate) fn total_clusters(&self) -> ClusterCount {
+        self.total_data_sectors() / ClusterCount::from(self.bpb.sectors_per_cluster)
     }
 
     #[inline]

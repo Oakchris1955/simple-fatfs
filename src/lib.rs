@@ -69,6 +69,11 @@
 #![warn(unused_lifetimes)]
 // clippy attributes
 #![warn(clippy::derive_partial_eq_without_eq)]
+#![warn(clippy::cast_lossless)]
+#![warn(clippy::cast_possible_truncation)]
+#![warn(clippy::cast_possible_wrap)]
+#![warn(clippy::cast_precision_loss)]
+#![warn(clippy::cast_sign_loss)]
 #![warn(clippy::redundant_clone)]
 
 extern crate alloc;

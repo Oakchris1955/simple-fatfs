@@ -91,7 +91,7 @@ pub(crate) struct FATDirEntry {
     pub(crate) cluster_high: u16,
     pub(crate) modified: EntryModificationTime,
     pub(crate) cluster_low: u16,
-    pub(crate) file_size: u32,
+    pub(crate) file_size: FileSize,
 }
 
 /// A less-detailed version of [`RawProperties`]
@@ -103,8 +103,8 @@ pub(crate) struct MinProperties {
     pub(crate) created: Option<PrimitiveDateTime>,
     pub(crate) modified: PrimitiveDateTime,
     pub(crate) accessed: Option<Date>,
-    pub(crate) file_size: u32,
-    pub(crate) data_cluster: u32,
+    pub(crate) file_size: FileSize,
+    pub(crate) data_cluster: ClusterIndex,
 }
 
 impl From<RawProperties> for MinProperties {
@@ -144,8 +144,8 @@ pub(crate) struct RawProperties {
     pub(crate) created: Option<PrimitiveDateTime>,
     pub(crate) modified: PrimitiveDateTime,
     pub(crate) accessed: Option<Date>,
-    pub(crate) file_size: u32,
-    pub(crate) data_cluster: u32,
+    pub(crate) file_size: FileSize,
+    pub(crate) data_cluster: ClusterIndex,
 
     pub(crate) chain: DirEntryChain,
 }
@@ -206,6 +206,7 @@ impl From<MinProperties> for FATDirEntry {
             accessed: value.accessed.into(),
             cluster_high: (value.data_cluster >> (u32::BITS / 2)) as u16,
             modified: value.modified.into(),
+            #[allow(clippy::cast_possible_truncation)] // we are splitting a u32 here
             cluster_low: value.data_cluster as u16,
             file_size: value.file_size,
         }

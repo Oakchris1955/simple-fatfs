@@ -66,7 +66,7 @@ impl LFNEntry {
 ///
 /// This only takes into account the [`DirEntries`](DirEntry) needed,
 /// not the contents of the file
-pub(crate) fn calc_entries_needed<S>(file_name: S) -> u32
+pub(crate) fn calc_entries_needed<S>(file_name: S) -> EntryCount
 where
     S: ToString,
 {
@@ -82,7 +82,8 @@ where
     // let's not forget the first entry
     let calc_entries_needed = 1 + lfn_entries_needed;
 
-    calc_entries_needed as u32
+    EntryCount::try_from(calc_entries_needed)
+        .expect("an LFN can be up to 255 chars, this won't panic")
 }
 
 #[derive(Debug)]
@@ -114,7 +115,8 @@ impl LFNEntryGenerator {
             .collect();
 
         Self {
-            current_entry: chars.len() as u8,
+            current_entry: u8::try_from(chars.len())
+                .expect("we won't be stored more that 20 entries"),
             chars,
             checksum,
 
@@ -131,11 +133,13 @@ impl Iterator for LFNEntryGenerator {
             return None;
         }
 
-        let current_chars = &self.chars[(self.current_entry - 1) as usize];
+        let current_chars = &self.chars[usize::from(self.current_entry - 1)];
         let mut chars = [0_u8; CHARS_PER_LFN_ENTRY * 2];
         chars[..current_chars.len()].copy_from_slice(current_chars);
 
-        let lfn_mask = if self.current_entry >= self.chars.len() as u8 {
+        let lfn_mask = if self.current_entry
+            >= u8::try_from(self.chars.len()).expect("we won't be stored more that 20 entries")
+        {
             LAST_LFN_ENTRY_MASK
         } else {
             0
@@ -400,8 +404,9 @@ where
                         modified,
                         accessed,
                         file_size: entry.file_size,
-                        data_cluster: ((entry.cluster_high as u32) << 16)
-                            + entry.cluster_low as u32,
+                        data_cluster: (ClusterIndex::from(entry.cluster_high)
+                            << (ClusterIndex::BITS / 2))
+                            + ClusterIndex::from(entry.cluster_low),
                         chain: self
                             .current_chain
                             .take()

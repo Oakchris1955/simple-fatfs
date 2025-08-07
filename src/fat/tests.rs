@@ -32,7 +32,7 @@ fn check_FAT_offset() {
     } else {
         unreachable!("this should be a FAT16 filesystem")
     };
-    assert_eq!(u16::MAX << 8 | media_type as u16, first_entry);
+    assert_eq!(u16::MAX << 8 | u16::from(media_type), first_entry);
 
     let second_entry = u16::from_le_bytes(fs.sector_buffer[2..4].try_into().unwrap());
     assert_eq!(u16::MAX, second_entry);
@@ -160,7 +160,8 @@ fn write_to_file() {
     file.write_all(TEXT.as_bytes()).unwrap();
 
     // seek back to the start of where we wrote our text
-    file.seek(SeekFrom::Current(-(TEXT.len() as i64))).unwrap();
+    file.seek(SeekFrom::Current(-i64::try_from(TEXT.len()).unwrap()))
+        .unwrap();
     let mut buf = [0_u8; TEXT.len()];
     file.read_exact(&mut buf).unwrap();
     let stored_text = std::str::from_utf8(&buf).unwrap();
@@ -540,13 +541,13 @@ fn truncate_file() {
         .unwrap();
 
     // we are gonna truncate the bee movie script down to 20 000 bytes
-    const NEW_SIZE: u32 = 20_000;
-    file.truncate(NEW_SIZE).unwrap();
+    const NEW_SIZE: usize = 20_000;
+    file.truncate(u32::try_from(NEW_SIZE).unwrap()).unwrap();
 
     let mut file_string = String::new();
     file.read_to_string(&mut file_string).unwrap();
     let mut expected_string = BEE_MOVIE_SCRIPT.to_string();
-    expected_string.truncate(NEW_SIZE as usize);
+    expected_string.truncate(NEW_SIZE);
 
     assert_eq!(file_string, expected_string);
 }
@@ -876,8 +877,10 @@ fn write_to_fat32_file() {
     file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
 
     // seek back
-    file.seek(SeekFrom::Current(-(BEE_MOVIE_SCRIPT.len() as i64)))
-        .unwrap();
+    file.seek(SeekFrom::Current(
+        -i64::try_from(BEE_MOVIE_SCRIPT.len()).unwrap(),
+    ))
+    .unwrap();
 
     // read back what we wrote
     let mut string = String::new();
@@ -905,7 +908,8 @@ fn truncate_fat32_file() {
     const EXPECTED_STR: &str = "Hello fr";
 
     let mut file = fs.get_rw_file(PathBuf::from("/hello.txt")).unwrap();
-    file.truncate(EXPECTED_STR.len() as u32).unwrap();
+    file.truncate(u32::try_from(EXPECTED_STR.len()).unwrap())
+        .unwrap();
 
     let mut string = String::new();
     file.read_to_string(&mut string).unwrap();

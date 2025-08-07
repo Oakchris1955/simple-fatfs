@@ -15,8 +15,10 @@ use crate::{FSError, FSResult, InternalFSError};
 pub(crate) struct FileProps {
     pub(crate) entry: Properties,
     /// the byte offset of the R/W pointer
-    pub(crate) offset: u64,
-    pub(crate) current_cluster: u32,
+    ///
+    /// this can't exceed the file size, so they share the same data type
+    pub(crate) offset: FileSize,
+    pub(crate) current_cluster: ClusterIndex,
 }
 
 /// A read-only file within a FAT filesystem
@@ -79,12 +81,12 @@ where
 
     #[inline]
     /// Non-[`panic`]king version of [`next_cluster()`](ROFile::next_cluster)
-    fn get_next_cluster(&mut self) -> Result<Option<u32>, <Self as IOBase>::Error> {
+    fn get_next_cluster(&mut self) -> Result<Option<ClusterIndex>, <Self as IOBase>::Error> {
         self.fs.get_next_cluster(self.props.current_cluster)
     }
 
     /// Returns that last cluster in the file's cluster chain
-    fn last_cluster_in_chain(&mut self) -> Result<u32, <Self as IOBase>::Error> {
+    fn last_cluster_in_chain(&mut self) -> Result<ClusterIndex, <Self as IOBase>::Error> {
         // we begin from the current cluster to save some time
         let mut current_cluster = self.props.current_cluster;
 
@@ -107,7 +109,7 @@ where
         loop {
             cluster_count += 1;
 
-            if cluster_count * self.fs.cluster_size() >= self.file_size.into() {
+            if cluster_count * self.fs.cluster_size() >= self.file_size {
                 break;
             }
 
@@ -124,11 +126,11 @@ where
         match seekfrom {
             SeekFrom::Start(offset) => offset,
             SeekFrom::Current(offset) => {
-                let offset = self.props.offset as i64 + offset;
+                let offset = i64::from(self.props.offset) + offset;
                 offset.try_into().unwrap_or(u64::MIN)
             }
             SeekFrom::End(offset) => {
-                let offset = self.file_size as i64 + offset;
+                let offset = i64::from(self.file_size) + offset;
                 offset.try_into().unwrap_or(u64::MIN)
             }
         }
@@ -151,19 +153,19 @@ where
         // this is the maximum amount of bytes that can be read
         let read_cap = cmp::min(
             buf.len(),
-            self.file_size as usize - self.props.offset as usize,
+            // we better not panic here (this could be an issue only on 16-bit targets tho)
+            usize::try_from(self.file_size - self.props.offset).unwrap_or(usize::MAX),
         );
 
         'outer: loop {
-            let sector_init_offset = u32::try_from(self.props.offset % self.fs.cluster_size())
-                .unwrap()
-                / self.fs.sector_size();
+            let sector_init_offset =
+                self.props.offset % self.fs.cluster_size() / u32::from(self.fs.sector_size());
             let first_sector_of_cluster = self
                 .fs
                 .data_cluster_to_partition_sector(self.props.current_cluster)
                 + sector_init_offset;
             let last_sector_of_cluster = first_sector_of_cluster
-                + self.fs.sectors_per_cluster() as u32
+                + SectorCount::from(self.fs.sectors_per_cluster())
                 - sector_init_offset
                 - 1;
             log::debug!(
@@ -174,12 +176,13 @@ where
             );
 
             for sector in first_sector_of_cluster..=last_sector_of_cluster {
-                self.fs.load_nth_sector(sector.into())?;
+                self.fs.load_nth_sector(sector)?;
 
-                let start_index = self.props.offset as usize % self.fs.sector_size() as usize;
+                let start_index = usize::try_from(self.props.offset % u32::from(self.fs.sector_size()))
+                    .expect("sector_size's upper limit is 2^16, within Rust's usize (Rust support 16, 32 and 64-bit archs)");
                 let bytes_to_read = cmp::min(
                     read_cap - bytes_read,
-                    self.fs.sector_size() as usize - start_index,
+                    usize::from(self.fs.sector_size()) - start_index,
                 );
                 log::debug!(
                     "Gonna read {bytes_to_read} bytes from sector {sector} starting at byte {start_index}"
@@ -190,14 +193,14 @@ where
                 );
 
                 bytes_read += bytes_to_read;
-                self.props.offset += bytes_to_read as u64;
+                self.props.offset += FileSize::try_from(bytes_to_read).unwrap();
 
                 // if we have read as many bytes as we want...
                 if bytes_read >= read_cap {
                     // ...but we must process get the next cluster for future uses,
                     // we do that before breaking
                     if self.props.offset % self.fs.cluster_size() == 0
-                        && self.props.offset < self.file_size.into()
+                        && self.props.offset < self.file_size
                     {
                         self.next_cluster()?;
                     }
@@ -214,7 +217,8 @@ where
 
     // the default `read_to_end` implementation isn't efficient enough, so we just do this
     fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize, Self::Error> {
-        let bytes_to_read = self.file_size as usize - self.props.offset as usize;
+        let bytes_to_read =
+            usize::try_from(self.file_size - self.props.offset).unwrap_or(usize::MAX);
         let init_buf_len = buf.len();
 
         // resize buffer to fit the file contents exactly
@@ -235,12 +239,15 @@ where
         let offset = self.offset_from_seekfrom(pos);
 
         // in case the cursor goes beyond the EOF, allocate more clusters
-        if offset > (self.file_size as u64).next_multiple_of(self.fs.cluster_size()) {
+        if offset > u64::from(self.file_size.next_multiple_of(self.fs.cluster_size())) {
             return Err(IOError::new(
                 <Self::Error as IOError>::Kind::new_unexpected_eof(),
                 "moved past eof in a RO file",
             ));
         }
+
+        let offset = FileSize::try_from(offset)
+            .expect("file_size is u32, so offset must be able to fit in a u32 too");
 
         log::trace!(
             "Previous cursor offset is {}, new cursor offset is {}",
@@ -256,7 +263,7 @@ where
                 // (perhaps we could follow a similar approach to elm-chan's FATFS, by using a cluster link map table, perhaps as an optional feature)
                 self.props.offset = 0;
                 self.props.current_cluster = self.data_cluster;
-                self.seek(SeekFrom::Start(offset))?;
+                self.seek(SeekFrom::Start(offset.into()))?;
             }
             Ordering::Equal => (),
             Ordering::Greater => {
@@ -268,7 +275,7 @@ where
             }
         }
 
-        Ok(self.props.offset)
+        Ok(self.props.offset.into())
     }
 }
 
@@ -354,9 +361,9 @@ where
     /// to the file contents
     ///
     /// Furthermore, if the cursor point is beyond the new EOF, it will be moved there
-    pub fn truncate(&mut self, size: u32) -> Result<(), <Self as IOBase>::Error> {
+    pub fn truncate(&mut self, size: FileSize) -> Result<(), <Self as IOBase>::Error> {
         // looks like the new truncated size would be smaller than the current one, so we just return
-        if size.next_multiple_of(self.fs.props.cluster_size as u32) >= self.file_size {
+        if size.next_multiple_of(self.fs.props.cluster_size) >= self.file_size {
             if size < self.file_size {
                 self.file_size = size;
             }
@@ -365,7 +372,7 @@ where
         }
 
         // we store the current offset for later use
-        let previous_offset = cmp::min(self.props.offset, size.into());
+        let previous_offset = cmp::min(self.props.offset, size);
 
         // we seek back to where the EOF will be
         self.seek(SeekFrom::Start(size.into()))?;
@@ -389,7 +396,7 @@ where
         }
 
         // don't forget to seek back to where we started
-        self.seek(SeekFrom::Start(previous_offset))?;
+        self.seek(SeekFrom::Start(previous_offset.into()))?;
 
         log::debug!(
             "Successfully truncated file {} from {} to {} bytes",
@@ -553,10 +560,20 @@ where
     S: Read + Write + Seek,
 {
     fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        let cur_offset = self.props.offset;
+
+        // if that is fine, the first seek below should't have an overflow issue
+        if u64::try_from(buf.len()).unwrap_or(u64::MAX) > FileSize::MAX.into() {
+            return Err(IOError::new(
+                <Self::Error as IOError>::Kind::new_unexpected_eof(),
+                "a file can be up to 2^32 bytes long, can't increase size of file",
+            ));
+        };
+
         // allocate clusters
-        self.seek(SeekFrom::Current(buf.len() as i64))?;
+        self.seek(SeekFrom::Start(u64::from(cur_offset) + buf.len() as u64))?;
         // rewind back to where we were
-        self.seek(SeekFrom::Current(-(buf.len() as i64)))?;
+        self.seek(SeekFrom::Start(cur_offset.into()))?;
 
         let mut bytes_written = 0;
 
@@ -566,25 +583,25 @@ where
                 self.props.current_cluster
             );
 
-            let sector_init_offset = u32::try_from(self.props.offset % self.fs.cluster_size())
-                .unwrap()
-                / self.fs.sector_size();
+            let sector_init_offset =
+                self.props.offset % self.fs.cluster_size() / u32::from(self.fs.sector_size());
             let first_sector_of_cluster = self
                 .fs
                 .data_cluster_to_partition_sector(self.props.current_cluster)
                 + sector_init_offset;
             let last_sector_of_cluster = first_sector_of_cluster
-                + self.fs.sectors_per_cluster() as u32
+                + SectorCount::from(self.fs.sectors_per_cluster())
                 - sector_init_offset
                 - 1;
             for sector in first_sector_of_cluster..=last_sector_of_cluster {
-                self.fs.load_nth_sector(sector.into())?;
+                self.fs.load_nth_sector(sector)?;
 
-                let start_index = self.props.offset as usize % self.fs.sector_size() as usize;
+                let start_index = usize::try_from(self.props.offset % u32::from(self.fs.sector_size()))
+                    .expect("sector_size's upper limit is 2^16, within Rust's usize (Rust support 16, 32 and 64-bit archs)");
 
                 let bytes_to_write = cmp::min(
                     buf.len() - bytes_written,
-                    self.fs.sector_size() as usize - start_index,
+                    usize::from(self.fs.sector_size()) - start_index,
                 );
 
                 self.fs.sector_buffer[start_index..start_index + bytes_to_write]
@@ -592,7 +609,7 @@ where
                 self.fs.set_modified();
 
                 bytes_written += bytes_to_write;
-                self.props.offset += bytes_to_write as u64;
+                self.props.offset += FileSize::try_from(bytes_to_write).unwrap();
 
                 // if we have written as many bytes as we want...
                 if bytes_written >= buf.len() {
@@ -628,13 +645,24 @@ where
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error> {
         let offset = self.offset_from_seekfrom(pos);
 
+        // TODO: properly handle offsets above 2^32 (an IO revamp would help here)
+        let offset = match FileSize::try_from(offset) {
+            Ok(offset) => offset,
+            Err(_) => {
+                return Err(IOError::new(
+                    <Self::Error as IOError>::Kind::new_unexpected_eof(),
+                    "a file can be up to 2^32 bytes long, can't increase size of file",
+                ))
+            }
+        };
+
         // in case the cursor goes beyond the EOF, allocate more clusters
-        if offset > (self.file_size as u64).next_multiple_of(self.fs.cluster_size()) {
+        if offset > self.file_size.next_multiple_of(self.fs.cluster_size()) {
             let bytes_allocated = if self.file_size == 0 {
                 // even if the file size is zero, a file has a cluster already allocated
                 self.fs.props.cluster_size
             } else {
-                (self.file_size as u64).next_multiple_of(self.fs.cluster_size())
+                self.file_size.next_multiple_of(self.fs.cluster_size())
             };
             let clusters_to_allocate = (offset - bytes_allocated).div_ceil(self.fs.cluster_size());
             log::debug!("Seeking beyond EOF, allocating {clusters_to_allocate} more clusters");
@@ -645,7 +673,7 @@ where
             // and modify the file length accordingly
             // TODO: this should return a proper IO error
             match self.fs.allocate_clusters(
-                num::NonZero::new(clusters_to_allocate as u32).expect("This is greater than 1"),
+                num::NonZero::new(clusters_to_allocate).expect("This is greater than 1"),
                 Some(last_cluster_in_chain),
             ) {
                 Ok(_) => (),
@@ -657,7 +685,7 @@ where
                 }
             };
 
-            self.file_size = offset as u32;
+            self.file_size = offset;
             log::debug!(
                 "New file size after reallocation is {} bytes",
                 self.file_size
