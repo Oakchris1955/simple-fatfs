@@ -539,10 +539,10 @@ where
 
         let mut fs = Self {
             storage,
-            sector_buffer: SectorBuffer::from((
-                &buffer[..usize::from(props.sector_size)],
+            sector_buffer: SectorBuffer::new(
+                Box::from(&buffer[..usize::from(props.sector_size)]),
                 stored_sector,
-            )),
+            ),
             fsinfo_modified: false,
             clock: Box::from(&STATIC_DEFAULT_CLOCK),
             dir_info: DirInfo::at_root_dir(&boot_record),
@@ -1692,10 +1692,10 @@ where
         Ok(RWFile::from_props(
             FileProps {
                 current_cluster: raw_properties.data_cluster,
-                entry: Properties::from((
+                entry: Properties::from_raw(
                     RawProperties::from_chain(raw_properties, chain),
                     path.into(),
-                )),
+                ),
                 offset: 0,
             },
             self,

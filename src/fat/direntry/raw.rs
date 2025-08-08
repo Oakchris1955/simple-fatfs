@@ -62,8 +62,8 @@ impl bincode::Encode for RawAttributes {
     }
 }
 
-impl From<(Attributes, bool)> for RawAttributes {
-    fn from((attributes, is_dir): (Attributes, bool)) -> Self {
+impl RawAttributes {
+    pub(crate) fn from_attributes(attributes: Attributes, is_dir: bool) -> Self {
         let mut raw_attributes = RawAttributes::empty();
 
         raw_attributes.set(RawAttributes::READ_ONLY, attributes.read_only);
@@ -158,7 +158,7 @@ impl RawProperties {
         let entry_path = path.as_ref().join(&self.name);
 
         DirEntry {
-            entry: Properties::from((self, entry_path.into())),
+            entry: Properties::from_raw(self, entry_path.into()),
         }
     }
 
@@ -184,7 +184,7 @@ impl From<Properties> for RawProperties {
             name: String::from(value.path.file_name().expect("the path is normalized")),
             sfn: value.sfn,
             is_dir: value.is_dir,
-            attributes: (value.attributes, value.is_dir).into(),
+            attributes: RawAttributes::from_attributes(value.attributes, value.is_dir),
             created: value.created,
             modified: value.modified,
             accessed: value.accessed,

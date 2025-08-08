@@ -11,11 +11,11 @@ pub(crate) struct SectorBuffer {
     pub(crate) stored_sector: SectorIndex,
 }
 
-impl From<(&[u8], SectorIndex)> for SectorBuffer {
-    fn from(value: (&[u8], SectorIndex)) -> Self {
+impl SectorBuffer {
+    pub(crate) fn new(sector_buffer: Box<[u8]>, stored_sector: SectorIndex) -> Self {
         Self {
-            slice: Box::from(value.0),
-            stored_sector: value.1,
+            slice: sector_buffer,
+            stored_sector,
         }
     }
 }

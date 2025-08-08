@@ -207,19 +207,19 @@ impl Properties {
     }
 }
 
-impl From<(RawProperties, Box<Path>)> for Properties {
-    fn from((raw, path): (RawProperties, Box<Path>)) -> Self {
-        Properties {
+impl Properties {
+    pub(crate) fn from_raw(raw_props: RawProperties, path: Box<Path>) -> Self {
+        Self {
             path,
-            sfn: raw.sfn,
-            is_dir: raw.is_dir,
-            attributes: raw.attributes.into(),
-            created: raw.created,
-            modified: raw.modified,
-            accessed: raw.accessed,
-            file_size: raw.file_size,
-            data_cluster: raw.data_cluster,
-            chain: raw.chain,
+            sfn: raw_props.sfn,
+            is_dir: raw_props.is_dir,
+            attributes: raw_props.attributes.into(),
+            created: raw_props.created,
+            modified: raw_props.modified,
+            accessed: raw_props.accessed,
+            file_size: raw_props.file_size,
+            data_cluster: raw_props.data_cluster,
+            chain: raw_props.chain,
         }
     }
 }
