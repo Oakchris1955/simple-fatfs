@@ -2,7 +2,7 @@
 // not for the popular serde package
 use super::*;
 
-use core::{iter, mem};
+use core::{iter, mem, num};
 
 #[cfg(not(feature = "std"))]
 use alloc::{
@@ -72,7 +72,7 @@ impl LFNEntry {
 ///
 /// This only takes into account the [`DirEntries`](DirEntry) needed,
 /// not the contents of the file
-pub(crate) fn calc_entries_needed<S>(file_name: S) -> EntryCount
+pub(crate) fn calc_entries_needed<S>(file_name: S) -> num::NonZero<EntryCount>
 where
     S: ToString,
 {
@@ -88,8 +88,11 @@ where
     // let's not forget the first entry
     let calc_entries_needed = 1 + lfn_entries_needed;
 
-    EntryCount::try_from(calc_entries_needed)
-        .expect("an LFN can be up to 255 chars, this won't panic")
+    num::NonZero::new(
+        EntryCount::try_from(calc_entries_needed)
+            .expect("an LFN can be up to 255 chars, this won't panic"),
+    )
+    .expect("as seen above, this is >= 1")
 }
 
 #[derive(Debug)]

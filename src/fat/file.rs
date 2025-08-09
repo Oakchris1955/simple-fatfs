@@ -452,16 +452,17 @@ where
                 .expect("This file name should be valid")
                 .to_owned();
             // the first entry of the dirchain could belong to a LFNEntry, so we must handle that
-            let direntry_location = match num::NonZero::new(calc_entries_needed(file_name) - 1) {
-                Some(nonzero) => {
-                    chain_start
-                        .nth_entry(self.fs, nonzero)?
-                        .ok_or(FSError::InternalFSError(
-                            InternalFSError::MalformedEntryChain,
-                        ))?
-                }
-                None => chain_start,
-            };
+            let direntry_location =
+                match num::NonZero::new(EntryCount::from(calc_entries_needed(file_name)) - 1) {
+                    Some(nonzero) => {
+                        chain_start
+                            .nth_entry(self.fs, nonzero)?
+                            .ok_or(FSError::InternalFSError(
+                                InternalFSError::MalformedEntryChain,
+                            ))?
+                    }
+                    None => chain_start,
+                };
             let sector = direntry_location.get_entry_sector(self.fs);
             let offset = direntry_location.get_sector_byte_offset(self.fs);
 

@@ -1092,7 +1092,7 @@ where
     /// This may or may not allocate new clusters.
     pub(crate) fn allocate_nth_entries(
         &mut self,
-        n: EntryCount,
+        n: num::NonZero<EntryCount>,
     ) -> FSResult<EntryLocation, S::Error> {
         // navigate to the cached directory, if we aren't already there
         self._go_to_cached_dir()?;
@@ -1116,7 +1116,7 @@ where
                 EntryStatus::Used => chain_len = 0,
             }
 
-            if chain_len >= n {
+            if chain_len >= n.get() {
                 return Ok(first_entry);
             }
 
@@ -1134,12 +1134,12 @@ where
 
             // what if for whatever reason the data types changes?
             #[allow(clippy::absurd_extreme_comparisons)]
-            if entry_count + n >= DIRENTRY_LIMIT {
+            if entry_count + n.get() >= DIRENTRY_LIMIT {
                 // defragment the cluster chain just in case
                 // this frees up any space for entries
                 let new_entry_count = self.defragment_entry_chain()?;
 
-                if new_entry_count + n >= DIRENTRY_LIMIT {
+                if new_entry_count + n.get() >= DIRENTRY_LIMIT {
                     return Err(FSError::DirEntryLimitReached);
                 }
 
@@ -1185,7 +1185,7 @@ where
                 )
                 .unwrap();
 
-                if remaining_entries < n - chain_len {
+                if remaining_entries < n.get() - chain_len {
                     Err(FSError::RootDirectoryFull)
                 } else {
                     Ok(first_entry)
@@ -1199,7 +1199,7 @@ where
                 )
                 .expect("a cluster can have a max of ~16k entries");
 
-                let entries_left = n - chain_len;
+                let entries_left = n.get() - chain_len;
                 let free_entries_on_current_cluster = entries_per_cluster - (last_entry.index + 1);
 
                 // if we do in fact have to allocate some clusters, we allocate them
@@ -1310,6 +1310,8 @@ where
     /// Insert the provided `entries` to the cluster chain of the current cached directory
     ///
     /// Returns the corresponding [`DirEntryChain`]
+    ///
+    /// Panics if the `entries` array is empty
     pub(crate) fn insert_to_entry_chain(
         &mut self,
         entries: Box<[MinProperties]>,
@@ -1319,10 +1321,12 @@ where
         self._go_to_cached_dir()?;
 
         for entry in &entries {
-            entries_needed += calc_entries_needed(&(*entry.name));
+            entries_needed += calc_entries_needed(&(*entry.name)).get();
         }
 
-        let first_entry = self.allocate_nth_entries(entries_needed)?;
+        let first_entry = self.allocate_nth_entries(
+            num::NonZero::new(entries_needed).expect("The entries array shouldn't be empty"),
+        )?;
 
         let mut entries_iter = EntryComposer::from(entries);
 
