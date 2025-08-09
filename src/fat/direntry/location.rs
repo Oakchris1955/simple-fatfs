@@ -100,7 +100,7 @@ pub(crate) enum EntryStatus {
 }
 
 /// The location of a [`FATDirEntry`]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct EntryLocation {
     /// the location of the first corresponding entry's data unit
     pub(crate) unit: EntryLocationUnit,
@@ -153,7 +153,11 @@ impl EntryLocation {
         (usize::from(self.index) * DIRENTRY_SIZE) % usize::from(fs.props.sector_size)
     }
 
-    pub(crate) fn free_entry<S>(&self, fs: &mut FileSystem<S>) -> Result<(), S::Error>
+    pub(crate) fn free_entry<S>(
+        &self,
+        fs: &mut FileSystem<S>,
+        is_last: bool,
+    ) -> Result<(), S::Error>
     where
         S: Read + Write + Seek,
     {
@@ -161,7 +165,11 @@ impl EntryLocation {
         fs.load_nth_sector(entry_sector)?;
 
         let byte_offset = self.get_sector_byte_offset(fs);
-        fs.sector_buffer[byte_offset] = UNUSED_ENTRY;
+        fs.sector_buffer[byte_offset] = if is_last {
+            LAST_AND_UNUSED_ENTRY
+        } else {
+            UNUSED_ENTRY
+        };
         fs.set_modified();
 
         Ok(())

@@ -16,6 +16,8 @@ use crate::*;
 
 use bincode::{Decode, Encode};
 
+pub(crate) const DIRENTRY_LIMIT: EntryCount = EntryCount::MAX;
+
 const LAST_LFN_ENTRY_MASK: u8 = 0x40;
 pub(crate) const LFN_CHAR_LIMIT: usize = 255; // not including the trailing null
 const LFN_FIRST_CHARS: usize = 5;

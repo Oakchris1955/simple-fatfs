@@ -171,6 +171,11 @@ where
      this operation. Consider performing this operation on a subdirectory instead
     */
     RootDirectoryFull,
+    /**
+     The entry limit for this directory (2^16 - 1) has been reached.
+     Consider performing this operation on a subdirectory instead
+    */
+    DirEntryLimitReached,
     /// An IO error occured
     #[displaydoc("An IO error occured: {0}")]
     IOError(I),

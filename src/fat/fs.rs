@@ -1106,9 +1106,11 @@ where
         let mut last_entry = first_entry.clone();
 
         let mut chain_len = 0;
+        let mut entry_count: EntryCount = 0;
 
         loop {
             let entry_status = last_entry.entry_status(self)?;
+            entry_count += 1;
             match entry_status {
                 EntryStatus::Unused | EntryStatus::LastUnused => chain_len += 1,
                 EntryStatus::Used => chain_len = 0,
@@ -1128,6 +1130,22 @@ where
                 && last_entry.index + 1 >= last_entry.unit.get_max_offset(self)
             {
                 break;
+            }
+
+            // what if for whatever reason the data types changes?
+            #[allow(clippy::absurd_extreme_comparisons)]
+            if entry_count + n >= DIRENTRY_LIMIT {
+                // defragment the cluster chain just in case
+                // this frees up any space for entries
+                let new_entry_count = self.defragment_entry_chain()?;
+
+                if new_entry_count + n >= DIRENTRY_LIMIT {
+                    return Err(FSError::DirEntryLimitReached);
+                }
+
+                // we have enough entries now, this call should make us
+                // enter an infinite recursion
+                return self.allocate_nth_entries(n);
             }
 
             last_entry = last_entry
@@ -1338,6 +1356,75 @@ where
         })
     }
 
+    /// Defragment the entry chain of the current directory
+    ///
+    /// Returns a [`FSResult`] containing the new number of entries
+    pub(crate) fn defragment_entry_chain(&mut self) -> FSResult<EntryCount, S::Error> {
+        let mut current_entry_loc = EntryLocation {
+            unit: self.dir_info.chain_start,
+            index: 0,
+        };
+        let mut new_chain_end = current_entry_loc.clone();
+        let mut entry_count: EntryCount = 0;
+
+        loop {
+            match current_entry_loc.entry_status(self)? {
+                EntryStatus::Used => {
+                    // no reason to copy the bytes if both locations are the same
+                    if current_entry_loc != new_chain_end {
+                        // we have found a free entry, copy the bytes to a temporary slice
+                        let entry_sector = current_entry_loc.get_entry_sector(self);
+                        let entry_offset = current_entry_loc.get_sector_byte_offset(self);
+                        let mut bytes = [0u8; DIRENTRY_SIZE];
+                        bytes.copy_from_slice(
+                            &self.load_nth_sector(entry_sector)?
+                                [entry_offset..entry_offset + DIRENTRY_SIZE],
+                        );
+                        self.set_modified();
+
+                        // copy the bytes where they belong
+                        let entry_sector = new_chain_end.get_entry_sector(self);
+                        let entry_offset = new_chain_end.get_sector_byte_offset(self);
+                        self.load_nth_sector(entry_sector)?;
+                        self.sector_buffer[entry_offset..entry_offset + DIRENTRY_SIZE]
+                            .copy_from_slice(&bytes);
+                        self.set_modified();
+
+                        // what if for whatever reason the data types changes?
+                        #[allow(clippy::absurd_extreme_comparisons)]
+                        if entry_count >= DIRENTRY_LIMIT {
+                            break;
+                        }
+
+                        // don't forget to free the entry
+                        current_entry_loc.free_entry(self, false)?;
+                    }
+
+                    entry_count += 1;
+
+                    // advance the new entry chain
+                    new_chain_end = new_chain_end
+                        .next_entry(self)?
+                        .expect("we just pushed an entry to this chain")
+                }
+                EntryStatus::LastUnused => break,
+                _ => (),
+            }
+
+            current_entry_loc = match current_entry_loc.next_entry(self)? {
+                Some(entry) => entry,
+                None => break,
+            }
+        }
+
+        // we should also probably mark the entry after the last used one as last and unused
+        new_chain_end.free_entry(self, true)?;
+
+        self.dir_info.chain_end = Some(new_chain_end);
+
+        Ok(entry_count)
+    }
+
     /// Mark the individual entries of a contiguous FAT entry chain as unused
     ///
     /// Note: No validation is done to check whether or not the chain is valid
@@ -1346,7 +1433,7 @@ where
         let mut current_entry = chain.location.clone();
 
         loop {
-            current_entry.free_entry(self)?;
+            current_entry.free_entry(self, false)?;
 
             entries_freed += 1;
 

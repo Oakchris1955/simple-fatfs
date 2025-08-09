@@ -1,6 +1,7 @@
 use crate::io::prelude::*;
 use crate::*;
 
+use akin::akin;
 use test_log::test;
 
 static MINFS: &[u8] = include_bytes!("../../imgs/minfs.img");
@@ -499,6 +500,71 @@ fn remove_nonempty_dir_with_readonly_file() {
             _ => panic!("unexpected IOError: {err:?}"),
         },
         _ => panic!("the directory should have been deleted by now"),
+    }
+}
+akin! {
+    let &fat_type = [FAT12, FAT16, FAT32];
+    let &unused_entries = [5, 2, 1];
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn entry_defragment_~*fat_type() {
+        const UNUSED_ENTRY_COUNT: EntryCount = *unused_entries;
+
+        use std::io::Cursor;
+
+        let mut storage = Cursor::new(~*fat_type.to_owned());
+        let mut fs = FileSystem::from_storage(&mut storage).unwrap();
+        fs.show_hidden(true);
+
+        // ik, this is dirty
+        let old_entry_count = {
+            let mut i: EntryCount = 0;
+
+            fs.go_to_dir("/").unwrap();
+
+            let mut current_entry = EntryLocation {
+                unit: fs.dir_info.chain_start,
+                index: 0,
+            };
+
+            while let Some(next_entry) = current_entry
+                .next_entry(&mut fs)
+                .unwrap()
+                .filter(|entry| entry.entry_status(&mut fs).unwrap() != EntryStatus::LastUnused)
+            {
+                current_entry = next_entry;
+                i += 1
+            }
+
+            // we miss the last entry because of the .filter
+            i + 1
+        };
+
+        log::info!("Old entry count: {old_entry_count}");
+
+        let old_names: Box<[Box<str>]> = fs
+            .read_dir("/")
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .map(|entry| entry.path().file_name().unwrap().to_owned())
+            .map(Box::from)
+            .collect();
+
+        let new_entry_count = fs.defragment_entry_chain().unwrap();
+
+        log::info!("New entry count: {new_entry_count}");
+
+        let new_names: Box<[Box<str>]> = fs
+            .read_dir("/")
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .map(|entry| entry.path().file_name().unwrap().to_owned())
+            .map(Box::from)
+            .collect();
+
+        assert_eq!(old_names, new_names);
+        assert_eq!(old_entry_count - UNUSED_ENTRY_COUNT, new_entry_count);
     }
 }
 

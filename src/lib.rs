@@ -68,6 +68,7 @@
 #![warn(unused_import_braces)]
 #![warn(unused_lifetimes)]
 // clippy attributes
+#![warn(clippy::absurd_extreme_comparisons)] // who thought this was a good idea for a deny lint?
 #![warn(clippy::derive_partial_eq_without_eq)]
 #![warn(clippy::cast_lossless)]
 #![warn(clippy::cast_possible_truncation)]
