@@ -81,7 +81,7 @@ impl RawAttributes {
 // TODO: actually check this on runtime
 pub(crate) const NONROOT_MIN_DIRENTRIES: usize = 2;
 
-#[derive(Encode, Decode, Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Encode, Decode)]
 pub(crate) struct FATDirEntry {
     pub(crate) sfn: Sfn,
     pub(crate) attributes: RawAttributes,

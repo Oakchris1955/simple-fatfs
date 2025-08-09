@@ -321,7 +321,7 @@ where
                 return Ok(None);
             }
             UNUSED_ENTRY => {
-                self.entry_location = entry_location.clone().next_entry(self.fs)?;
+                self.entry_location = entry_location.next_entry(self.fs)?;
                 return Ok(None);
             }
             _ => (),
@@ -339,7 +339,7 @@ where
             Some(current_chain) => current_chain.len += 1,
             None => {
                 self.current_chain = Some(DirEntryChain {
-                    location: entry_location.clone(),
+                    location: *entry_location,
                     len: 1,
                 })
             }
@@ -402,7 +402,7 @@ where
                     entry.modified.try_into(),
                     entry.accessed.try_into(),
                 ) {
-                    self.entry_location = entry_location.clone().next_entry(self.fs)?;
+                    self.entry_location = entry_location.next_entry(self.fs)?;
 
                     return Ok(Some(RawProperties {
                         name: filename,
@@ -425,7 +425,7 @@ where
             }
         }
 
-        self.entry_location = entry_location.clone().next_entry(self.fs)?;
+        self.entry_location = entry_location.next_entry(self.fs)?;
 
         Ok(None)
     }

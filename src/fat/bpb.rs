@@ -45,7 +45,7 @@ impl BootRecord {
 pub(crate) const BOOT_SIGNATURE: u8 = 0x29;
 pub(crate) const FAT_SIGNATURE: u16 = 0x55AA;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct BootRecordFAT {
     pub bpb: BpbFat,
     pub ebr: Ebr,
@@ -55,7 +55,7 @@ impl BootRecordFAT {
     #[inline]
     pub(crate) fn verify_signature(&self) -> bool {
         match self.fat_type() {
-            FATType::FAT12 | FATType::FAT16 | FATType::FAT32 => match self.ebr {
+            FATType::FAT12 | FATType::FAT16 | FATType::FAT32 => match &self.ebr {
                 Ebr::FAT12_16(ebr_fat12_16) => {
                     ebr_fat12_16.boot_signature == BOOT_SIGNATURE
                         && ebr_fat12_16.signature == FAT_SIGNATURE
@@ -82,7 +82,7 @@ impl BootRecordFAT {
     #[inline]
     /// FAT size in sectors
     pub(crate) fn fat_sector_size(&self) -> u32 {
-        match self.ebr {
+        match &self.ebr {
             Ebr::FAT12_16(_ebr_fat12_16) => self.bpb.table_size_16.into(),
             Ebr::FAT32(ebr_fat32, _) => ebr_fat32.table_size_32,
         }
@@ -146,7 +146,7 @@ impl BootRecordFAT {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 // Everything here is naturally aligned (thank god)
 pub(crate) struct BootRecordExFAT {
     pub _dummy_jmp: [u8; 3],
@@ -171,7 +171,7 @@ pub(crate) struct BootRecordExFAT {
 }
 
 pub(crate) const BPBFAT_SIZE: usize = 36;
-#[derive(Encode, Decode, Debug, Clone, Copy)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub(crate) struct BpbFat {
     pub _jmpboot: [u8; 3],
     pub _oem_identifier: [u8; 8],
@@ -191,7 +191,7 @@ pub(crate) struct BpbFat {
 }
 
 pub(crate) const EBR_SIZE: usize = MIN_SECTOR_SIZE - BPBFAT_SIZE;
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum Ebr {
     FAT12_16(EBRFAT12_16),
@@ -205,7 +205,7 @@ impl fmt::Debug for Ebr {
     }
 }
 
-#[derive(Encode, Decode, Clone, Copy)]
+#[derive(Encode, Decode, Clone)]
 pub(crate) struct EBRFAT12_16 {
     pub _drive_num: u8,
     pub _windows_nt_flags: u8,
@@ -232,13 +232,13 @@ pub(crate) struct FAT32ExtendedFlags {
 }
 
 // FIXME: these might be the other way around
-#[derive(Encode, Decode, Debug, Clone, Copy)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub(crate) struct FATVersion {
     minor: u8,
     major: u8,
 }
 
-#[derive(Encode, Decode, Clone, Copy)]
+#[derive(Encode, Decode, Clone)]
 pub(crate) struct EBRFAT32 {
     pub table_size_32: u32,
     pub extended_flags: FAT32ExtendedFlags,
@@ -257,10 +257,11 @@ pub(crate) struct EBRFAT32 {
     pub signature: u16,
 }
 
+pub(crate) const FSINFO_SIZE: usize = 512;
 const FSINFO_LEAD_SIGNATURE: u32 = 0x41615252;
 const FSINFO_MID_SIGNATURE: u32 = 0x61417272;
 const FSINFO_TRAIL_SIGNAUTE: u32 = 0xAA550000;
-#[derive(Encode, Decode, Debug, Clone, Copy)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub(crate) struct FSInfoFAT32 {
     pub lead_signature: u32,
     pub _reserved1: [u8; 480],

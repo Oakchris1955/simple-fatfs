@@ -66,7 +66,7 @@ impl EntryLocationUnit {
         S: Read + Seek,
     {
         match self {
-            EntryLocationUnit::RootDirSector(sector) => match fs.boot_record {
+            EntryLocationUnit::RootDirSector(sector) => match &fs.boot_record {
                 BootRecord::Fat(boot_record_fat) => {
                     if boot_record_fat.root_dir_sectors() == 0 {
                         unreachable!(concat!("This should be zero iff the FAT type if FAT32, ",
@@ -92,7 +92,7 @@ impl EntryLocationUnit {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntryStatus {
     Unused,
     LastUnused,
@@ -100,7 +100,7 @@ pub(crate) enum EntryStatus {
 }
 
 /// The location of a [`FATDirEntry`]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EntryLocation {
     /// the location of the first corresponding entry's data unit
     pub(crate) unit: EntryLocationUnit,
@@ -221,7 +221,7 @@ impl EntryLocation {
 }
 
 /// The location of a chain of [`FATDirEntry`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct DirEntryChain {
     /// the location of the first corresponding entry
     pub(crate) location: EntryLocation,

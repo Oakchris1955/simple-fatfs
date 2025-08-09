@@ -194,7 +194,7 @@ impl DirInfo {
             // this is basically the root directory
             path: PathBuf::from(path_consts::SEPARATOR_STR),
             chain_start: match boot_record {
-                BootRecord::Fat(boot_record_fat) => match boot_record_fat.ebr {
+                BootRecord::Fat(boot_record_fat) => match &boot_record_fat.ebr {
                     // it doesn't really matter what value we put in here, since we won't be using it
                     Ebr::FAT12_16(_ebr_fat12_16) => EntryLocationUnit::RootDirSector(0),
                     Ebr::FAT32(ebr_fat32, _) => {
@@ -523,7 +523,7 @@ where
         let fat_type = boot_record.fat_type();
         log::info!("The FAT type of the filesystem is {fat_type:?}");
 
-        match boot_record {
+        match &boot_record {
             BootRecord::Fat(boot_record_fat) => {
                 if boot_record_fat.verify_signature() {
                     log::error!("FAT boot record has invalid signature(s)");
@@ -732,11 +732,11 @@ where
     /// Gets the next free cluster. Returns an IO [`Result`]
     /// If the [`Result`] returns [`Ok`] that contains a [`None`], the drive is full
     pub(crate) fn next_free_cluster(&mut self) -> Result<Option<ClusterIndex>, S::Error> {
-        let start_cluster = match self.boot_record {
+        let start_cluster = match &self.boot_record {
             BootRecord::Fat(boot_record_fat) => {
                 let mut first_free_cluster = self.first_free_cluster;
 
-                if let Ebr::FAT32(_, fsinfo) = boot_record_fat.ebr {
+                if let Ebr::FAT32(_, fsinfo) = &boot_record_fat.ebr {
                     // a value of u32::MAX denotes unawareness of the first free cluster
                     // we also do a bit of range checking
                     // TODO: if this is unknown, figure it out and write it to the FSInfo structure
@@ -803,7 +803,7 @@ where
         /// How many bytes to probe at max for each FAT per iteration (must be a multiple of [`MAX_SECTOR_SIZE`])
         const MAX_PROBE_SIZE: u32 = 1 << 20;
 
-        let fat_byte_size = match self.boot_record {
+        let fat_byte_size = match &self.boot_record {
             BootRecord::Fat(boot_record_fat) => boot_record_fat.fat_sector_size(),
             BootRecord::ExFAT(_) => unreachable!(),
         };
@@ -840,7 +840,7 @@ where
 
     #[allow(non_snake_case)]
     pub(crate) fn sector_belongs_to_FAT(&self, sector: SectorIndex) -> bool {
-        match self.boot_record {
+        match &self.boot_record {
             BootRecord::Fat(boot_record_fat) => (boot_record_fat.first_fat_sector().into()
                 ..boot_record_fat.first_root_dir_sector())
                 .contains(&sector),
@@ -1099,11 +1099,11 @@ where
 
         // we may not even need to allocate new entries.
         // let's check if there is a chain of unused entries big enough to be used
-        let mut first_entry = self.dir_info.chain_end.clone().unwrap_or_else(|| {
+        let mut first_entry = self.dir_info.chain_end.unwrap_or_else(|| {
             EntryLocation::from_partition_sector(self.sector_buffer.stored_sector, self)
         });
 
-        let mut last_entry = first_entry.clone();
+        let mut last_entry = first_entry;
 
         let mut chain_len = 0;
         let mut entry_count: EntryCount = 0;
@@ -1155,18 +1155,18 @@ where
                 ))?;
 
             if entry_status == EntryStatus::Used {
-                first_entry = last_entry.clone();
+                first_entry = last_entry;
             }
         }
 
         // let's set the last-known dir entry
-        self.dir_info.chain_end = Some(last_entry.clone());
+        self.dir_info.chain_end = Some(last_entry);
 
         // we have broken out of the loop, that means we reached the end of the chain
         // of the already-allocated entries
         match last_entry.unit {
             EntryLocationUnit::RootDirSector(_) => {
-                let remaining_sectors: SectorCount = match self.boot_record {
+                let remaining_sectors: SectorCount = match &self.boot_record {
                     BootRecord::Fat(boot_record_fat) => {
                         boot_record_fat.first_root_dir_sector()
                             + SectorCount::from(boot_record_fat.root_dir_sectors())
@@ -1330,7 +1330,7 @@ where
 
         let mut entries_iter = EntryComposer::from(entries);
 
-        let mut current_entry = first_entry.clone();
+        let mut current_entry = first_entry;
         let mut entry_bytes = entries_iter
             .next()
             .expect("this iterator is guaranteed to return at least once");
@@ -1368,7 +1368,7 @@ where
             unit: self.dir_info.chain_start,
             index: 0,
         };
-        let mut new_chain_end = current_entry_loc.clone();
+        let mut new_chain_end = current_entry_loc;
         let mut entry_count: EntryCount = 0;
 
         loop {
@@ -1434,7 +1434,7 @@ where
     /// Note: No validation is done to check whether or not the chain is valid
     pub(crate) fn remove_entry_chain(&mut self, chain: &DirEntryChain) -> Result<(), S::Error> {
         let mut entries_freed = 0;
-        let mut current_entry = chain.location.clone();
+        let mut current_entry = chain.location;
 
         loop {
             current_entry.free_entry(self, false)?;
@@ -1565,8 +1565,8 @@ where
         if let Some(fat_sector_props) = FATSectorProps::new(self.sector_buffer.stored_sector, self)
         {
             log::trace!("syncing FAT sector {}", fat_sector_props.sector_offset,);
-            match self.boot_record {
-                BootRecord::Fat(boot_record_fat) => match boot_record_fat.ebr {
+            match &self.boot_record {
+                BootRecord::Fat(boot_record_fat) => match &boot_record_fat.ebr {
                     Ebr::FAT12_16(_) => {
                         self._sync_FAT_sector(&fat_sector_props)?;
                     }
@@ -1597,11 +1597,15 @@ where
         use utils::bincode::BINCODE_CONFIG;
 
         if self.fsinfo_modified {
-            if let BootRecord::Fat(boot_record_fat) = self.boot_record {
-                if let Ebr::FAT32(ebr_fat32, fsinfo) = boot_record_fat.ebr {
-                    self.load_nth_sector(ebr_fat32.fat_info.into())?;
+            if let BootRecord::Fat(boot_record_fat) = &self.boot_record {
+                if let Ebr::FAT32(ebr_fat32, fsinfo) = &boot_record_fat.ebr {
+                    // FIXME: unnecessary memory usage?
+                    let mut bytes = [0_u8; FSINFO_SIZE];
 
-                    bincode::encode_into_slice(fsinfo, &mut self.sector_buffer, BINCODE_CONFIG)?;
+                    bincode::encode_into_slice(fsinfo, &mut bytes, BINCODE_CONFIG)?;
+
+                    self.load_nth_sector(ebr_fat32.fat_info.into())?;
+                    self.sector_buffer[..FSINFO_SIZE].copy_from_slice(&bytes);
                 }
             }
 
@@ -1954,7 +1958,7 @@ where
             self.set_modified();
         }
 
-        let old_chain = entry_from.chain.clone();
+        let old_chain = entry_from.chain;
         let old_props: MinProperties = entry_from.into();
         let to_filename = to.file_name().expect("this path is normalized");
         let sfn = utils::string::gen_sfn(to_filename, self, parent_to)?;

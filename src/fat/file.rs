@@ -445,7 +445,7 @@ where
             let mut bytes = [0; DIRENTRY_SIZE];
             bincode::encode_into_slice(direntry, &mut bytes, BINCODE_CONFIG)?;
 
-            let chain_start = self.props.entry.chain.location.clone();
+            let chain_start = self.props.entry.chain.location;
             let file_name = self
                 .path()
                 .file_name()
