@@ -153,6 +153,42 @@ impl EntryLocation {
         (usize::from(self.index) * DIRENTRY_SIZE) % usize::from(fs.props.sector_size)
     }
 
+    // Note: this could also return a borrowed subslice from fs.sector_buffer,
+    // but since it is only 32 bytes, I don't think it is worth the hastle
+    pub(crate) fn get_bytes<S>(
+        &self,
+        fs: &mut FileSystem<S>,
+    ) -> Result<[u8; DIRENTRY_SIZE], S::Error>
+    where
+        S: Read + Seek,
+    {
+        let entry_sector = self.get_entry_sector(fs);
+        let entry_offset = self.get_sector_byte_offset(fs);
+        let mut bytes = [0u8; DIRENTRY_SIZE];
+        bytes.copy_from_slice(
+            &fs.load_nth_sector(entry_sector)?[entry_offset..entry_offset + DIRENTRY_SIZE],
+        );
+
+        Ok(bytes)
+    }
+
+    pub(crate) fn set_bytes<S>(
+        &self,
+        fs: &mut FileSystem<S>,
+        bytes: [u8; DIRENTRY_SIZE],
+    ) -> Result<(), S::Error>
+    where
+        S: Read + Write + Seek,
+    {
+        let entry_sector = self.get_entry_sector(fs);
+        let entry_offset = self.get_sector_byte_offset(fs);
+        fs.load_nth_sector(entry_sector)?;
+        fs.sector_buffer[entry_offset..entry_offset + DIRENTRY_SIZE].copy_from_slice(&bytes);
+        fs.set_modified();
+
+        Ok(())
+    }
+
     pub(crate) fn free_entry<S>(
         &self,
         fs: &mut FileSystem<S>,

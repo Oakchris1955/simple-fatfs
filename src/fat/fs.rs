@@ -1288,9 +1288,19 @@ where
         // we zero the current sector
         self.sector_buffer.fill(0);
 
+        let mut entry_location = EntryLocation {
+            unit: EntryLocationUnit::DataCluster(dir_cluster),
+            index: 0,
+        };
+
         for (i, bytes) in entries_iter.enumerate() {
-            self.sector_buffer[(i * DIRENTRY_SIZE)..((i + 1) * DIRENTRY_SIZE)]
-                .copy_from_slice(&bytes);
+            entry_location.set_bytes(self, bytes)?;
+
+            if i < NONROOT_MIN_DIRENTRIES {
+                entry_location = entry_location
+                    .next_entry(self)?
+                    .expect("this will only be called once");
+            }
         }
 
         self.set_modified();
@@ -1336,13 +1346,7 @@ where
             .expect("this iterator is guaranteed to return at least once");
 
         loop {
-            let entry_sector = current_entry.get_entry_sector(self);
-            self.load_nth_sector(entry_sector)?;
-            self.set_modified();
-
-            let byte_offset = current_entry.get_sector_byte_offset(self);
-            self.sector_buffer[byte_offset..(byte_offset + DIRENTRY_SIZE)]
-                .copy_from_slice(&entry_bytes);
+            current_entry.set_bytes(self, entry_bytes)?;
 
             match entries_iter.next() {
                 Some(bytes) => entry_bytes = bytes,
@@ -1376,23 +1380,10 @@ where
                 EntryStatus::Used => {
                     // no reason to copy the bytes if both locations are the same
                     if current_entry_loc != new_chain_end {
-                        // we have found a free entry, copy the bytes to a temporary slice
-                        let entry_sector = current_entry_loc.get_entry_sector(self);
-                        let entry_offset = current_entry_loc.get_sector_byte_offset(self);
-                        let mut bytes = [0u8; DIRENTRY_SIZE];
-                        bytes.copy_from_slice(
-                            &self.load_nth_sector(entry_sector)?
-                                [entry_offset..entry_offset + DIRENTRY_SIZE],
-                        );
-                        self.set_modified();
-
                         // copy the bytes where they belong
-                        let entry_sector = new_chain_end.get_entry_sector(self);
-                        let entry_offset = new_chain_end.get_sector_byte_offset(self);
-                        self.load_nth_sector(entry_sector)?;
-                        self.sector_buffer[entry_offset..entry_offset + DIRENTRY_SIZE]
-                            .copy_from_slice(&bytes);
-                        self.set_modified();
+                        let bytes = current_entry_loc.get_bytes(self)?;
+
+                        new_chain_end.set_bytes(self, bytes)?;
 
                         // what if for whatever reason the data types changes?
                         #[allow(clippy::absurd_extreme_comparisons)]
@@ -1943,6 +1934,12 @@ where
                 },
             };
 
+            // we are modifying the 2nd entry
+            let entry_location = EntryLocation {
+                unit: EntryLocationUnit::DataCluster(entry_from.data_cluster),
+                index: 1,
+            };
+
             use utils::bincode::BINCODE_CONFIG;
 
             self._go_to_cached_dir()?;
@@ -1954,8 +1951,7 @@ where
                 BINCODE_CONFIG,
             )?;
 
-            self.sector_buffer[DIRENTRY_SIZE..(DIRENTRY_SIZE * 2)].copy_from_slice(&bytes);
-            self.set_modified();
+            entry_location.set_bytes(self, bytes)?;
         }
 
         let old_chain = entry_from.chain;

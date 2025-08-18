@@ -308,11 +308,7 @@ where
         };
 
         // load the sector of the current entry
-        let entry_sector = entry_location.get_entry_sector(self.fs);
-        let sector_offset = entry_location.get_sector_byte_offset(self.fs);
-        self.fs.load_nth_sector(entry_sector)?;
-
-        let chunk = &self.fs.sector_buffer[sector_offset..(sector_offset + DIRENTRY_SIZE)];
+        let chunk = entry_location.get_bytes(self.fs)?;
 
         match chunk[0] {
             LAST_AND_UNUSED_ENTRY => {
@@ -328,7 +324,7 @@ where
         };
 
         let Ok(entry) =
-            bincode::decode_from_slice::<FATDirEntry, _>(chunk, BINCODE_CONFIG).map(|(v, _)| v)
+            bincode::decode_from_slice::<FATDirEntry, _>(&chunk, BINCODE_CONFIG).map(|(v, _)| v)
         else {
             // FIXME: handle such error cases or panic
             return Ok(None);
@@ -349,7 +345,7 @@ where
             if entry.attributes.contains(RawAttributes::LFN) {
                 // TODO: perhaps there is a way to utilize the `order` field?
                 let Ok((lfn_entry, _)) =
-                    bincode::decode_from_slice::<LFNEntry, _>(chunk, BINCODE_CONFIG)
+                    bincode::decode_from_slice::<LFNEntry, _>(&chunk, BINCODE_CONFIG)
                 else {
                     if let Some(current_chain) = &mut self.current_chain {
                         current_chain.len -= 1

@@ -463,12 +463,8 @@ where
                     }
                     None => chain_start,
                 };
-            let sector = direntry_location.get_entry_sector(self.fs);
-            let offset = direntry_location.get_sector_byte_offset(self.fs);
 
-            self.fs.load_nth_sector(sector)?;
-            self.fs.sector_buffer[offset..(offset + DIRENTRY_SIZE)].clone_from_slice(&bytes);
-            self.fs.set_modified();
+            direntry_location.set_bytes(self.fs, bytes)?;
 
             self.entry_modified = false;
         }
