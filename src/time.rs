@@ -21,8 +21,6 @@ pub trait Clock: fmt::Debug {
 #[allow(missing_copy_implementations)]
 pub struct DefaultClock;
 
-pub(crate) static STATIC_DEFAULT_CLOCK: DefaultClock = DefaultClock {};
-
 impl Clock for DefaultClock {
     fn now(&self) -> PrimitiveDateTime {
         #[cfg(feature = "std")]
