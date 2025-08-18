@@ -426,19 +426,6 @@ impl<S> FileSystem<S>
 where
     S: Read + Seek,
 {
-    /// Replace the internal [`Clock`] with a different one
-    ///
-    /// Use this in `no-std` contexts to replace the [`DefaultClock`] used
-    pub fn with_clock<C>(&mut self, boxed_clock: Box<dyn Clock>) {
-        self.clock = boxed_clock;
-    }
-}
-
-/// Setter functions
-impl<S> FileSystem<S>
-where
-    S: Read + Seek,
-{
     /// Whether or not to list hidden files
     ///
     /// Off by default
@@ -465,7 +452,7 @@ where
     ///
     /// Fails if the storage is way too small to support a FAT filesystem.
     /// For most use cases, that shouldn't be an issue, you can just call [`.unwrap()`](Result::unwrap)
-    pub fn from_storage(mut storage: S) -> FSResult<Self, S::Error> {
+    pub fn new(mut storage: S, options: FSOptions) -> FSResult<Self, S::Error> {
         use utils::bincode::BINCODE_CONFIG;
 
         // Begin by reading the boot record
@@ -544,7 +531,7 @@ where
                 stored_sector,
             ),
             fsinfo_modified: false,
-            clock: Box::from(&STATIC_DEFAULT_CLOCK),
+            clock: options.clock,
             dir_info: DirInfo::at_root_dir(&boot_record),
             sync_f: None,
             unmount_f: None,
