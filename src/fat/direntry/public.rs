@@ -2,6 +2,7 @@ use super::*;
 
 use core::ops;
 
+use crate::io::prelude::*;
 use crate::*;
 
 #[cfg(not(feature = "std"))]
@@ -236,5 +237,62 @@ impl ops::Deref for DirEntry {
     #[inline]
     fn deref(&self) -> &Self::Target {
         &self.entry
+    }
+}
+
+/// Iterator over the entries in a directory.
+///
+/// The order in which this iterator returns entries can vary
+/// and shouldn't be relied upon
+#[derive(Debug)]
+pub struct ReadDir<'a, S>(pub(crate) ReadDirInt<'a, S>)
+where
+    S: Read + Seek;
+
+impl<S> ReadDir<'_, S>
+where
+    S: Read + Seek,
+{
+    #[inline]
+    pub(crate) fn get_fs(&mut self) -> &mut FileSystem<S> {
+        self.0.get_fs()
+    }
+}
+
+impl<'a, S> From<ReadDirInt<'a, S>> for ReadDir<'a, S>
+where
+    S: Read + Seek,
+{
+    fn from(value: ReadDirInt<'a, S>) -> Self {
+        Self(value)
+    }
+}
+
+impl<S> Iterator for ReadDir<'_, S>
+where
+    S: Read + Seek,
+{
+    type Item = Result<DirEntry, S::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.0.next() {
+                Some(res) => match res {
+                    Ok(value) => {
+                        if self.get_fs().filter.filter(&value)
+                            // we shouldn't expose the special entries to the user
+                            && ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
+                                .contains(&value.name.as_str())
+                        {
+                            return Some(Ok(value.into_dir_entry(&self.get_fs().dir_info.path)));
+                        } else {
+                            continue;
+                        }
+                    }
+                    Err(err) => return Some(Err(err)),
+                },
+                None => return None,
+            }
+        }
     }
 }
