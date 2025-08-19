@@ -3,7 +3,9 @@ use alloc::{format, string::String};
 
 use alloc::string::FromUtf16Error;
 
-use crate::{io::prelude::*, path::*, FSResult, FileSystem, Sfn, SFN_EXT_LEN, SFN_NAME_LEN};
+use crate::{
+    io::prelude::*, path::*, Codepage, FSResult, FileSystem, Sfn, SFN_EXT_LEN, SFN_NAME_LEN,
+};
 
 /// variation of <https://stackoverflow.com/a/42067321/19247098> for processing LFNs
 pub(crate) fn string_from_lfn(utf16_src: &[u16]) -> Result<String, FromUtf16Error> {
@@ -15,9 +17,9 @@ pub(crate) fn string_from_lfn(utf16_src: &[u16]) -> Result<String, FromUtf16Erro
     String::from_utf16(&utf16_src[..nul_range_end])
 }
 
-pub(crate) fn as_sfn(string: &str) -> Option<Sfn> {
+pub(crate) fn as_sfn(string: &str, codepage: &Codepage) -> Option<Sfn> {
     // anything non-ascii should be represented as a LFN
-    if !string.is_ascii() {
+    if !string.chars().all(|c| codepage.contains(c)) {
         return None;
     }
 
@@ -65,8 +67,8 @@ struct SfnGenerator {
 }
 
 impl SfnGenerator {
-    fn new(string: &str) -> Self {
-        let (name, ext) = Self::_sfn_name_ext_from_string(string);
+    fn new(string: &str, codepage: &Codepage) -> Self {
+        let (name, ext) = Self::_sfn_name_ext_from_string(string, codepage);
 
         Self {
             name,
@@ -77,8 +79,8 @@ impl SfnGenerator {
         }
     }
 
-    fn _sfn_name_ext_from_string(string: &str) -> (String, String) {
-        let ascii_string: String = string.chars().filter(|c| c.is_ascii()).collect();
+    fn _sfn_name_ext_from_string(string: &str, codepage: &Codepage) -> (String, String) {
+        let ascii_string: String = string.chars().filter(|c| codepage.contains(*c)).collect();
 
         // a file can still not have an extension
         let (mut name, mut ext) = ascii_string
@@ -150,7 +152,7 @@ where
 {
     // we first check if this string is a valid short filename
     'outer: {
-        if let Some(sfn) = as_sfn(string) {
+        if let Some(sfn) = as_sfn(string, &fs.codepage) {
             // don't forget to check if that SFN already exists
             for entry in fs.process_current_dir() {
                 let entry = entry?;
@@ -164,7 +166,7 @@ where
         }
     }
 
-    let generator = SfnGenerator::new(string);
+    let generator = SfnGenerator::new(string, &fs.codepage);
 
     // FIXME: this is bad, has best-case O(n) time complexity
     'outer: for sfn in generator {

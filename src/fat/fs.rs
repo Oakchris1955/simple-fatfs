@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::{error::*, io::prelude::*, path::*, time::*, utils};
+use crate::{codepage, error::*, io::prelude::*, path::*, time::*, utils};
 
 use core::{cmp, iter, num, ops};
 
@@ -398,6 +398,7 @@ where
     unmount_f: Option<UnmountFn<S>>,
 
     pub(crate) clock: Box<dyn Clock>,
+    pub(crate) codepage: codepage::Codepage,
 
     pub(crate) boot_record: BootRecord,
     // since `self.boot_record.fat_type()` calls like 5 nested functions, we keep this cached and expose it with a public getter function
@@ -532,6 +533,7 @@ where
             ),
             fsinfo_modified: false,
             clock: options.clock,
+            codepage: options.codepage,
             dir_info: DirInfo::at_root_dir(&boot_record),
             sync_f: None,
             unmount_f: None,
@@ -1241,7 +1243,7 @@ where
 
         let entries = Box::from([
             MinProperties {
-                name: CURRENT_DIR_SFN.to_string().into(),
+                name: Box::from(typed_path::constants::windows::CURRENT_DIR_STR),
                 sfn: CURRENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
@@ -1252,7 +1254,7 @@ where
                 data_cluster: dir_cluster,
             },
             MinProperties {
-                name: PARENT_DIR_SFN.to_string().into(),
+                name: Box::from(typed_path::constants::windows::PARENT_DIR_STR),
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
@@ -1268,7 +1270,7 @@ where
         ]);
 
         // this composer will ALWAYS generate 2 entries
-        let entries_iter = EntryComposer::from(entries);
+        let entries_iter = EntryComposer::new(entries, &self.codepage);
 
         self.load_nth_sector(self.data_cluster_to_partition_sector(dir_cluster))?;
 
@@ -1318,14 +1320,14 @@ where
         self._go_to_cached_dir()?;
 
         for entry in &entries {
-            entries_needed += calc_entries_needed(&(*entry.name)).get();
+            entries_needed += calc_entries_needed(&(*entry.name), &self.codepage).get();
         }
 
         let first_entry = self.allocate_nth_entries(
             num::NonZero::new(entries_needed).expect("The entries array shouldn't be empty"),
         )?;
 
-        let mut entries_iter = EntryComposer::from(entries);
+        let mut entries_iter = EntryComposer::new(entries, &self.codepage);
 
         let mut current_entry = first_entry;
         let mut entry_bytes = entries_iter
@@ -1907,7 +1909,7 @@ where
             // so that it points to the new parent directory
             // the ".." entry is always the second entry, so we will do something a bit hacky here
             let parent_entry = MinProperties {
-                name: PARENT_DIR_SFN.to_string().into(),
+                name: Box::from(typed_path::constants::windows::PARENT_DIR_STR),
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
@@ -2006,6 +2008,8 @@ where
             )
             .into());
         }
+
+        log::error!("{:?}", self.read_dir(path).unwrap().collect::<Vec<_>>());
 
         if self.read_dir(path)?.next().is_some() {
             return Err(FSError::DirectoryNotEmpty);

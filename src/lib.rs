@@ -79,6 +79,7 @@
 
 extern crate alloc;
 
+mod codepage;
 mod error;
 mod fat;
 pub mod io;
@@ -86,6 +87,7 @@ mod path;
 mod time;
 mod utils;
 
+pub use codepage::*;
 pub use error::*;
 pub use fat::*;
 pub use path::*;

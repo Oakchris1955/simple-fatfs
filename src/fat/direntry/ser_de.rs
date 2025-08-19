@@ -72,7 +72,7 @@ impl LFNEntry {
 ///
 /// This only takes into account the [`DirEntries`](DirEntry) needed,
 /// not the contents of the file
-pub(crate) fn calc_entries_needed<S>(file_name: S) -> num::NonZero<EntryCount>
+pub(crate) fn calc_entries_needed<S>(file_name: S, codepage: &Codepage) -> num::NonZero<EntryCount>
 where
     S: ToString,
 {
@@ -80,7 +80,7 @@ where
 
     let file_name = file_name.to_string();
     let char_count = file_name.chars().count();
-    let lfn_entries_needed = if as_sfn(&file_name).is_some() {
+    let lfn_entries_needed = if as_sfn(&file_name, codepage).is_some() {
         0
     } else {
         char_count.div_ceil(CHARS_PER_LFN_ENTRY)
@@ -185,15 +185,19 @@ pub(crate) struct EntryComposer {
     entry_index: usize,
 
     lfn_iter: Option<LFNEntryGenerator>,
+
+    codepage: Codepage,
 }
 
-impl From<Box<[MinProperties]>> for EntryComposer {
-    fn from(value: Box<[MinProperties]>) -> Self {
+impl EntryComposer {
+    pub(crate) fn new(entries: Box<[MinProperties]>, codepage: &Codepage) -> Self {
         Self {
-            entries: value,
+            entries,
             entry_index: 0,
 
             lfn_iter: None,
+
+            codepage: *codepage,
         }
     }
 }
@@ -233,7 +237,9 @@ impl Iterator for EntryComposer {
             },
             None => {
                 // no reason to generate a SFN if the filename is already a valid one
-                if *current_entry.sfn.to_string() == *current_entry.name {
+                if utils::string::as_sfn(&current_entry.name, &self.codepage)
+                    .is_some_and(|sfn| sfn == current_entry.sfn)
+                {
                     self.entry_index += 1;
 
                     bincode::encode_into_slice(
@@ -390,7 +396,7 @@ where
                     self.lfn_checksum = None;
                     parsed_str
                 } else {
-                    entry.sfn.to_string()
+                    entry.sfn.decode(&self.fs.codepage)
                 };
 
                 if let (Ok(created), Ok(modified), Ok(accessed)) = (

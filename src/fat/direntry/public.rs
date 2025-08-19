@@ -1,6 +1,6 @@
 use super::*;
 
-use core::{fmt, ops};
+use core::ops;
 
 use crate::*;
 
@@ -107,20 +107,19 @@ impl Sfn {
 
         sum
     }
-}
 
-impl fmt::Display for Sfn {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub(crate) fn decode(&self, codepage: &Codepage) -> String {
+        let mut string = String::with_capacity(SFN_LEN);
         // we begin by writing the name (even if it is padded with spaces, they will be trimmed, so we don't care)
-        write!(f, "{}", String::from_utf8_lossy(&self.name).trim())?;
+        string.push_str(codepage.decode(&self.name).trim_end());
 
         // then, if the extension isn't empty (padded with zeroes), we write it too
-        let ext = String::from_utf8_lossy(&self.ext).trim().to_owned();
+        let ext = codepage.decode(&self.ext).trim_end().to_owned();
         if !ext.is_empty() {
-            write!(f, ".{ext}")?;
+            string.push_str(&ext);
         };
 
-        Ok(())
+        string
     }
 }
 
