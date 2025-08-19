@@ -1616,7 +1616,7 @@ impl<S> FileSystem<S>
 where
     S: Read + Seek,
 {
-    /// Read all the entries of a directory ([`Path`]) into [`ReadDirInt`]
+    /// Read all the entries of a directory ([`Path`]) into [`ReadDir`]
     ///
     /// Fails if `path` doesn't represent a directory, or if that directory doesn't exist
     pub fn read_dir<P: AsRef<Path>>(&mut self, path: P) -> FSResult<ReadDir<'_, S>, S::Error> {
