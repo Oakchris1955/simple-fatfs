@@ -8,6 +8,7 @@ use alloc::boxed::Box;
 pub struct FSOptions {
     pub(crate) clock: Box<dyn Clock>,
     pub(crate) codepage: codepage::Codepage,
+    pub(crate) update_file_fields: bool,
 }
 
 impl FSOptions {
@@ -30,6 +31,18 @@ impl FSOptions {
 
         self
     }
+
+    /// Whether to update the last accessed/modified file fields
+    pub fn set_update_file_fields(&mut self, update: bool) {
+        self.update_file_fields = update
+    }
+
+    /// Whether to update the last accessed/modified file fields (chainable)
+    pub fn with_update_file_fields(mut self, update: bool) -> Self {
+        self.update_file_fields = update;
+
+        self
+    }
 }
 
 impl Default for FSOptions {
@@ -37,6 +50,7 @@ impl Default for FSOptions {
         Self {
             clock: Box::new(DefaultClock),
             codepage: codepage::Codepage::CP437,
+            update_file_fields: false,
         }
     }
 }

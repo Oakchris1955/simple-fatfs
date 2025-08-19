@@ -399,6 +399,7 @@ where
 
     pub(crate) clock: Box<dyn Clock>,
     pub(crate) codepage: codepage::Codepage,
+    pub(crate) update_file_fields: bool,
 
     pub(crate) boot_record: BootRecord,
     // since `self.boot_record.fat_type()` calls like 5 nested functions, we keep this cached and expose it with a public getter function
@@ -540,6 +541,7 @@ where
             fsinfo_modified: false,
             clock: options.clock,
             codepage: options.codepage,
+            update_file_fields: options.update_file_fields,
             dir_info: DirInfo::at_root_dir(&boot_record),
             sync_f: None,
             unmount_f: None,

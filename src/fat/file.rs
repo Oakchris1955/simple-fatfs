@@ -475,25 +475,29 @@ where
 
     #[inline]
     fn _set_accessed(&mut self) {
-        let now = self.fs.clock.now();
+        if self.fs.update_file_fields {
+            let now = self.fs.clock.now();
 
-        if let Some(accessed) = &mut self.accessed {
-            *accessed = now.date();
+            if let Some(accessed) = &mut self.accessed {
+                *accessed = now.date();
+            }
+
+            self.entry_modified = true;
         }
-
-        self.entry_modified = true;
     }
 
     #[inline]
     fn _set_modified(&mut self) {
-        let now = self.fs.clock.now();
+        if self.fs.update_file_fields {
+            let now = self.fs.clock.now();
 
-        if let Some(accessed) = &mut self.accessed {
-            *accessed = now.date();
+            if let Some(accessed) = &mut self.accessed {
+                *accessed = now.date();
+            }
+            self.modified = now;
+
+            self.entry_modified = true;
         }
-        self.modified = now;
-
-        self.entry_modified = true;
     }
 }
 
@@ -691,6 +695,7 @@ where
         }
 
         self._set_accessed();
+        self.entry_modified = true;
 
         self.ro_file.seek(pos)
     }

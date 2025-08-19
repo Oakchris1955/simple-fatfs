@@ -752,7 +752,8 @@ fn check_last_accessed_rw() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let mut fs =
+        FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
 
     let mut file = fs
         .get_rw_file(PathBuf::from("/bee movie script.txt"))
@@ -778,7 +779,8 @@ fn check_last_modified() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let mut fs =
+        FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
 
     let mut file = fs
         .get_rw_file(PathBuf::from("/bee movie script.txt"))
