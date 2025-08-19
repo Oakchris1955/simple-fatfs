@@ -45,7 +45,8 @@ pub(crate) const DIRENTRY_SIZE: usize = 32;
 
 pub(crate) const SFN_NAME_LEN: usize = 8;
 pub(crate) const SFN_EXT_LEN: usize = 3;
-pub(crate) const SFN_LEN: usize = SFN_NAME_LEN + SFN_EXT_LEN;
+// don't forget the "." between the name and the file extension
+pub(crate) const SFN_LEN: usize = SFN_NAME_LEN + 1 + SFN_EXT_LEN;
 
 #[derive(Encode, Decode, Debug, Clone, Copy, PartialEq, Eq)]
 /// The short filename of an entry
@@ -86,8 +87,8 @@ pub(crate) const PARENT_DIR_SFN: Sfn = Sfn {
 };
 
 impl Sfn {
-    fn get_byte_slice(&self) -> [u8; SFN_LEN] {
-        let mut slice = [0; SFN_LEN];
+    fn get_byte_slice(&self) -> [u8; SFN_NAME_LEN + SFN_EXT_LEN] {
+        let mut slice = [0; SFN_NAME_LEN + SFN_EXT_LEN];
 
         slice[..SFN_NAME_LEN].copy_from_slice(&self.name);
         slice[SFN_NAME_LEN..].copy_from_slice(&self.ext);
