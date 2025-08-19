@@ -176,6 +176,10 @@ where
      Consider performing this operation on a subdirectory instead
     */
     DirEntryLimitReached,
+    /**
+     The filesystem provided is not supported (e.g. ExFAT).
+    */
+    UnsupportedFS,
     /// An IO error occured
     #[displaydoc("An IO error occured: {0}")]
     IOError(I),

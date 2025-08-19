@@ -18,10 +18,7 @@ impl BootRecord {
     pub(crate) fn fat_type(&self) -> FATType {
         match self {
             BootRecord::Fat(boot_record_fat) => boot_record_fat.fat_type(),
-            BootRecord::ExFAT(_boot_record_exfat) => {
-                todo!("ExFAT not yet implemented");
-                FATType::ExFAT
-            }
+            BootRecord::ExFAT(_boot_record_exfat) => FATType::ExFAT,
         }
     }
 

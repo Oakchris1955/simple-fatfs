@@ -509,6 +509,12 @@ where
 
         // verify boot record signature
         let fat_type = boot_record.fat_type();
+
+        if fat_type == FATType::ExFAT {
+            log::error!("Filesystem is ExFAT, which is currently unsupported");
+            return Err(FSError::UnsupportedFS);
+        }
+
         log::info!("The FAT type of the filesystem is {fat_type:?}");
 
         match &boot_record {
