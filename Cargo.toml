@@ -15,6 +15,7 @@ bitflags = { version = "2.6.0", features = ["serde"] }
 displaydoc = { version = "0.2.5", default-features = false }
 log = "0.4.22"
 oem_cp = "2.1.0"
+setbits = "0.1.0"
 #serde = { version = "1.0.204", default-features = false, features = [ "alloc", "derive" ] }
 #serde-big-array = "0.5.1"
 time = { version = "0.3.36", default-features = false, features = [ "alloc", "parsing", "macros", "local-offset" ]}
