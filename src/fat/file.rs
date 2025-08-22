@@ -453,7 +453,7 @@ where
                 .to_owned();
             // the first entry of the dirchain could belong to a LFNEntry, so we must handle that
             let direntry_location = match num::NonZero::new(
-                EntryCount::from(calc_entries_needed(file_name, &self.fs.codepage)) - 1,
+                EntryCount::from(calc_entries_needed(file_name, &self.fs.options.codepage)) - 1,
             ) {
                 Some(nonzero) => {
                     chain_start
@@ -475,8 +475,8 @@ where
 
     #[inline]
     fn _set_accessed(&mut self) {
-        if self.fs.update_file_fields {
-            let now = self.fs.clock.now();
+        if self.fs.options.update_file_fields {
+            let now = self.fs.options.clock.now();
 
             if let Some(accessed) = &mut self.accessed {
                 *accessed = now.date();
@@ -488,8 +488,8 @@ where
 
     #[inline]
     fn _set_modified(&mut self) {
-        if self.fs.update_file_fields {
-            let now = self.fs.clock.now();
+        if self.fs.options.update_file_fields {
+            let now = self.fs.options.clock.now();
 
             if let Some(accessed) = &mut self.accessed {
                 *accessed = now.date();

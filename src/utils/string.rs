@@ -152,7 +152,7 @@ where
 {
     // we first check if this string is a valid short filename
     'outer: {
-        if let Some(sfn) = as_sfn(string, &fs.codepage) {
+        if let Some(sfn) = as_sfn(string, &fs.options.codepage) {
             // don't forget to check if that SFN already exists
             for entry in fs.process_current_dir() {
                 let entry = entry?;
@@ -166,7 +166,7 @@ where
         }
     }
 
-    let generator = SfnGenerator::new(string, &fs.codepage);
+    let generator = SfnGenerator::new(string, &fs.options.codepage);
 
     // FIXME: this is bad, has best-case O(n) time complexity
     'outer: for sfn in generator {

@@ -396,7 +396,7 @@ where
                     self.lfn_checksum = None;
                     parsed_str
                 } else {
-                    entry.sfn.decode(&self.fs.codepage)
+                    entry.sfn.decode(&self.fs.options.codepage)
                 };
 
                 if let (Ok(created), Ok(modified), Ok(accessed)) = (

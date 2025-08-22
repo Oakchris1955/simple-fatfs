@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::{codepage, error::*, io::prelude::*, path::*, time::*, utils};
+use crate::{error::*, io::prelude::*, path::*, utils};
 
 use core::{cmp, iter, num, ops};
 
@@ -397,9 +397,7 @@ where
     sync_f: Option<SyncSectorBufferFn<S>>,
     unmount_f: Option<UnmountFn<S>>,
 
-    pub(crate) clock: Box<dyn Clock>,
-    pub(crate) codepage: codepage::Codepage,
-    pub(crate) update_file_fields: bool,
+    pub(crate) options: FSOptions,
 
     pub(crate) boot_record: BootRecord,
     // since `self.boot_record.fat_type()` calls like 5 nested functions, we keep this cached and expose it with a public getter function
@@ -539,9 +537,7 @@ where
                 stored_sector,
             ),
             fsinfo_modified: false,
-            clock: options.clock,
-            codepage: options.codepage,
-            update_file_fields: options.update_file_fields,
+            options,
             dir_info: DirInfo::at_root_dir(&boot_record),
             sync_f: None,
             unmount_f: None,
@@ -1277,7 +1273,7 @@ where
         ]);
 
         // this composer will ALWAYS generate 2 entries
-        let entries_iter = EntryComposer::new(entries, &self.codepage);
+        let entries_iter = EntryComposer::new(entries, &self.options.codepage);
 
         self.load_nth_sector(self.data_cluster_to_partition_sector(dir_cluster))?;
 
@@ -1327,14 +1323,14 @@ where
         self._go_to_cached_dir()?;
 
         for entry in &entries {
-            entries_needed += calc_entries_needed(&(*entry.name), &self.codepage).get();
+            entries_needed += calc_entries_needed(&(*entry.name), &self.options.codepage).get();
         }
 
         let first_entry = self.allocate_nth_entries(
             num::NonZero::new(entries_needed).expect("The entries array shouldn't be empty"),
         )?;
 
-        let mut entries_iter = EntryComposer::new(entries, &self.codepage);
+        let mut entries_iter = EntryComposer::new(entries, &self.options.codepage);
 
         let mut current_entry = first_entry;
         let mut entry_bytes = entries_iter
@@ -1753,7 +1749,7 @@ where
 
         let sfn = utils::string::gen_sfn(file_name, self, parent_dir)?;
 
-        let now = self.clock.now();
+        let now = self.options.clock.now();
 
         // we got everything to create our first (and only) RawProperties struct
         let raw_properties = MinProperties {
@@ -1814,7 +1810,7 @@ where
             }
         }
 
-        let now = self.clock.now();
+        let now = self.options.clock.now();
 
         let dir_cluster = self.create_entry_chain(self.dir_info.chain_start, now)?;
 
@@ -1909,7 +1905,7 @@ where
         // pointing to the same file. Here we use the second method
         self.go_to_dir(parent_to)?;
 
-        let now = self.clock.now();
+        let now = self.options.clock.now();
 
         if entry_from.is_dir() {
             // the process with directories is the same, expect we must modify the ".." entry
