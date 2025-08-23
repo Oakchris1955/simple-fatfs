@@ -1,5 +1,5 @@
 #[cfg(not(feature = "std"))]
-use alloc::string::String;
+use alloc::{boxed::Box, format, string::String};
 
 use alloc::string::FromUtf16Error;
 
