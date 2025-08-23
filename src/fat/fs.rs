@@ -2012,8 +2012,6 @@ where
             .into());
         }
 
-        log::error!("{:?}", self.read_dir(path).unwrap().collect::<Vec<_>>());
-
         if self.read_dir(path)?.next().is_some() {
             return Err(FSError::DirectoryNotEmpty);
         }
