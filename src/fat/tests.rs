@@ -221,11 +221,21 @@ fn create_subdir_file() {
 fn create_lots_of_files() {
     use regex::Regex;
     use std::io::Cursor;
+    use std::num;
 
-    const FILE_COUNT: usize = 1_000;
+    const FILE_COUNT: usize = 1000;
 
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let mut fs = FileSystem::new(
+        &mut storage,
+        FSOptions::new().with_filter_size(compute_bitmap_size(
+            num::NonZero::new(FILE_COUNT * 2).unwrap(),
+            0.001,
+        )),
+    )
+    .unwrap();
+
+    fs.cache_dir("/another root directory").unwrap();
 
     for i in 1..=FILE_COUNT {
         let name = PathBuf::from(&format!("/another root directory/{i}.txt"));

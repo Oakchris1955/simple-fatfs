@@ -193,6 +193,9 @@ pub(crate) struct DirInfo {
     ///
     /// [`None`] if it is not known
     pub(crate) chain_end: Option<EntryLocation>,
+    // we box that to save space if it is None (as of writing this,
+    // the Bloom struct occupies 184 bytes in-memory)
+    pub(crate) filter: Option<Box<utils::bloom::Bloom<Box<str>>>>,
 }
 
 impl DirInfo {
@@ -211,6 +214,7 @@ impl DirInfo {
                 BootRecord::ExFAT(_boot_record_exfat) => todo!(),
             },
             chain_end: None,
+            filter: None,
         }
     }
 }
@@ -1681,6 +1685,13 @@ where
         }
 
         if let Some(file_name) = path.file_name() {
+            // IO operations are expensive, check the bloom filter
+            if let Some(filter) = &self.dir_info.borrow().filter {
+                if !filter.check(&Box::from(file_name)) {
+                    return Err(FSError::NotFound);
+                }
+            }
+
             let parent_dir = self.read_dir(
                 path.parent()
                     .expect("we aren't in the root directory, this shouldn't panic"),
@@ -1734,6 +1745,48 @@ where
             Err(FSError::IsADirectory)
         }
     }
+
+    /// Cache all of path's entries if it is a directory into a Bloom filter
+    ///
+    /// Useful if you plan to create lots of files in a directory
+    ///
+    /// Increases memory usage by `options.query_filter_size()`, where
+    /// options is the [`FSOptions`] struct passed to [`new`](Self::new)
+    pub fn cache_dir<P>(&mut self, path: P) -> FSResult<(), S::Error>
+    where
+        P: AsRef<Path>,
+    {
+        let path = path.as_ref();
+
+        if !path.is_valid() {
+            return Err(FSError::MalformedPath);
+        }
+
+        self.go_to_dir(path)?;
+
+        let mut filter = utils::bloom::Bloom::new(
+            self.options.filter_size,
+            num::NonZeroUsize::new(DIRENTRY_LIMIT.into()).unwrap(),
+        );
+
+        let codepage = self.options.codepage;
+
+        for entry in self.process_current_dir() {
+            let entry = entry?;
+
+            // FIXME: convert long name and sfns to boxed strings when processing
+            // to minimize heap allocations
+            let long_name: Box<str> = Box::from(entry.name);
+            let short_name: Box<str> = Box::from(entry.sfn.decode(codepage));
+
+            filter.set(&short_name);
+            filter.set(&long_name);
+        }
+
+        self.dir_info.borrow_mut().filter = Some(Box::new(filter));
+
+        Ok(())
+    }
 }
 
 /// [`Write`]-related functions
@@ -1766,11 +1819,21 @@ where
         self.go_to_dir(parent_dir)?;
 
         // check if there is already a file or directory with the same name
-        for entry in self.process_current_dir() {
-            let entry = entry?;
+        // this won't actually run unless the file we are creating is in the
+        // cached directory
+        'check: {
+            if let Some(filter) = &self.dir_info.borrow().filter {
+                if !filter.check(&Box::from(file_name)) {
+                    break 'check;
+                }
+            }
 
-            if entry.name == file_name {
-                return Err(FSError::AlreadyExists);
+            for entry in self.process_current_dir() {
+                let entry = entry?;
+
+                if entry.name == file_name {
+                    return Err(FSError::AlreadyExists);
+                }
             }
         }
 
@@ -1794,7 +1857,15 @@ where
         };
 
         let entries = [raw_properties.clone()];
+        log::error!("bad...");
+
         let chain = self.insert_to_entry_chain(Box::new(entries))?;
+        log::error!("feeling...");
+
+        if let Some(filter) = &mut self.dir_info.borrow_mut().filter {
+            filter.set(&raw_properties.name);
+            filter.set(&Box::from(raw_properties.sfn.decode(self.options.codepage)));
+        }
 
         Ok(RWFile::from_props(
             FileProps {

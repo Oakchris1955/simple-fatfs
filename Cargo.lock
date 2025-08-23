@@ -483,6 +483,7 @@ dependencies = [
  "oem_cp",
  "rand 0.9.2",
  "regex",
+ "siphasher",
  "test-log",
  "time",
  "typed-path",
