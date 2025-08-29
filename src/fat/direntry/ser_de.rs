@@ -172,6 +172,10 @@ impl Iterator for LFNEntryGenerator {
 
 impl iter::FusedIterator for LFNEntryGenerator {}
 
+/// A special case where due to 0xE5 being a valid
+/// byte sequence in the Japanese codepage, 0x05
+/// is used instead
+pub(crate) const USED_KANJI: u8 = 0x05;
 pub(crate) const UNUSED_ENTRY: u8 = 0xE5;
 pub(crate) const LAST_AND_UNUSED_ENTRY: u8 = 0x00;
 
@@ -310,7 +314,7 @@ where
         };
 
         // load the sector of the current entry
-        let chunk = entry_location.get_bytes(self.fs)?;
+        let mut chunk = entry_location.get_bytes(self.fs)?;
 
         match chunk[0] {
             LAST_AND_UNUSED_ENTRY => {
@@ -322,6 +326,7 @@ where
                 self.entry_location = entry_location.next_entry(self.fs)?;
                 return Ok(None);
             }
+            USED_KANJI => chunk[0] = UNUSED_ENTRY,
             _ => (),
         };
 
