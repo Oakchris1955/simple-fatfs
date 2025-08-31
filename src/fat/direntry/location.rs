@@ -17,7 +17,7 @@ pub(crate) enum EntryLocationUnit {
 impl EntryLocationUnit {
     // I will leave this here in case it is needed in the future
     #[allow(unused)]
-    pub(crate) fn from_partition_sector<S>(sector: SectorIndex, fs: &mut FileSystem<S>) -> Self
+    pub(crate) fn from_partition_sector<S>(sector: SectorIndex, fs: &FileSystem<S>) -> Self
     where
         S: Read + Seek,
     {
@@ -31,7 +31,7 @@ impl EntryLocationUnit {
         }
     }
 
-    pub(crate) fn get_max_offset<S>(&self, fs: &mut FileSystem<S>) -> u16
+    pub(crate) fn get_max_offset<S>(&self, fs: &FileSystem<S>) -> u16
     where
         S: Read + Seek,
     {
@@ -44,7 +44,7 @@ impl EntryLocationUnit {
             .expect("a cluster can have a max of ~16k entries")
     }
 
-    pub(crate) fn get_entry_sector<S>(&self, fs: &mut FileSystem<S>) -> SectorIndex
+    pub(crate) fn get_entry_sector<S>(&self, fs: &FileSystem<S>) -> SectorIndex
     where
         S: Read + Seek,
     {
@@ -60,13 +60,13 @@ impl EntryLocationUnit {
 
     pub(crate) fn get_next_unit<S>(
         &self,
-        fs: &mut FileSystem<S>,
+        fs: &FileSystem<S>,
     ) -> Result<Option<EntryLocationUnit>, S::Error>
     where
         S: Read + Seek,
     {
         match self {
-            EntryLocationUnit::RootDirSector(sector) => match &fs.boot_record {
+            EntryLocationUnit::RootDirSector(sector) => match &*fs.boot_record.borrow() {
                 BootRecord::Fat(boot_record_fat) => {
                     if boot_record_fat.root_dir_sectors() == 0 {
                         unreachable!(concat!("This should be zero iff the FAT type if FAT32, ",
@@ -109,7 +109,7 @@ pub(crate) struct EntryLocation {
 }
 
 impl EntryLocation {
-    pub(crate) fn from_partition_sector<S>(sector: SectorIndex, fs: &mut FileSystem<S>) -> Self
+    pub(crate) fn from_partition_sector<S>(sector: SectorIndex, fs: &FileSystem<S>) -> Self
     where
         S: Read + Seek,
     {
@@ -118,7 +118,7 @@ impl EntryLocation {
         Self { unit, index: 0 }
     }
 
-    pub(crate) fn entry_status<S>(&self, fs: &mut FileSystem<S>) -> Result<EntryStatus, S::Error>
+    pub(crate) fn entry_status<S>(&self, fs: &FileSystem<S>) -> Result<EntryStatus, S::Error>
     where
         S: Read + Seek,
     {
@@ -126,7 +126,7 @@ impl EntryLocation {
         fs.load_nth_sector(entry_sector)?;
 
         let byte_offset = self.get_sector_byte_offset(fs);
-        Ok(match fs.sector_buffer[byte_offset] {
+        Ok(match fs.sector_buffer.borrow()[byte_offset] {
             UNUSED_ENTRY => EntryStatus::Unused,
             LAST_AND_UNUSED_ENTRY => EntryStatus::LastUnused,
             _ => EntryStatus::Used,
@@ -134,7 +134,7 @@ impl EntryLocation {
     }
 
     #[inline]
-    pub(crate) fn get_entry_sector<S>(&self, fs: &mut FileSystem<S>) -> SectorIndex
+    pub(crate) fn get_entry_sector<S>(&self, fs: &FileSystem<S>) -> SectorIndex
     where
         S: Read + Seek,
     {
@@ -146,7 +146,7 @@ impl EntryLocation {
     }
 
     #[inline]
-    pub(crate) fn get_sector_byte_offset<S>(&self, fs: &mut FileSystem<S>) -> usize
+    pub(crate) fn get_sector_byte_offset<S>(&self, fs: &FileSystem<S>) -> usize
     where
         S: Read + Seek,
     {
@@ -155,10 +155,7 @@ impl EntryLocation {
 
     // Note: this could also return a borrowed subslice from fs.sector_buffer,
     // but since it is only 32 bytes, I don't think it is worth the hastle
-    pub(crate) fn get_bytes<S>(
-        &self,
-        fs: &mut FileSystem<S>,
-    ) -> Result<[u8; DIRENTRY_SIZE], S::Error>
+    pub(crate) fn get_bytes<S>(&self, fs: &FileSystem<S>) -> Result<[u8; DIRENTRY_SIZE], S::Error>
     where
         S: Read + Seek,
     {
@@ -174,7 +171,7 @@ impl EntryLocation {
 
     pub(crate) fn set_bytes<S>(
         &self,
-        fs: &mut FileSystem<S>,
+        fs: &FileSystem<S>,
         bytes: [u8; DIRENTRY_SIZE],
     ) -> Result<(), S::Error>
     where
@@ -183,17 +180,14 @@ impl EntryLocation {
         let entry_sector = self.get_entry_sector(fs);
         let entry_offset = self.get_sector_byte_offset(fs);
         fs.load_nth_sector(entry_sector)?;
-        fs.sector_buffer[entry_offset..entry_offset + DIRENTRY_SIZE].copy_from_slice(&bytes);
+        fs.sector_buffer.borrow_mut()[entry_offset..entry_offset + DIRENTRY_SIZE]
+            .copy_from_slice(&bytes);
         fs.set_modified();
 
         Ok(())
     }
 
-    pub(crate) fn free_entry<S>(
-        &self,
-        fs: &mut FileSystem<S>,
-        is_last: bool,
-    ) -> Result<(), S::Error>
+    pub(crate) fn free_entry<S>(&self, fs: &FileSystem<S>, is_last: bool) -> Result<(), S::Error>
     where
         S: Read + Write + Seek,
     {
@@ -201,7 +195,7 @@ impl EntryLocation {
         fs.load_nth_sector(entry_sector)?;
 
         let byte_offset = self.get_sector_byte_offset(fs);
-        fs.sector_buffer[byte_offset] = if is_last {
+        fs.sector_buffer.borrow_mut()[byte_offset] = if is_last {
             LAST_AND_UNUSED_ENTRY
         } else {
             UNUSED_ENTRY
@@ -213,7 +207,7 @@ impl EntryLocation {
 
     pub(crate) fn next_entry<S>(
         mut self,
-        fs: &mut FileSystem<S>,
+        fs: &FileSystem<S>,
     ) -> Result<Option<EntryLocation>, S::Error>
     where
         S: Read + Seek,
@@ -237,7 +231,7 @@ impl EntryLocation {
     // The NonZero here is to ensure that the `0..n` doesn't panic
     pub(crate) fn nth_entry<S>(
         self,
-        fs: &mut FileSystem<S>,
+        fs: &FileSystem<S>,
         n: num::NonZero<EntryIndex>,
     ) -> Result<Option<EntryLocation>, S::Error>
     where

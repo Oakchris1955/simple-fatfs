@@ -254,7 +254,7 @@ where
     S: Read + Seek,
 {
     #[inline]
-    pub(crate) fn get_fs(&mut self) -> &mut FileSystem<S> {
+    pub(crate) fn get_fs(&self) -> &FileSystem<S> {
         self.0.get_fs()
     }
 }
@@ -279,12 +279,14 @@ where
             match self.0.next() {
                 Some(res) => match res {
                     Ok(value) => {
-                        if self.get_fs().filter.filter(&value)
+                        if self.get_fs().filter.borrow().filter(&value)
                             // we shouldn't expose the special entries to the user
                             && ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
                                 .contains(&value.name.as_str())
                         {
-                            return Some(Ok(value.into_dir_entry(&self.get_fs().dir_info.path)));
+                            return Some(Ok(
+                                value.into_dir_entry(&self.get_fs().dir_info.borrow().path)
+                            ));
                         } else {
                             continue;
                         }

@@ -277,21 +277,21 @@ where
     // if `None`, we have exhausted the iterator
     entry_location: Option<EntryLocation>,
 
-    pub(crate) fs: &'a mut FileSystem<S>,
+    pub(crate) fs: &'a FileSystem<S>,
 }
 
 impl<'a, S> ReadDirInt<'a, S>
 where
     S: Read + Seek,
 {
-    pub(crate) fn new(fs: &'a mut FileSystem<S>) -> Self {
+    pub(crate) fn new(fs: &'a FileSystem<S>) -> Self {
         Self {
             lfn_buf: Vec::with_capacity(LFN_CHAR_LIMIT.div_ceil(CHARS_PER_LFN_ENTRY)),
             lfn_checksum: None,
             current_chain: None,
 
             entry_location: Some(EntryLocation {
-                unit: fs.dir_info.chain_start,
+                unit: fs.dir_info.borrow().chain_start,
                 index: 0,
             }),
 
@@ -300,7 +300,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn get_fs(&mut self) -> &mut FileSystem<S> {
+    pub(crate) fn get_fs(&self) -> &FileSystem<S> {
         self.fs
     }
 
