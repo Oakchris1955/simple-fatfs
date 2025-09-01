@@ -228,14 +228,16 @@ fn create_lots_of_files() {
 
     for i in 1..=FILE_COUNT {
         let name = PathBuf::from(&format!("/another root directory/{i}.txt"));
-        fs.create_file(&name).unwrap();
+        let mut file = fs.create_file(&name).unwrap();
 
-        let mut file = fs.get_rw_file(&name).unwrap();
         file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
         file.rewind().unwrap();
 
         drop(file);
+    }
 
+    for i in 1..=FILE_COUNT {
+        let name = PathBuf::from(&format!("/another root directory/{i}.txt"));
         let mut file = fs.get_ro_file(&name).unwrap();
         assert_file_is_i_dont_need_a_badge(&mut file);
     }
