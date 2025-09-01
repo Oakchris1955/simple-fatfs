@@ -1231,7 +1231,7 @@ where
                     for cluster in
                         first_cluster..(first_cluster + ClusterCount::from(clusters_to_allocate))
                     {
-                        let first_sector = self.cluster_to_sector(cluster);
+                        let first_sector = self.data_cluster_to_partition_sector(cluster);
 
                         for sector in first_sector
                             ..(first_sector + SectorCount::from(self.sectors_per_cluster()))
@@ -1487,7 +1487,7 @@ where
         first_cluster: Option<ClusterIndex>,
     ) -> FSResult<ClusterIndex, S::Error> {
         let mut last_cluster_in_chain = first_cluster;
-        let mut first_allocated_cluster = first_cluster;
+        let mut first_allocated_cluster = None;
 
         for i in 0..n.into() {
             match self.next_free_cluster()? {
@@ -1497,7 +1497,7 @@ where
                     // Similar behavour is observed in FAT16/32, with 2 sync operations
                     // THis number should be halved for both cases
 
-                    if i == 0 && first_cluster.is_none() {
+                    if i == 0 {
                         first_allocated_cluster = Some(next_free_cluster);
                     }
 
