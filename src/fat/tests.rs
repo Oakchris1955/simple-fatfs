@@ -17,9 +17,9 @@ fn check_FAT_offset() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let fat_offset = match &fs.boot_record {
+    let fat_offset = match &*fs.boot_record.borrow() {
         BootRecord::Fat(boot_record_fat) => boot_record_fat.first_fat_sector(),
         BootRecord::ExFAT(_boot_record_exfat) => unreachable!(),
     };
@@ -27,15 +27,15 @@ fn check_FAT_offset() {
     // we manually read the first and second entry of the FAT table
     fs.load_nth_sector(fat_offset.into()).unwrap();
 
-    let first_entry = u16::from_le_bytes(fs.sector_buffer[..2].try_into().unwrap());
-    let media_type = if let BootRecord::Fat(boot_record_fat) = &fs.boot_record {
+    let first_entry = u16::from_le_bytes(fs.sector_buffer.borrow()[..2].try_into().unwrap());
+    let media_type = if let BootRecord::Fat(boot_record_fat) = &*fs.boot_record.borrow() {
         boot_record_fat.bpb._media_type
     } else {
         unreachable!("this should be a FAT16 filesystem")
     };
     assert_eq!(u16::MAX << 8 | u16::from(media_type), first_entry);
 
-    let second_entry = u16::from_le_bytes(fs.sector_buffer[2..4].try_into().unwrap());
+    let second_entry = u16::from_le_bytes(fs.sector_buffer.borrow()[2..4].try_into().unwrap());
     assert_eq!(u16::MAX, second_entry);
 }
 
@@ -44,7 +44,7 @@ fn read_file_in_root_dir() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file(PathBuf::from("/root.txt")).unwrap();
 
@@ -93,7 +93,7 @@ fn read_huge_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
         .get_ro_file(PathBuf::from("/bee movie script.txt"))
@@ -109,7 +109,7 @@ fn seek_n_read() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
         .get_ro_file(PathBuf::from("/GNU ⁄ Linux copypasta.txt"))
@@ -143,7 +143,7 @@ fn write_to_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT12.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_rw_file(PathBuf::from("/root.txt")).unwrap();
 
@@ -190,7 +190,7 @@ fn create_root_dir_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.create_file(PathBuf::from("/new.txt")).unwrap();
 
@@ -205,7 +205,7 @@ fn create_subdir_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
         .create_file(PathBuf::from("/another root directory/baby i am free.txt"))
@@ -224,7 +224,7 @@ fn create_lots_of_files() {
     const FILE_COUNT: usize = 1_000;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     for i in 1..=FILE_COUNT {
         let name = PathBuf::from(&format!("/another root directory/{i}.txt"));
@@ -246,7 +246,7 @@ fn create_directory_in_root_and_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.create_dir(PathBuf::from("/unbelievable")).unwrap();
     let mut file = fs
@@ -264,7 +264,7 @@ fn create_directory_in_subdir_and_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.create_dir(PathBuf::from("/another root directory2"))
         .unwrap();
@@ -285,7 +285,7 @@ fn rename_root_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename(
         PathBuf::from("/root.txt"),
@@ -308,7 +308,7 @@ fn rename_nonroot_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename(
         PathBuf::from("/rootdir/example.txt"),
@@ -331,7 +331,7 @@ fn rename_root_directory() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename(PathBuf::from("/rootdir"), PathBuf::from("/rootdir2"))
         .unwrap();
@@ -351,7 +351,7 @@ fn rename_root_file_fat32() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename(
         PathBuf::from("/hello.txt"),
@@ -372,7 +372,7 @@ fn rename_nonroot_file_fat32() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename(
         PathBuf::from("/secret/bee movie script.txt"),
@@ -390,7 +390,7 @@ fn rename_root_directory_fat32() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename(PathBuf::from("/secret"), PathBuf::from("/emptydir/secret"))
         .unwrap();
@@ -407,7 +407,7 @@ fn remove_root_dir_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     // the bee movie script (here) is in the root directory region
     let file_path = PathBuf::from("/bee movie script.txt");
@@ -430,7 +430,7 @@ fn remove_data_region_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT12.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     // the bee movie script (here) is in the data region
     let file_path = PathBuf::from("/test/bee movie script.txt");
@@ -453,7 +453,7 @@ fn remove_empty_dir() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = PathBuf::from("/another root directory/");
 
@@ -475,7 +475,7 @@ fn remove_nonempty_dir_with_readonly_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = PathBuf::from("/rootdir/");
 
@@ -514,7 +514,7 @@ akin! {
         use std::io::Cursor;
 
         let mut storage = Cursor::new(~*fat_type.to_owned());
-        let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+        let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
         fs.show_hidden(true);
 
         // ik, this is dirty
@@ -524,14 +524,14 @@ akin! {
             fs.go_to_dir("/").unwrap();
 
             let mut current_entry = EntryLocation {
-                unit: fs.dir_info.chain_start,
+                unit: fs.dir_info.borrow().chain_start,
                 index: 0,
             };
 
             while let Some(next_entry) = current_entry
-                .next_entry(&mut fs)
+                .next_entry(&fs)
                 .unwrap()
-                .filter(|entry| entry.entry_status(&mut fs).unwrap() != EntryStatus::LastUnused)
+                .filter(|entry| entry.entry_status(&fs).unwrap() != EntryStatus::LastUnused)
             {
                 current_entry = next_entry;
                 i += 1
@@ -574,7 +574,7 @@ fn FAT_tables_after_write_are_identical() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     assert!(
         fs.FAT_tables_are_identical().unwrap(),
@@ -600,7 +600,7 @@ fn truncate_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
         .get_rw_file(PathBuf::from("/bee movie script.txt"))
@@ -623,7 +623,7 @@ fn read_only_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let file_result = fs.get_rw_file(PathBuf::from("/rootdir/example.txt"));
 
@@ -641,7 +641,7 @@ fn get_hidden_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT12.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let file_path = PathBuf::from("/hidden");
     {
@@ -668,7 +668,7 @@ fn read_file_in_subdir() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
         .get_ro_file(PathBuf::from("/rootdir/example.txt"))
@@ -687,7 +687,7 @@ fn check_file_timestamps() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let file = fs
         .get_ro_file(PathBuf::from("/rootdir/example.txt"))
@@ -705,7 +705,7 @@ fn modify_file_timestamps() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
         .get_rw_file(PathBuf::from("/bee movie script.txt"))
@@ -728,7 +728,7 @@ fn check_last_accessed_ro() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
         .get_ro_file(PathBuf::from("/rootdir/example.txt"))
@@ -752,8 +752,7 @@ fn check_last_accessed_rw() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs =
-        FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
 
     let mut file = fs
         .get_rw_file(PathBuf::from("/bee movie script.txt"))
@@ -779,8 +778,7 @@ fn check_last_modified() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT16.to_owned());
-    let mut fs =
-        FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
 
     let mut file = fs
         .get_rw_file(PathBuf::from("/bee movie script.txt"))
@@ -805,7 +803,7 @@ fn read_file_fat12() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT12.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     {
         let mut file = fs.get_ro_file(PathBuf::from("/foo/bar.txt")).unwrap();
@@ -831,7 +829,7 @@ fn read_file_fat32() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
         .get_ro_file(PathBuf::from("/secret/bee movie script.txt"))
@@ -845,7 +843,7 @@ fn create_file_root_dir_fat32() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
         .create_file(PathBuf::from("/bee movie script or something ig.txt"))
@@ -862,7 +860,7 @@ fn create_file_subdir_fat32() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
         .create_file(PathBuf::from("/secret/baby i am free.txt"))
@@ -879,7 +877,7 @@ fn create_directory_in_root_and_file_fat32() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.create_dir(PathBuf::from("/unbelievable")).unwrap();
     let mut file = fs
@@ -897,7 +895,7 @@ fn create_directory_in_subdir_and_file_fat32() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.create_dir(PathBuf::from("/another root directory"))
         .unwrap();
@@ -918,7 +916,7 @@ fn seek_n_read_fat32() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file(PathBuf::from("/hello.txt")).unwrap();
     file.seek(SeekFrom::Start(13)).unwrap();
@@ -935,7 +933,7 @@ fn write_to_fat32_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_rw_file(PathBuf::from("/hello.txt")).unwrap();
     // an arbitrary offset to seek to
@@ -971,7 +969,7 @@ fn truncate_fat32_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     const EXPECTED_STR: &str = "Hello fr";
 
@@ -989,7 +987,7 @@ fn remove_fat32_file() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let file_path = PathBuf::from("/secret/bee movie script.txt");
 
@@ -1012,7 +1010,7 @@ fn remove_empty_fat32_dir() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = PathBuf::from("/emptydir/");
 
@@ -1034,7 +1032,7 @@ fn remove_nonempty_fat32_dir() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = PathBuf::from("/secret/");
 
@@ -1056,7 +1054,7 @@ fn attempt_to_remove_file_as_directory() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = PathBuf::from("/hello.txt");
 
@@ -1079,9 +1077,9 @@ fn FAT_tables_after_fat32_write_are_identical() {
     use std::io::Cursor;
 
     let mut storage = Cursor::new(FAT32.to_owned());
-    let mut fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    match &fs.boot_record {
+    match &*fs.boot_record.borrow() {
         BootRecord::Fat(boot_record_fat) => match &boot_record_fat.ebr {
             Ebr::FAT32(ebr_fat32, _) => assert!(
                 !ebr_fat32.extended_flags.mirroring_disabled(),

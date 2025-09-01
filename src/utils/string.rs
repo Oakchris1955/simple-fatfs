@@ -143,7 +143,7 @@ impl Iterator for SfnGenerator {
 
 pub(crate) fn gen_sfn<S, P>(
     string: &str,
-    fs: &mut FileSystem<S>,
+    fs: &FileSystem<S>,
     target_dir: P,
 ) -> FSResult<Sfn, S::Error>
 where

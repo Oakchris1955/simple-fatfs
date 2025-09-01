@@ -31,7 +31,7 @@ pub struct ROFile<'a, S>
 where
     S: Read + Seek,
 {
-    pub(crate) fs: &'a mut FileSystem<S>,
+    pub(crate) fs: &'a FileSystem<S>,
     pub(crate) props: FileProps,
 }
 
@@ -60,7 +60,7 @@ impl<'a, S> ROFile<'a, S>
 where
     S: Read + Seek,
 {
-    pub(crate) fn from_props(props: FileProps, fs: &'a mut FileSystem<S>) -> Self {
+    pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S>) -> Self {
         Self { fs, props }
     }
 }
@@ -189,7 +189,7 @@ where
                 );
 
                 buf[bytes_read..bytes_read + bytes_to_read].copy_from_slice(
-                    &self.fs.sector_buffer[start_index..start_index + bytes_to_read],
+                    &self.fs.sector_buffer.borrow()[start_index..start_index + bytes_to_read],
                 );
 
                 bytes_read += bytes_to_read;
@@ -295,6 +295,18 @@ where
     pub(crate) entry_modified: bool,
 }
 
+impl<'a, S> From<ROFile<'a, S>> for RWFile<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    fn from(value: ROFile<'a, S>) -> Self {
+        Self {
+            ro_file: value,
+            entry_modified: false,
+        }
+    }
+}
+
 impl<'a, S> ops::Deref for RWFile<'a, S>
 where
     S: Read + Write + Seek,
@@ -320,11 +332,8 @@ impl<'a, S> RWFile<'a, S>
 where
     S: Read + Write + Seek,
 {
-    pub(crate) fn from_props(props: FileProps, fs: &'a mut FileSystem<S>) -> Self {
-        Self {
-            ro_file: ROFile::from_props(props, fs),
-            entry_modified: false,
-        }
+    pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S>) -> Self {
+        ROFile::from_props(props, fs).into()
     }
 }
 
@@ -606,7 +615,7 @@ where
                     usize::from(self.fs.sector_size()) - start_index,
                 );
 
-                self.fs.sector_buffer[start_index..start_index + bytes_to_write]
+                self.fs.sector_buffer.borrow_mut()[start_index..start_index + bytes_to_write]
                     .copy_from_slice(&buf[bytes_written..bytes_written + bytes_to_write]);
                 self.fs.set_modified();
 

@@ -4,6 +4,7 @@ use super::*;
 use alloc::{boxed::Box, string::String};
 
 use crate::*;
+use io::prelude::*;
 
 use ::time;
 use bincode::{impl_borrow_decode, Decode, Encode};
@@ -128,8 +129,11 @@ impl From<Properties> for MinProperties {
     }
 }
 
-impl From<DirEntry> for MinProperties {
-    fn from(value: DirEntry) -> Self {
+impl<S> From<DirEntry<'_, S>> for MinProperties
+where
+    S: Read + Seek,
+{
+    fn from(value: DirEntry<'_, S>) -> Self {
         Self::from(value.entry)
     }
 }
@@ -151,14 +155,16 @@ pub(crate) struct RawProperties {
 }
 
 impl RawProperties {
-    pub(crate) fn into_dir_entry<P>(self, path: P) -> DirEntry
+    pub(crate) fn into_dir_entry<'a, P, S>(self, path: P, fs: &'a FileSystem<S>) -> DirEntry<'a, S>
     where
         P: AsRef<Path>,
+        S: Read + Seek,
     {
         let entry_path = path.as_ref().join(&self.name);
 
         DirEntry {
             entry: Properties::from_raw(self, entry_path.into()),
+            fs,
         }
     }
 

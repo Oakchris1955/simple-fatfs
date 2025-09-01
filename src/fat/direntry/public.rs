@@ -227,11 +227,58 @@ impl Properties {
 
 /// A thin wrapper for [`Properties`] representing a directory entry
 #[derive(Debug)]
-pub struct DirEntry {
+pub struct DirEntry<'a, S>
+where
+    S: Read + Seek,
+{
     pub(crate) entry: Properties,
+    pub(crate) fs: &'a FileSystem<S>,
 }
 
-impl ops::Deref for DirEntry {
+impl<'a, S> DirEntry<'a, S>
+where
+    S: Read + Seek,
+{
+    /// Get the corresponding [`ROFile`] object of this [`DirEntry`]
+    ///
+    /// Will return `None` if the entry is a directory
+    pub fn to_ro_file(&self) -> Option<ROFile<'a, S>> {
+        self.is_file().then(|| ROFile {
+            fs: self.fs,
+            props: FileProps {
+                entry: self.entry.clone(),
+                offset: 0,
+                current_cluster: self.data_cluster,
+            },
+        })
+    }
+
+    /*
+    TODO: we also need a way to store the current directory state
+    before going to another directory
+
+    pub fn to_dir(&self) -> ReadDir<'a, S> {
+        // code goes here
+    }
+    */
+}
+
+impl<'a, S> DirEntry<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    /// Get the corresponding [`RWFile`] object of this [`DirEntry`]
+    ///
+    /// Will return `None` if the entry is a directory
+    pub fn to_rw_file(self) -> Option<RWFile<'a, S>> {
+        self.to_ro_file().map(|ro_file| ro_file.into())
+    }
+}
+
+impl<S> ops::Deref for DirEntry<'_, S>
+where
+    S: Read + Seek,
+{
     type Target = Properties;
 
     #[inline]
@@ -254,7 +301,7 @@ where
     S: Read + Seek,
 {
     #[inline]
-    pub(crate) fn get_fs(&mut self) -> &mut FileSystem<S> {
+    pub(crate) fn get_fs(&self) -> &FileSystem<S> {
         self.0.get_fs()
     }
 }
@@ -268,23 +315,26 @@ where
     }
 }
 
-impl<S> Iterator for ReadDir<'_, S>
+impl<'a, S> Iterator for ReadDir<'a, S>
 where
     S: Read + Seek,
 {
-    type Item = Result<DirEntry, S::Error>;
+    type Item = Result<DirEntry<'a, S>, S::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match self.0.next() {
                 Some(res) => match res {
                     Ok(value) => {
-                        if self.get_fs().filter.filter(&value)
+                        if self.get_fs().filter.borrow().filter(&value)
                             // we shouldn't expose the special entries to the user
                             && ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
                                 .contains(&value.name.as_str())
                         {
-                            return Some(Ok(value.into_dir_entry(&self.get_fs().dir_info.path)));
+                            return Some(Ok(value.into_dir_entry(
+                                &self.get_fs().dir_info.borrow().path,
+                                self.0.fs,
+                            )));
                         } else {
                             continue;
                         }
