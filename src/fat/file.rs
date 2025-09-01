@@ -295,6 +295,18 @@ where
     pub(crate) entry_modified: bool,
 }
 
+impl<'a, S> From<ROFile<'a, S>> for RWFile<'a, S>
+where
+    S: Read + Write + Seek,
+{
+    fn from(value: ROFile<'a, S>) -> Self {
+        Self {
+            ro_file: value,
+            entry_modified: false,
+        }
+    }
+}
+
 impl<'a, S> ops::Deref for RWFile<'a, S>
 where
     S: Read + Write + Seek,
@@ -321,10 +333,7 @@ where
     S: Read + Write + Seek,
 {
     pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S>) -> Self {
-        Self {
-            ro_file: ROFile::from_props(props, fs),
-            entry_modified: false,
-        }
+        ROFile::from_props(props, fs).into()
     }
 }
 

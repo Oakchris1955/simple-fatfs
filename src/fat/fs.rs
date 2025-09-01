@@ -1631,10 +1631,7 @@ where
     fn get_rw_file_unchecked<P: AsRef<Path>>(&self, path: P) -> FSResult<RWFile<'_, S>, S::Error> {
         let ro_file = self.get_ro_file(path)?;
 
-        Ok(RWFile {
-            ro_file,
-            entry_modified: false,
-        })
+        Ok(ro_file.into())
     }
 }
 
@@ -1699,14 +1696,14 @@ where
 
             match entry {
                 Some(entry) => {
-                    let mut file = ROFile {
-                        fs: self,
-                        props: FileProps {
+                    let mut file = ROFile::from_props(
+                        FileProps {
                             offset: 0,
                             current_cluster: entry.data_cluster,
                             entry,
                         },
-                    };
+                        self,
+                    );
 
                     if file.cluster_chain_is_healthy()? {
                         Ok(file)

@@ -243,7 +243,7 @@ where
     ///
     /// Will return `None` if the entry is a directory
     pub fn to_ro_file(&self) -> Option<ROFile<'a, S>> {
-        self.is_file().then_some(ROFile {
+        self.is_file().then(|| ROFile {
             fs: self.fs,
             props: FileProps {
                 entry: self.entry.clone(),
@@ -270,11 +270,8 @@ where
     /// Get the corresponding [`RWFile`] object of this [`DirEntry`]
     ///
     /// Will return `None` if the entry is a directory
-    pub fn to_rw_file(&self) -> Option<RWFile<'a, S>> {
-        self.to_ro_file().map(|ro_file| RWFile {
-            ro_file,
-            entry_modified: false,
-        })
+    pub fn to_rw_file(self) -> Option<RWFile<'a, S>> {
+        self.to_ro_file().map(|ro_file| ro_file.into())
     }
 }
 
