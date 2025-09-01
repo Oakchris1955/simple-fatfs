@@ -567,7 +567,7 @@ impl<S> FileSystem<S>
 where
     S: Read + Seek,
 {
-    pub(crate) fn process_current_dir(&self) -> ReadDirInt<S> {
+    pub(crate) fn process_current_dir<'a>(&'a self) -> ReadDirInt<'a, S> {
         ReadDirInt::new(self)
     }
 
