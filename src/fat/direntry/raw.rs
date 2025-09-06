@@ -4,11 +4,11 @@ use super::*;
 use alloc::{boxed::Box, string::String};
 
 use crate::*;
-use io::prelude::*;
 
 use ::time;
 use bincode::{impl_borrow_decode, Decode, Encode};
 use bitflags::bitflags;
+use embedded_io::*;
 use time::{Date, PrimitiveDateTime};
 
 bitflags! {

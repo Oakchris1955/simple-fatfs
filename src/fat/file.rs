@@ -6,10 +6,10 @@ use core::{cmp, num, ops};
 use alloc::{borrow::ToOwned, string::String, vec::Vec};
 use time::{Date, PrimitiveDateTime};
 
-use crate::error::{IOError, IOErrorKind};
-use crate::io::prelude::*;
-use crate::utils::bincode::BINCODE_CONFIG;
+use crate::utils::{self, bincode::BINCODE_CONFIG};
 use crate::{FSError, FSResult, InternalFSError};
+
+use embedded_io::*;
 
 #[derive(Debug)]
 pub(crate) struct FileProps {
@@ -72,7 +72,7 @@ where
 {
     #[inline]
     /// Panics if the current cluser doesn't point to another clluster
-    fn next_cluster(&mut self) -> Result<(), <Self as IOBase>::Error> {
+    fn next_cluster(&mut self) -> Result<(), <Self as ErrorType>::Error> {
         // when a `ROFile` is created, `cluster_chain_is_healthy` is called, if it fails, that ROFile is dropped
         self.props.current_cluster = self.get_next_cluster()?.unwrap();
 
@@ -81,12 +81,12 @@ where
 
     #[inline]
     /// Non-[`panic`]king version of [`next_cluster()`](ROFile::next_cluster)
-    fn get_next_cluster(&mut self) -> Result<Option<ClusterIndex>, <Self as IOBase>::Error> {
+    fn get_next_cluster(&mut self) -> Result<Option<ClusterIndex>, <Self as ErrorType>::Error> {
         self.fs.get_next_cluster(self.props.current_cluster)
     }
 
     /// Returns that last cluster in the file's cluster chain
-    fn last_cluster_in_chain(&mut self) -> Result<ClusterIndex, <Self as IOBase>::Error> {
+    fn last_cluster_in_chain(&mut self) -> Result<ClusterIndex, <Self as ErrorType>::Error> {
         // we begin from the current cluster to save some time
         let mut current_cluster = self.props.current_cluster;
 
@@ -137,7 +137,7 @@ where
     }
 }
 
-impl<S> IOBase for ROFile<'_, S>
+impl<S> ErrorType for ROFile<'_, S>
 where
     S: Read + Seek,
 {
@@ -214,21 +214,6 @@ where
 
         Ok(bytes_read)
     }
-
-    // the default `read_to_end` implementation isn't efficient enough, so we just do this
-    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize, Self::Error> {
-        let bytes_to_read =
-            usize::try_from(self.file_size - self.props.offset).unwrap_or(usize::MAX);
-        let init_buf_len = buf.len();
-
-        // resize buffer to fit the file contents exactly
-        buf.resize(init_buf_len + bytes_to_read, 0);
-
-        // this is guaranteed not to raise an EOF (although other error kinds might be raised...)
-        self.read_exact(&mut buf[init_buf_len..])?;
-
-        Ok(bytes_to_read)
-    }
 }
 
 impl<S> Seek for ROFile<'_, S>
@@ -236,15 +221,11 @@ where
     S: Read + Seek,
 {
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error> {
-        let offset = self.offset_from_seekfrom(pos);
+        let mut offset = self.offset_from_seekfrom(pos);
 
-        // in case the cursor goes beyond the EOF, allocate more clusters
-        if offset > u64::from(self.file_size.next_multiple_of(self.fs.cluster_size())) {
-            return Err(IOError::new(
-                <Self::Error as IOError>::Kind::new_unexpected_eof(),
-                "moved past eof in a RO file",
-            ));
-        }
+        // seek beyond EOF behaviour is implementation-defined,
+        // so we just move to EOF
+        offset = cmp::min(offset, self.file_size.into());
 
         let offset = FileSize::try_from(offset)
             .expect("file_size is u32, so offset must be able to fit in a u32 too");
@@ -370,7 +351,7 @@ where
     /// to the file contents
     ///
     /// Furthermore, if the cursor point is beyond the new EOF, it will be moved there
-    pub fn truncate(&mut self, size: FileSize) -> Result<(), <Self as IOBase>::Error> {
+    pub fn truncate(&mut self, size: FileSize) -> Result<(), <Self as ErrorType>::Error> {
         // looks like the new truncated size would be smaller than the current one, so we just return
         if size.next_multiple_of(self.fs.props.cluster_size) >= self.file_size {
             if size < self.file_size {
@@ -420,7 +401,7 @@ where
     }
 
     /// Remove the current file from the [`FileSystem`]
-    pub fn remove(mut self) -> Result<(), <Self as IOBase>::Error> {
+    pub fn remove(mut self) -> Result<(), <Self as ErrorType>::Error> {
         // we begin by removing the corresponding entries...
         self.ro_file
             .fs
@@ -452,7 +433,8 @@ where
         if self.entry_modified {
             let direntry = FATDirEntry::from(MinProperties::from(self.props.entry.clone()));
             let mut bytes = [0; DIRENTRY_SIZE];
-            bincode::encode_into_slice(direntry, &mut bytes, BINCODE_CONFIG)?;
+            bincode::encode_into_slice(direntry, &mut bytes, BINCODE_CONFIG)
+                .map_err(utils::bincode::map_err_enc)?;
 
             let chain_start = self.props.entry.chain.location;
             let file_name = self
@@ -510,11 +492,48 @@ where
     }
 }
 
-impl<S> IOBase for RWFile<'_, S>
+#[derive(Debug)]
+#[non_exhaustive] // TODO: see whether or not to keep this marked as non-exhaustive
+/// A [`RWFile`]-exclusive IO error struct
+pub enum RWFileError<I>
+where
+    I: Error,
+{
+    /// The underlying storage is full.
+    StorageFull,
+    /// An IO error occured
+    IOError(I),
+}
+
+impl<I> Error for RWFileError<I>
+where
+    I: Error,
+{
+    #[inline]
+    fn kind(&self) -> ErrorKind {
+        match self {
+            // TODO: when embedded-io adds a StorageFull variant, use that instead
+            Self::StorageFull => ErrorKind::OutOfMemory,
+            Self::IOError(err) => err.kind(),
+        }
+    }
+}
+
+impl<I> From<I> for RWFileError<I>
+where
+    I: Error,
+{
+    #[inline]
+    fn from(value: I) -> Self {
+        Self::IOError(value)
+    }
+}
+
+impl<S> ErrorType for RWFile<'_, S>
 where
     S: Read + Write + Seek,
 {
-    type Error = S::Error;
+    type Error = RWFileError<S::Error>;
 }
 
 impl<S> Read for RWFile<'_, S>
@@ -529,40 +548,21 @@ where
             self._set_accessed()
         };
 
-        res
+        res.map_err(|e| e.into())
     }
 
     #[inline]
-    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), Self::Error> {
+    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), ReadExactError<Self::Error>> {
         let res = self.ro_file.read_exact(buf);
 
         if res.is_ok() {
             self._set_accessed()
         };
 
-        res
-    }
-
-    #[inline]
-    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize, Self::Error> {
-        let res = self.ro_file.read_to_end(buf);
-
-        if res.is_ok() {
-            self._set_accessed()
-        };
-
-        res
-    }
-
-    #[inline]
-    fn read_to_string(&mut self, string: &mut String) -> Result<usize, Self::Error> {
-        let res = self.ro_file.read_to_string(string);
-
-        if res.is_ok() {
-            self._set_accessed()
-        };
-
-        res
+        res.map_err(|e| match e {
+            ReadExactError::UnexpectedEof => ReadExactError::UnexpectedEof,
+            ReadExactError::Other(err) => ReadExactError::Other(err.into()),
+        })
     }
 }
 
@@ -570,15 +570,15 @@ impl<S> Write for RWFile<'_, S>
 where
     S: Read + Write + Seek,
 {
-    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+    fn write(&mut self, mut buf: &[u8]) -> Result<usize, Self::Error> {
         let cur_offset = self.props.offset;
 
-        // if that is fine, the first seek below should't have an overflow issue
+        // seek beyond EOF behaviour is implementation-defined,
+        // so we just allocate the maximum possible space
         if u64::try_from(buf.len()).unwrap_or(u64::MAX) > FileSize::MAX.into() {
-            return Err(IOError::new(
-                <Self::Error as IOError>::Kind::new_unexpected_eof(),
-                "a file can be up to 2^32 bytes long, can't increase size of file",
-            ));
+            log::warn!("a file can be up to 2^32 bytes long, can't have a file larger than that");
+
+            buf = &buf[..FileSize::MAX as usize];
         };
 
         // allocate clusters
@@ -656,14 +656,14 @@ where
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error> {
         let offset = self.offset_from_seekfrom(pos);
 
-        // TODO: properly handle offsets above 2^32 (an IO revamp would help here)
         let offset = match FileSize::try_from(offset) {
             Ok(offset) => offset,
             Err(_) => {
-                return Err(IOError::new(
-                    <Self::Error as IOError>::Kind::new_unexpected_eof(),
-                    "a file can be up to 2^32 bytes long, can't increase size of file",
-                ))
+                log::warn!(
+                    "a file can be up to 2^32 bytes long, can't have a file larger than that"
+                );
+
+                FileSize::MAX
             }
         };
 
@@ -682,18 +682,12 @@ where
 
             // TODO: if possible, find how many clusters we successfully allocated
             // and modify the file length accordingly
-            // TODO: this should return a proper IO error
             match self.fs.allocate_clusters(
                 num::NonZero::new(clusters_to_allocate).expect("This is greater than 1"),
                 Some(last_cluster_in_chain),
             ) {
                 Ok(_) => (),
-                Err(_) => {
-                    return Err(IOError::new(
-                        <Self::Error as IOError>::Kind::new_unexpected_eof(),
-                        "the storage medium is full, can't increase size of file",
-                    ))
-                }
+                Err(_) => return Err(RWFileError::StorageFull),
             };
 
             self.file_size = offset;
@@ -706,7 +700,7 @@ where
         self._set_accessed();
         self.entry_modified = true;
 
-        self.ro_file.seek(pos)
+        self.ro_file.seek(pos).map_err(|e| e.into())
     }
 }
 

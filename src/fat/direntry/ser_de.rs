@@ -11,10 +11,10 @@ use alloc::{
     vec::Vec,
 };
 
-use crate::io::prelude::*;
 use crate::*;
 
 use bincode::{Decode, Encode};
+use embedded_io::*;
 
 pub(crate) const DIRENTRY_LIMIT: EntryCount = EntryCount::MAX;
 

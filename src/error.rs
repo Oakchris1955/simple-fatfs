@@ -1,99 +1,7 @@
-use core::fmt;
-
 use bincode::error::{DecodeError, EncodeError};
+use embedded_io::*;
 
-/// Base error type
-///
-/// To be replaced with [`core::error`] when feature [`error_in_core`](https://github.com/rust-lang/rust/issues/103765) gets pushed to `stable`
-pub trait Error: fmt::Debug + fmt::Display {}
-
-#[cfg(feature = "std")]
-impl Error for std::io::Error {}
-
-/// Base IO error type
-pub trait IOError: Error {
-    /// The type of the kind of this [`IOError`]
-    type Kind: IOErrorKind;
-
-    /// Construct a new [`IOError`] from an [`IOErrorKind`] and a `msg`
-    fn new<M>(kind: Self::Kind, msg: M) -> Self
-    where
-        M: fmt::Display;
-
-    /// Get the kind of this [`IOError`]
-    fn kind(&self) -> Self::Kind;
-}
-
-#[cfg(feature = "std")]
-impl IOError for std::io::Error {
-    type Kind = std::io::ErrorKind;
-
-    #[inline]
-    fn new<M>(kind: Self::Kind, msg: M) -> Self
-    where
-        M: fmt::Display,
-    {
-        std::io::Error::new(kind, msg.to_string())
-    }
-
-    #[inline]
-    fn kind(&self) -> Self::Kind {
-        self.kind()
-    }
-}
-
-/// The kind of an [`IOError`]
-pub trait IOErrorKind: PartialEq + Sized {
-    /// Create a new `UnexpectedEOF` [`IOErrorKind`]
-    fn new_unexpected_eof() -> Self;
-    /// Create a new `Interrupted` [`IOErrorKind`]
-    fn new_interrupted() -> Self;
-    /// Create a new `InvalidData` [`IOErrorKind`]
-    fn new_invalid_data() -> Self;
-    /// Create a new `Unsupported` [`IOErrorKind`]
-    fn new_unsupported() -> Self;
-
-    #[inline]
-    /// Check whether this [`IOErrorKind`] is of kind `UnexpectedEOF`
-    fn is_unexpected_eof(&self) -> bool {
-        self == &Self::new_unexpected_eof()
-    }
-    /// Check whether this [`IOErrorKind`] is of kind `Interrupted`
-    #[inline]
-    fn is_interrupted(&self) -> bool {
-        self == &Self::new_interrupted()
-    }
-    /// Check whether this [`IOErrorKind`] is of kind `InvalidData`
-    #[inline]
-    fn is_invalid_data(&self) -> bool {
-        self == &Self::new_invalid_data()
-    }
-    /// Check whether this [`IOErrorKind`] is of kind `Unsupported`
-    #[inline]
-    fn is_unsupported(&self) -> bool {
-        self == &Self::new_unsupported()
-    }
-}
-
-#[cfg(feature = "std")]
-impl IOErrorKind for std::io::ErrorKind {
-    #[inline]
-    fn new_unexpected_eof() -> Self {
-        std::io::ErrorKind::UnexpectedEof
-    }
-    #[inline]
-    fn new_interrupted() -> Self {
-        std::io::ErrorKind::Interrupted
-    }
-    #[inline]
-    fn new_invalid_data() -> Self {
-        std::io::ErrorKind::InvalidData
-    }
-    #[inline]
-    fn new_unsupported() -> Self {
-        std::io::ErrorKind::Unsupported
-    }
-}
+use crate::*;
 
 /// An error type that denotes that there is something wrong
 /// with the filesystem's structure itself (perhaps the FS itself is malformed/corrupted)
@@ -127,7 +35,7 @@ pub enum InternalFSError {
 #[derive(Debug, displaydoc::Display)]
 pub enum FSError<I>
 where
-    I: IOError,
+    I: Error,
 {
     /// An internal FS error occured
     #[displaydoc("An internal FS error occured: {0}")]
@@ -180,8 +88,10 @@ where
      The filesystem provided is not supported (e.g. ExFAT).
     */
     UnsupportedFS,
+    /// Unexpected EOF
+    UnexpectedEof,
     /// An IO error occured
-    #[displaydoc("An IO error occured: {0}")]
+    #[displaydoc("An IO error occured: {0:?}")]
     IOError(I),
 }
 
@@ -199,7 +109,7 @@ pub enum BincodeError {
 
 impl<I> From<I> for FSError<I>
 where
-    I: IOError,
+    I: Error,
 {
     #[inline]
     fn from(value: I) -> Self {
@@ -207,23 +117,28 @@ where
     }
 }
 
-impl<I> From<DecodeError> for FSError<I>
+impl<I> From<ReadExactError<I>> for FSError<I>
 where
-    I: IOError,
+    I: Error,
 {
     #[inline]
-    fn from(value: DecodeError) -> Self {
-        FSError::BincodeError(BincodeError::DecodeError(value))
+    fn from(value: ReadExactError<I>) -> Self {
+        match value {
+            ReadExactError::UnexpectedEof => FSError::UnexpectedEof,
+            ReadExactError::Other(e) => FSError::IOError(e),
+        }
     }
 }
 
-impl<I> From<EncodeError> for FSError<I>
+impl<I> From<RWFileError<I>> for FSError<I>
 where
-    I: IOError,
+    I: Error,
 {
-    #[inline]
-    fn from(value: EncodeError) -> Self {
-        FSError::BincodeError(BincodeError::EncodeError(value))
+    fn from(value: RWFileError<I>) -> Self {
+        match value {
+            RWFileError::StorageFull => FSError::StorageFull,
+            RWFileError::IOError(e) => FSError::IOError(e),
+        }
     }
 }
 

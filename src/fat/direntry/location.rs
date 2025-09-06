@@ -2,8 +2,9 @@ use super::*;
 
 use core::num;
 
-use crate::io::prelude::*;
 use crate::*;
+
+use embedded_io::*;
 
 /// The root directory sector or data cluster a [`FATDirEntry`] belongs too
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

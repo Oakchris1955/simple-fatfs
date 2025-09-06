@@ -2,7 +2,6 @@ use super::*;
 
 use core::ops;
 
-use crate::io::prelude::*;
 use crate::*;
 
 #[cfg(not(feature = "std"))]
@@ -10,6 +9,7 @@ use alloc::{borrow::ToOwned, boxed::Box, string::String};
 
 use ::time;
 use bincode::{Decode, Encode};
+use embedded_io::*;
 use time::{Date, PrimitiveDateTime};
 
 /// A list of the various attributes specified for a file/directory

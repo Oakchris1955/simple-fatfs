@@ -15,12 +15,14 @@
 //! # // this test fails on a no_std environment, don't run it in such a case
 //! extern crate simple_fatfs;
 //! use simple_fatfs::*;
-//! use simple_fatfs::io::prelude::*;
+//! use simple_fatfs::io::*;
+//!
+//! use embedded_io_adapters::std::FromStd;
 //!
 //! const FAT_IMG: &[u8] = include_bytes!("../imgs/fat12.img");
 //!
 //! fn main() {
-//!     let mut cursor = std::io::Cursor::new(FAT_IMG.to_owned());
+//!     let mut cursor = FromStd::new(std::io::Cursor::new(FAT_IMG.to_owned()));
 //!
 //!     // We can either pass by value or by (mutable) reference
 //!     // (Yes, the storage medium might be Read-Only, but reading is a mutable action)
@@ -46,8 +48,9 @@
 //!     // please keep in mind that opening a `ROFile` or `RWFile` borrows
 //!     // the parent `FileSystem` until that `ROFile` or `RWFile` is dropped
 //!     let mut file = fs.get_ro_file(PathBuf::from("/root.txt")).unwrap();
-//!     let mut string = String::new();
-//!     file.read_to_string(&mut string);
+//!     let mut file_buf = vec![0; file.file_size() as usize];
+//!     file.read_exact(&mut file_buf).unwrap();
+//!     let string = str::from_utf8(&file_buf).unwrap();
 //!     println!("root.txt contents:\n{}", string);
 //! }
 //! ```
@@ -82,12 +85,12 @@ extern crate alloc;
 mod codepage;
 mod error;
 mod fat;
-pub mod io;
 mod path;
 mod time;
 mod utils;
 
 pub use codepage::*;
+pub use embedded_io as io;
 pub use error::*;
 pub use fat::*;
 pub use path::*;
