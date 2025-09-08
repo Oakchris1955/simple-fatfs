@@ -10,6 +10,17 @@
 //! - Auto-`impl`s for [`std::io`] traits and structs
 //! - Easy-to-implement [`io`] traits
 //!
+//! ## Usage
+//!
+//! The library uses [`embedded-io`](embedded_io) for IO operations.
+//! Most notably, the storage medium is expected to implement at least the
+//! [`Read`] and [`Seek`] traits (RO storage), while [`Write`] is optional
+//! (R/W storage). Furthemore, [`ROFile`] & [`RWFile`] both implement [`Read`]
+//! & [`Seek`], while [`RWFile`] also implements [`Write`]
+//!
+//! To use [`std::io`]'s respective traits, use the
+//! [`embedded-io-adapters`](https://crates.io/crates/embedded-io-adapters) crate.
+//!
 //! ## Examples
 //! ```
 //! # // this test fails on a no_std environment, don't run it in such a case
@@ -54,6 +65,10 @@
 //!     println!("root.txt contents:\n{}", string);
 //! }
 //! ```
+//!
+//! [`Read`]: io::Read
+//! [`Seek`]: io::Seek
+//! [`Write`]: io::Write
 
 #![cfg_attr(not(feature = "std"), no_std)]
 // Even inside unsafe functions, we must acknowlegde the usage of unsafe code
