@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::{error::*, io::prelude::*, path::*, utils};
+use crate::{error::*, path::*, utils};
 
 use core::{
     cell::{Ref, RefCell},
@@ -11,6 +11,7 @@ use core::{
 use alloc::{boxed::Box, string::ToString, vec, vec::Vec};
 
 use ::time;
+use embedded_io::*;
 use time::PrimitiveDateTime;
 
 /// An enum representing different variants of the FAT filesystem
@@ -379,8 +380,8 @@ impl Default for FileFilter {
     }
 }
 
-type SyncSectorBufferFn<S> = fn(&FileSystem<S>) -> Result<(), <S as IOBase>::Error>;
-type UnmountFn<S> = fn(&FileSystem<S>) -> FSResult<(), <S as IOBase>::Error>;
+type SyncSectorBufferFn<S> = fn(&FileSystem<S>) -> Result<(), <S as ErrorType>::Error>;
+type UnmountFn<S> = fn(&FileSystem<S>) -> FSResult<(), <S as ErrorType>::Error>;
 
 /// An API to process a FAT filesystem
 #[derive(Debug)]
@@ -469,15 +470,17 @@ where
             return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));
         }
 
-        let bpb: BpbFat =
-            bincode::decode_from_slice(&buffer[..BPBFAT_SIZE], BINCODE_CONFIG).map(|(v, _)| v)?;
+        let bpb: BpbFat = bincode::decode_from_slice(&buffer[..BPBFAT_SIZE], BINCODE_CONFIG)
+            .map(|(v, _)| v)
+            .map_err(utils::bincode::map_err_dec)?;
 
         let ebr = if bpb.table_size_16 == 0 {
             let ebr_fat32: EBRFAT32 = bincode::decode_from_slice(
                 &buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE],
                 BINCODE_CONFIG,
             )
-            .map(|(v, _)| v)?;
+            .map(|(v, _)| v)
+            .map_err(utils::bincode::map_err_dec)?;
 
             storage.seek(SeekFrom::Start(
                 u64::from(ebr_fat32.fat_info) * u64::from(bpb.bytes_per_sector),
@@ -488,7 +491,8 @@ where
                 &buffer[..usize::from(bpb.bytes_per_sector)],
                 BINCODE_CONFIG,
             )
-            .map(|(v, _)| v)?;
+            .map(|(v, _)| v)
+            .map_err(utils::bincode::map_err_dec)?;
 
             if !fsinfo.verify_signature() {
                 log::error!("FAT32 FSInfo has invalid signature(s)");
@@ -502,7 +506,8 @@ where
                     &buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE],
                     BINCODE_CONFIG,
                 )
-                .map(|(v, _)| v)?,
+                .map(|(v, _)| v)
+                .map_err(utils::bincode::map_err_dec)?,
             )
         };
 
@@ -826,7 +831,15 @@ where
                     usize::try_from(cmp::min(MAX_PROBE_SIZE, bytes_left))
                         .unwrap_or(usize::MAX)
                 ];
-                self.storage.borrow_mut().read_exact(buf.as_mut_slice())?;
+                self.storage
+                    .borrow_mut()
+                    .read_exact(buf.as_mut_slice())
+                    .map_err(|e| match e {
+                        ReadExactError::UnexpectedEof => {
+                            panic!("Unexpected EOF while reading FAT table")
+                        }
+                        ReadExactError::Other(e) => e,
+                    })?;
                 tables.push(buf);
             }
 
@@ -855,9 +868,10 @@ where
     pub(crate) fn load_nth_sector(&self, n: SectorIndex) -> Result<Ref<'_, [u8]>, S::Error> {
         // FIXME: don't rely just on the filesystem for the device storage size
         if n >= self.props.total_sectors {
-            return Err(IOError::new(
-                <S::Error as IOError>::Kind::new_unexpected_eof(),
-                "seeked past end of storage device",
+            panic!(concat!(
+                "seeked past end of device medium. ",
+                "This is most likely an internal error, please report it: ",
+                "https://github.com/Oakchris1955/simple-fatfs/issues"
             ));
         }
 
@@ -880,7 +894,14 @@ where
                 .seek(SeekFrom::Start(self.sector_to_partition_offset(n)))?;
             self.storage
                 .borrow_mut()
-                .read_exact(&mut self.sector_buffer.borrow_mut())?;
+                .read_exact(&mut self.sector_buffer.borrow_mut())
+                .map_err(|e| match e {
+                    ReadExactError::UnexpectedEof => {
+                        panic!("Unexpected EOF while reading sector {n}\n\
+                        This is most likely an interal error, please report it: https://github.com/Oakchris1955/simple-fatfs/issues")
+                    }
+                    ReadExactError::Other(e) => e,
+                })?;
             self.storage
                 .borrow_mut()
                 .seek(SeekFrom::Current(-i64::from(self.props.sector_size)))?;
@@ -1612,7 +1633,8 @@ where
                     // FIXME: unnecessary memory usage?
                     let mut bytes = [0_u8; FSINFO_SIZE];
 
-                    bincode::encode_into_slice(fsinfo, &mut bytes, BINCODE_CONFIG)?;
+                    bincode::encode_into_slice(fsinfo, &mut bytes, BINCODE_CONFIG)
+                        .map_err(utils::bincode::map_err_enc)?;
 
                     self.load_nth_sector(ebr_fat32.fat_info.into())?;
                     self.sector_buffer.borrow_mut()[..FSINFO_SIZE].copy_from_slice(&bytes);
@@ -1952,11 +1974,8 @@ where
             self._go_to_cached_dir()?;
             let mut bytes: [u8; DIRENTRY_SIZE] = [0; DIRENTRY_SIZE];
 
-            bincode::encode_into_slice(
-                FATDirEntry::from(parent_entry),
-                &mut bytes,
-                BINCODE_CONFIG,
-            )?;
+            bincode::encode_into_slice(FATDirEntry::from(parent_entry), &mut bytes, BINCODE_CONFIG)
+                .map_err(utils::bincode::map_err_enc)?;
 
             entry_location.set_bytes(self, bytes)?;
         }
@@ -2020,11 +2039,7 @@ where
             == WindowsComponent::root()
         {
             // we are in the root directory, we can't remove it
-            return Err(S::Error::new(
-                <S::Error as IOError>::Kind::new_unsupported(),
-                "We can't remove the root directory",
-            )
-            .into());
+            return Err(FSError::InvalidInput);
         }
 
         if self.read_dir(path)?.next().is_some() {

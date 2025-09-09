@@ -10,17 +10,30 @@
 //! - Auto-`impl`s for [`std::io`] traits and structs
 //! - Easy-to-implement [`io`] traits
 //!
+//! ## Usage
+//!
+//! The library uses [`embedded-io`](embedded_io) for IO operations.
+//! Most notably, the storage medium is expected to implement at least the
+//! [`Read`] and [`Seek`] traits (RO storage), while [`Write`] is optional
+//! (R/W storage). Furthemore, [`ROFile`] & [`RWFile`] both implement [`Read`]
+//! & [`Seek`], while [`RWFile`] also implements [`Write`]
+//!
+//! To use [`std::io`]'s respective traits, use the
+//! [`embedded-io-adapters`](https://crates.io/crates/embedded-io-adapters) crate.
+//!
 //! ## Examples
 //! ```
 //! # // this test fails on a no_std environment, don't run it in such a case
 //! extern crate simple_fatfs;
 //! use simple_fatfs::*;
-//! use simple_fatfs::io::prelude::*;
+//! use simple_fatfs::io::*;
+//!
+//! use embedded_io_adapters::std::FromStd;
 //!
 //! const FAT_IMG: &[u8] = include_bytes!("../imgs/fat12.img");
 //!
 //! fn main() {
-//!     let mut cursor = std::io::Cursor::new(FAT_IMG.to_owned());
+//!     let mut cursor = FromStd::new(std::io::Cursor::new(FAT_IMG.to_owned()));
 //!
 //!     // We can either pass by value or by (mutable) reference
 //!     // (Yes, the storage medium might be Read-Only, but reading is a mutable action)
@@ -46,11 +59,16 @@
 //!     // please keep in mind that opening a `ROFile` or `RWFile` borrows
 //!     // the parent `FileSystem` until that `ROFile` or `RWFile` is dropped
 //!     let mut file = fs.get_ro_file(PathBuf::from("/root.txt")).unwrap();
-//!     let mut string = String::new();
-//!     file.read_to_string(&mut string);
+//!     let mut file_buf = vec![0; file.file_size() as usize];
+//!     file.read_exact(&mut file_buf).unwrap();
+//!     let string = str::from_utf8(&file_buf).unwrap();
 //!     println!("root.txt contents:\n{}", string);
 //! }
 //! ```
+//!
+//! [`Read`]: io::Read
+//! [`Seek`]: io::Seek
+//! [`Write`]: io::Write
 
 #![cfg_attr(not(feature = "std"), no_std)]
 // Even inside unsafe functions, we must acknowlegde the usage of unsafe code
@@ -82,12 +100,12 @@ extern crate alloc;
 mod codepage;
 mod error;
 mod fat;
-pub mod io;
 mod path;
 mod time;
 mod utils;
 
 pub use codepage::*;
+pub use embedded_io as io;
 pub use error::*;
 pub use fat::*;
 pub use path::*;

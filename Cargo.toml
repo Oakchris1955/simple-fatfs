@@ -13,6 +13,7 @@ bincode = "2.0.1"
 bitfield-struct = "0.8.0"
 bitflags = { version = "2.6.0", features = ["serde"] }
 displaydoc = { version = "0.2.5", default-features = false }
+embedded-io = { version = "0.6.1", features = ["alloc"] }
 log = "0.4.22"
 oem_cp = "2.1.0"
 setbits = "0.1.0"
@@ -26,4 +27,5 @@ default = ["std"]
 std = ["time/std", "time/local-offset"]
 
 [dev-dependencies]
+embedded-io-adapters = { version = "0.6.2", features = ["std"] }
 test-log = "0.2.16"
