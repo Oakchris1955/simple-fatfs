@@ -21,9 +21,15 @@ A fully-working FAT driver that covers the following criteria:
 - An easy-to-use public API for developers
 - Avoids unnecessary/overbloated dependencies (I am talking about [leftpad](https://www.npmjs.com/package/left-pad)-like dependencies)
 - `#[no_std]` support
-- Auto-`impl`s for already-existing `std` APIs (like the `Read`, `Write` & `Seek` traits)
+- Uses [`embedded-io`](https://crates.io/crates/embedded-io) for IO operations, making it suitable for embedded devices
 - FAT12/16/32/ExFAT support
 - VFAT/LFN (long filename) support
+
+It also aims to be able to do the following in the future:
+
+- Allow low-level manipulation of a FAT filesystem (e.g. for checking if a file is continuous)
+- Features enabling/disabling perhaps unnecessary features for certain use cases,
+  allowing for usage in devices with limited flash memory / RAM
 
 ## TODO
 
@@ -33,9 +39,21 @@ A fully-working FAT driver that covers the following criteria:
     PS: it does in fact matter. [bincode](https://crates.io/crates/bincode), which we use for (de)serialization allows us to configure the default endianess
 - [ ] Handle non-printable characters in names of files and directories
 - [ ] ExFAT support
-- [x] ~~when [feature(error_in_core)](https://github.com/rust-lang/rust/issues/103765) gets released to stable, bump MSRV & use the `core::error::Error` trait instead of our custom `error::Error`~~
-    this feature is now stabilized. However, [after a couple of community recommendations](https://www.reddit.com/r/rust/comments/1ejukow/comment/lgg3dtb/), we will be switching to [embedded-io] in the near future, which has its own `Error` trait, so that means...
-- [ ] replace custom `io` implementation with the [embedded-io] crate
+- [x] replace custom `io` implementation with the [embedded-io] crate
+- [ ] use `from_utf16be` for decoding LFNs (`str_from_utf16_endian` [#116258](https://github.com/rust-lang/rust/issues/116258))
+- [ ] handle duplicate file open, either by blocking or more preferably, by not allowing such behaviour.
+- [ ] the majority of codepages will end up being dead code for most users, use features for enabling/disabling them.
+
+## Known issues
+
+- While the library can support both little and big-endian systems,
+  due to the `str_from_utf16_endian` feature being unstable, long filenames
+  won't be properly decoded.
+
+- Duplicate file opens or in general any write operation involving a file that
+  is open either as R/W or RO could cause data corruption (see [#14](https://github.com/Oakchris1955/simple-fatfs/issues/14))
+
+- Multi-byte codepages, such as the Japanese one (932) are currently unsupported.
 
 ## Acknowledgements
 
