@@ -40,7 +40,7 @@
 //!     let mut fs = FileSystem::new(&mut cursor, FSOptions::new()).unwrap();
 //!
 //!     // Let's see what entries there are in the root directory
-//!     for entry in fs.read_dir(PathBuf::from("/")).unwrap() {
+//!     for entry in fs.read_dir("/").unwrap() {
 //!         // in a real world example, you probably don't wanna unwrap this
 //!         let entry = entry.unwrap();
 //!
@@ -58,7 +58,7 @@
 //!
 //!     // please keep in mind that opening a `ROFile` or `RWFile` borrows
 //!     // the parent `FileSystem` until that `ROFile` or `RWFile` is dropped
-//!     let mut file = fs.get_ro_file(PathBuf::from("/root.txt")).unwrap();
+//!     let mut file = fs.get_ro_file("/root.txt").unwrap();
 //!     let mut file_buf = vec![0; file.file_size() as usize];
 //!     file.read_exact(&mut file_buf).unwrap();
 //!     let string = str::from_utf8(&file_buf).unwrap();

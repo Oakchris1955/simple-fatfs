@@ -63,7 +63,7 @@ fn read_file_in_root_dir() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let mut file = fs.get_ro_file(PathBuf::from("/root.txt")).unwrap();
+    let mut file = fs.get_ro_file("/root.txt").unwrap();
 
     let mut file_buf = vec![0; file.file_size() as usize];
     file.read_exact(&mut file_buf).unwrap();
@@ -113,9 +113,7 @@ fn read_huge_file() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let mut file = fs
-        .get_ro_file(PathBuf::from("/bee movie script.txt"))
-        .unwrap();
+    let mut file = fs.get_ro_file("/bee movie script.txt").unwrap();
     assert_file_is_bee_movie_script(&mut file);
 }
 
@@ -129,9 +127,7 @@ fn seek_n_read() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let mut file = fs
-        .get_ro_file(PathBuf::from("/GNU ⁄ Linux copypasta.txt"))
-        .unwrap();
+    let mut file = fs.get_ro_file("/GNU ⁄ Linux copypasta.txt").unwrap();
     let mut file_bytes = [0_u8; 4096];
 
     // we first perform a forward seek...
@@ -163,7 +159,7 @@ fn write_to_file() {
     let mut storage = FromStd::new(Cursor::new(FAT12.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let mut file = fs.get_rw_file(PathBuf::from("/root.txt")).unwrap();
+    let mut file = fs.get_rw_file("/root.txt").unwrap();
 
     file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
     file.rewind().unwrap();
@@ -210,7 +206,7 @@ fn create_root_dir_file() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let mut file = fs.create_file(PathBuf::from("/new.txt")).unwrap();
+    let mut file = fs.create_file("/new.txt").unwrap();
 
     file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
     file.rewind().unwrap();
@@ -226,7 +222,7 @@ fn create_subdir_file() {
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
-        .create_file(PathBuf::from("/another root directory/baby i am free.txt"))
+        .create_file("/another root directory/baby i am free.txt")
         .unwrap();
 
     file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
@@ -268,10 +264,8 @@ fn create_directory_in_root_and_file() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    fs.create_dir(PathBuf::from("/unbelievable")).unwrap();
-    let mut file = fs
-        .create_file(PathBuf::from("/unbelievable/baby i am free.txt"))
-        .unwrap();
+    fs.create_dir("/unbelievable").unwrap();
+    let mut file = fs.create_file("/unbelievable/baby i am free.txt").unwrap();
 
     file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
     file.rewind().unwrap();
@@ -286,8 +280,7 @@ fn create_directory_in_subdir_and_file() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    fs.create_dir(PathBuf::from("/another root directory2"))
-        .unwrap();
+    fs.create_dir("/another root directory2").unwrap();
     let mut file = fs
         .create_file(PathBuf::from(
             "/another root directory/bee movie script.txt",
@@ -307,15 +300,9 @@ fn rename_root_file() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    fs.rename(
-        PathBuf::from("/root.txt"),
-        PathBuf::from("/rootdir/not root.txt"),
-    )
-    .unwrap();
+    fs.rename("/root.txt", "/rootdir/not root.txt").unwrap();
 
-    let mut file = fs
-        .get_ro_file(PathBuf::from("/rootdir/not root.txt"))
-        .unwrap();
+    let mut file = fs.get_ro_file("/rootdir/not root.txt").unwrap();
 
     let mut file_buf = vec![0; file.file_size() as usize];
     file.read_exact(&mut file_buf).unwrap();
@@ -331,15 +318,10 @@ fn rename_nonroot_file() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    fs.rename(
-        PathBuf::from("/rootdir/example.txt"),
-        PathBuf::from("/another root directory/hello.txt"),
-    )
-    .unwrap();
-
-    let mut file = fs
-        .get_ro_file(PathBuf::from("/another root directory/hello.txt"))
+    fs.rename("/rootdir/example.txt", "/another root directory/hello.txt")
         .unwrap();
+
+    let mut file = fs.get_ro_file("/another root directory/hello.txt").unwrap();
 
     let mut file_buf = vec![0; file.file_size() as usize];
     file.read_exact(&mut file_buf).unwrap();
@@ -355,12 +337,9 @@ fn rename_root_directory() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    fs.rename(PathBuf::from("/rootdir"), PathBuf::from("/rootdir2"))
-        .unwrap();
+    fs.rename("/rootdir", "/rootdir2").unwrap();
 
-    let mut file = fs
-        .get_ro_file(PathBuf::from("/rootdir2/example.txt"))
-        .unwrap();
+    let mut file = fs.get_ro_file("/rootdir2/example.txt").unwrap();
 
     let mut file_buf = vec![0; file.file_size() as usize];
     file.read_exact(&mut file_buf).unwrap();
@@ -376,13 +355,9 @@ fn rename_root_file_fat32() {
     let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    fs.rename(
-        PathBuf::from("/hello.txt"),
-        PathBuf::from("/emptydir/bye.txt"),
-    )
-    .unwrap();
+    fs.rename("/hello.txt", "/emptydir/bye.txt").unwrap();
 
-    let mut file = fs.get_ro_file(PathBuf::from("/emptydir/bye.txt")).unwrap();
+    let mut file = fs.get_ro_file("/emptydir/bye.txt").unwrap();
 
     let mut file_buf = vec![0; file.file_size() as usize];
     file.read_exact(&mut file_buf).unwrap();
@@ -398,13 +373,10 @@ fn rename_nonroot_file_fat32() {
     let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    fs.rename(
-        PathBuf::from("/secret/bee movie script.txt"),
-        PathBuf::from("/BEES.txt"),
-    )
-    .unwrap();
+    fs.rename("/secret/bee movie script.txt", "/BEES.txt")
+        .unwrap();
 
-    let mut file = fs.get_ro_file(PathBuf::from("/BEES.txt")).unwrap();
+    let mut file = fs.get_ro_file("/BEES.txt").unwrap();
 
     assert_file_is_bee_movie_script(&mut file);
 }
@@ -416,11 +388,10 @@ fn rename_root_directory_fat32() {
     let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    fs.rename(PathBuf::from("/secret"), PathBuf::from("/emptydir/secret"))
-        .unwrap();
+    fs.rename("/secret", "/emptydir/secret").unwrap();
 
     let mut file = fs
-        .get_ro_file(PathBuf::from("/emptydir/secret/bee movie script.txt"))
+        .get_ro_file("/emptydir/secret/bee movie script.txt")
         .unwrap();
 
     assert_file_is_bee_movie_script(&mut file);
@@ -434,8 +405,8 @@ fn remove_root_dir_file() {
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     // the bee movie script (here) is in the root directory region
-    let file_path = PathBuf::from("/bee movie script.txt");
-    let file = fs.get_rw_file(&file_path).unwrap();
+    let file_path = "/bee movie script.txt";
+    let file = fs.get_rw_file(file_path).unwrap();
     file.remove().unwrap();
 
     // the file should now be gone
@@ -457,8 +428,8 @@ fn remove_data_region_file() {
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     // the bee movie script (here) is in the data region
-    let file_path = PathBuf::from("/test/bee movie script.txt");
-    let file = fs.get_rw_file(&file_path).unwrap();
+    let file_path = "/test/bee movie script.txt";
+    let file = fs.get_rw_file(file_path).unwrap();
     file.remove().unwrap();
 
     // the file should now be gone
@@ -479,9 +450,9 @@ fn remove_empty_dir() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let dir_path = PathBuf::from("/another root directory/");
+    let dir_path = "/another root directory/";
 
-    fs.remove_empty_dir(&dir_path).unwrap();
+    fs.remove_empty_dir(dir_path).unwrap();
 
     // the directory should now be gone
     let dir_result = fs.read_dir(dir_path);
@@ -501,10 +472,10 @@ fn remove_nonempty_dir_with_readonly_file() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let dir_path = PathBuf::from("/rootdir/");
+    let dir_path = "/rootdir/";
 
     // the directory should contain a read-only file (example.txt)
-    let del_result = fs.remove_dir_all(&dir_path);
+    let del_result = fs.remove_dir_all(dir_path);
     match del_result {
         Err(err) => match err {
             FSError::ReadOnlyFile => (),
@@ -514,7 +485,7 @@ fn remove_nonempty_dir_with_readonly_file() {
     }
 
     // this should now remove the directory
-    fs.remove_dir_all_unchecked(dir_path.clone()).unwrap();
+    fs.remove_dir_all_unchecked(dir_path).unwrap();
 
     // the directory should now be gone
     let dir_result = fs.read_dir(dir_path);
@@ -610,7 +581,7 @@ fn FAT_tables_after_write_are_identical() {
     );
 
     // let's write the bee movie script to root.txt (why not), check, truncate the file, then check again
-    let mut file = fs.get_rw_file(PathBuf::from("root.txt")).unwrap();
+    let mut file = fs.get_rw_file("root.txt").unwrap();
 
     file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
     assert!(file.fs.FAT_tables_are_identical().unwrap());
@@ -626,9 +597,7 @@ fn truncate_file() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let mut file = fs
-        .get_rw_file(PathBuf::from("/bee movie script.txt"))
-        .unwrap();
+    let mut file = fs.get_rw_file("/bee movie script.txt").unwrap();
 
     // we are gonna truncate the bee movie script down to 20 000 bytes
     const NEW_SIZE: usize = 20_000;
@@ -650,7 +619,7 @@ fn read_only_file() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let file_result = fs.get_rw_file(PathBuf::from("/rootdir/example.txt"));
+    let file_result = fs.get_rw_file("/rootdir/example.txt");
 
     match file_result {
         Err(err) => match err {
@@ -668,9 +637,9 @@ fn get_hidden_file() {
     let mut storage = FromStd::new(Cursor::new(FAT12.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let file_path = PathBuf::from("/hidden");
+    let file_path = "/hidden";
     {
-        let file_result = fs.get_ro_file(&file_path);
+        let file_result = fs.get_ro_file(file_path);
         match file_result {
             Err(err) => match err {
                 FSError::NotFound => (),
@@ -695,9 +664,7 @@ fn read_file_in_subdir() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let mut file = fs
-        .get_ro_file(PathBuf::from("/rootdir/example.txt"))
-        .unwrap();
+    let mut file = fs.get_ro_file("/rootdir/example.txt").unwrap();
 
     let mut file_buf = vec![0; file.file_size() as usize];
     file.read_exact(&mut file_buf).unwrap();
@@ -715,9 +682,7 @@ fn check_file_timestamps() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let file = fs
-        .get_ro_file(PathBuf::from("/rootdir/example.txt"))
-        .unwrap();
+    let file = fs.get_ro_file("/rootdir/example.txt").unwrap();
 
     assert_eq!(Some(datetime!(2024-07-11 13:02:38.15)), file.created);
     assert_eq!(datetime!(2024-07-11 13:02:38.0), file.modified);
@@ -733,18 +698,14 @@ fn modify_file_timestamps() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let mut file = fs
-        .get_rw_file(PathBuf::from("/bee movie script.txt"))
-        .unwrap();
+    let mut file = fs.get_rw_file("/bee movie script.txt").unwrap();
 
     // back to the future we go
     file.set_accessed(date!(1985 - 07 - 3));
 
     drop(file);
 
-    let file = fs
-        .get_ro_file(PathBuf::from("/bee movie script.txt"))
-        .unwrap();
+    let file = fs.get_ro_file("/bee movie script.txt").unwrap();
 
     assert_eq!(&Some(date!(1985 - 07 - 3)), file.last_accessed_date());
 }
@@ -756,9 +717,7 @@ fn check_last_accessed_ro() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let mut file = fs
-        .get_ro_file(PathBuf::from("/rootdir/example.txt"))
-        .unwrap();
+    let mut file = fs.get_ro_file("/rootdir/example.txt").unwrap();
 
     // read some data
     let mut target = [0; 42];
@@ -766,9 +725,7 @@ fn check_last_accessed_ro() {
 
     drop(file);
 
-    let file = fs
-        .get_ro_file(PathBuf::from("/rootdir/example.txt"))
-        .unwrap();
+    let file = fs.get_ro_file("/rootdir/example.txt").unwrap();
 
     assert_ne!(&Some(DefaultClock.now().date()), file.last_accessed_date());
 }
@@ -780,9 +737,7 @@ fn check_last_accessed_rw() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
 
-    let mut file = fs
-        .get_rw_file(PathBuf::from("/bee movie script.txt"))
-        .unwrap();
+    let mut file = fs.get_rw_file("/bee movie script.txt").unwrap();
 
     // read some data
     let mut target = [0; 42];
@@ -790,9 +745,7 @@ fn check_last_accessed_rw() {
 
     drop(file);
 
-    let file = fs
-        .get_ro_file(PathBuf::from("/bee movie script.txt"))
-        .unwrap();
+    let file = fs.get_ro_file("/bee movie script.txt").unwrap();
 
     assert_eq!(&Some(DefaultClock.now().date()), file.last_accessed_date());
 }
@@ -806,18 +759,14 @@ fn check_last_modified() {
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
 
-    let mut file = fs
-        .get_rw_file(PathBuf::from("/bee movie script.txt"))
-        .unwrap();
+    let mut file = fs.get_rw_file("/bee movie script.txt").unwrap();
 
     // just some random data
     file.write(&[49, 65, 47]).unwrap();
 
     drop(file);
 
-    let file = fs
-        .get_ro_file(PathBuf::from("/bee movie script.txt"))
-        .unwrap();
+    let file = fs.get_ro_file("/bee movie script.txt").unwrap();
 
     assert_eq!(&Some(DefaultClock.now().date()), file.last_accessed_date());
     // I find it highly unlikely that this test won't have been completed within 15 seconds
@@ -832,7 +781,7 @@ fn read_file_fat12() {
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     {
-        let mut file = fs.get_ro_file(PathBuf::from("/foo/bar.txt")).unwrap();
+        let mut file = fs.get_ro_file("/foo/bar.txt").unwrap();
         let mut file_buf = vec![0; file.file_size() as usize];
         file.read_exact(&mut file_buf).unwrap();
         let file_string = str::from_utf8(&file_buf).unwrap();
@@ -844,9 +793,7 @@ fn read_file_fat12() {
         // please not that the FAT12 image has been modified so that
         // one FAT entry of the file we are reading is split between different sectors
         // this way, we also test for this case
-        let mut file = fs
-            .get_ro_file(PathBuf::from("/test/bee movie script.txt"))
-            .unwrap();
+        let mut file = fs.get_ro_file("/test/bee movie script.txt").unwrap();
         assert_file_is_bee_movie_script(&mut file);
     }
 }
@@ -858,9 +805,7 @@ fn read_file_fat32() {
     let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let mut file = fs
-        .get_ro_file(PathBuf::from("/secret/bee movie script.txt"))
-        .unwrap();
+    let mut file = fs.get_ro_file("/secret/bee movie script.txt").unwrap();
 
     assert_file_is_bee_movie_script(&mut file);
 }
@@ -873,7 +818,7 @@ fn create_file_root_dir_fat32() {
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
-        .create_file(PathBuf::from("/bee movie script or something ig.txt"))
+        .create_file("/bee movie script or something ig.txt")
         .unwrap();
 
     file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
@@ -889,9 +834,7 @@ fn create_file_subdir_fat32() {
     let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let mut file = fs
-        .create_file(PathBuf::from("/secret/baby i am free.txt"))
-        .unwrap();
+    let mut file = fs.create_file("/secret/baby i am free.txt").unwrap();
 
     file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
     file.rewind().unwrap();
@@ -906,10 +849,8 @@ fn create_directory_in_root_and_file_fat32() {
     let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    fs.create_dir(PathBuf::from("/unbelievable")).unwrap();
-    let mut file = fs
-        .create_file(PathBuf::from("/unbelievable/baby i am free.txt"))
-        .unwrap();
+    fs.create_dir("/unbelievable").unwrap();
+    let mut file = fs.create_file("/unbelievable/baby i am free.txt").unwrap();
 
     file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
     file.rewind().unwrap();
@@ -924,8 +865,7 @@ fn create_directory_in_subdir_and_file_fat32() {
     let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    fs.create_dir(PathBuf::from("/another root directory"))
-        .unwrap();
+    fs.create_dir("/another root directory").unwrap();
     let mut file = fs
         .create_file(PathBuf::from(
             "/another root directory/bee movie script.txt",
@@ -945,7 +885,7 @@ fn seek_n_read_fat32() {
     let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let mut file = fs.get_ro_file(PathBuf::from("/hello.txt")).unwrap();
+    let mut file = fs.get_ro_file("/hello.txt").unwrap();
     file.seek(SeekFrom::Start(13)).unwrap();
 
     #[allow(clippy::cast_possible_truncation)]
@@ -965,7 +905,7 @@ fn write_to_fat32_file() {
     let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let mut file = fs.get_rw_file(PathBuf::from("/hello.txt")).unwrap();
+    let mut file = fs.get_rw_file("/hello.txt").unwrap();
     // an arbitrary offset to seek to
     const START_OFFSET: u64 = 1436;
     file.seek(SeekFrom::Start(START_OFFSET)).unwrap();
@@ -1006,7 +946,7 @@ fn truncate_fat32_file() {
 
     const EXPECTED_STR: &str = "Hello fr";
 
-    let mut file = fs.get_rw_file(PathBuf::from("/hello.txt")).unwrap();
+    let mut file = fs.get_rw_file("/hello.txt").unwrap();
     file.truncate(u32::try_from(EXPECTED_STR.len()).unwrap())
         .unwrap();
 
@@ -1023,9 +963,9 @@ fn remove_fat32_file() {
     let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let file_path = PathBuf::from("/secret/bee movie script.txt");
+    let file_path = "/secret/bee movie script.txt";
 
-    let file = fs.get_rw_file(&file_path).unwrap();
+    let file = fs.get_rw_file(file_path).unwrap();
     file.remove().unwrap();
 
     // the file should now be gone
@@ -1046,9 +986,9 @@ fn remove_empty_fat32_dir() {
     let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let dir_path = PathBuf::from("/emptydir/");
+    let dir_path = "/emptydir/";
 
-    fs.remove_empty_dir(&dir_path).unwrap();
+    fs.remove_empty_dir(dir_path).unwrap();
 
     // the directory should now be gone
     let dir_result = fs.read_dir(dir_path);
@@ -1068,9 +1008,9 @@ fn remove_nonempty_fat32_dir() {
     let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let dir_path = PathBuf::from("/secret/");
+    let dir_path = "/secret/";
 
-    fs.remove_dir_all(&dir_path).unwrap();
+    fs.remove_dir_all(dir_path).unwrap();
 
     // the directory should now be gone
     let dir_result = fs.read_dir(dir_path);
@@ -1090,7 +1030,7 @@ fn attempt_to_remove_file_as_directory() {
     let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let dir_path = PathBuf::from("/hello.txt");
+    let dir_path = "/hello.txt";
 
     let fs_result = fs.remove_dir_all(dir_path);
 
@@ -1134,7 +1074,7 @@ fn FAT_tables_after_fat32_write_are_identical() {
     );
 
     // let's write the bee movie script to root.txt (why not), check, truncate the file, then check again
-    let mut file = fs.get_rw_file(PathBuf::from("hello.txt")).unwrap();
+    let mut file = fs.get_rw_file("hello.txt").unwrap();
 
     file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
     assert!(file.fs.FAT_tables_are_identical().unwrap());
