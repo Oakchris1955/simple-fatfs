@@ -55,7 +55,7 @@ pub(crate) const SFN_LEN: usize = SFN_NAME_LEN + 1 + SFN_EXT_LEN;
 /// In FAT, each file has 2 filenames: one long and one short filename.
 /// The short filename is retained for backwards-compatibility reasons
 /// by the FAT specification and shouldn't concern most users.
-pub struct Sfn {
+pub(crate) struct Sfn {
     pub(crate) name: [u8; SFN_NAME_LEN],
     pub(crate) ext: [u8; SFN_EXT_LEN],
 }
@@ -128,7 +128,7 @@ impl Sfn {
 #[derive(Clone, Debug)]
 pub struct Properties {
     pub(crate) path: Box<Path>,
-    pub(crate) sfn: Sfn,
+    pub(crate) sfn: (Sfn, Codepage),
     pub(crate) is_dir: bool,
     pub(crate) attributes: Attributes,
     pub(crate) created: Option<PrimitiveDateTime>,
@@ -150,9 +150,9 @@ impl Properties {
     }
 
     #[inline]
-    /// Get the corresponding [short filename](`Sfn`) for this entry
-    pub fn sfn(&self) -> &Sfn {
-        &self.sfn
+    /// Get the corresponding short filename for this entry
+    pub fn sfn(&self) -> String {
+        self.sfn.0.decode(&self.sfn.1)
     }
 
     #[inline]
@@ -209,10 +209,10 @@ impl Properties {
 }
 
 impl Properties {
-    pub(crate) fn from_raw(raw_props: RawProperties, path: Box<Path>) -> Self {
+    pub(crate) fn from_raw(raw_props: RawProperties, path: Box<Path>, codepage: Codepage) -> Self {
         Self {
             path,
-            sfn: raw_props.sfn,
+            sfn: (raw_props.sfn, codepage),
             is_dir: raw_props.is_dir,
             attributes: raw_props.attributes.into(),
             created: raw_props.created,

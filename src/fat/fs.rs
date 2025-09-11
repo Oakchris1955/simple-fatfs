@@ -1814,6 +1814,7 @@ where
                 entry: Properties::from_raw(
                     RawProperties::from_chain(raw_properties, chain),
                     path.into(),
+                    self.options.codepage,
                 ),
                 offset: 0,
             },

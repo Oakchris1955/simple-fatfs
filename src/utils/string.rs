@@ -173,7 +173,7 @@ where
         for entry in fs.read_dir(&target_dir)? {
             let entry = entry?;
 
-            if *entry.sfn() == sfn {
+            if entry.sfn.0 == sfn {
                 continue 'outer;
             }
         }

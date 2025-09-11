@@ -163,7 +163,7 @@ impl RawProperties {
         let entry_path = path.as_ref().join(&self.name);
 
         DirEntry {
-            entry: Properties::from_raw(self, entry_path.into()),
+            entry: Properties::from_raw(self, entry_path.into(), fs.options.codepage),
             fs,
         }
     }
@@ -188,7 +188,7 @@ impl From<Properties> for RawProperties {
     fn from(value: Properties) -> Self {
         Self {
             name: String::from(value.path.file_name().expect("the path is normalized")),
-            sfn: value.sfn,
+            sfn: value.sfn.0,
             is_dir: value.is_dir,
             attributes: RawAttributes::from_attributes(value.attributes, value.is_dir),
             created: value.created,
