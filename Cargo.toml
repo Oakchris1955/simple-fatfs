@@ -10,7 +10,7 @@ exclude = ["/.github", ".vscode", "/imgs", "**/*cliff*"]
 [dependencies]
 bincode = "2.0.1"
 bitfield-struct = "0.8.0"
-bitflags = { version = "2.6.0", features = ["serde"] }
+bitflags = { version = "2.6.0" }
 displaydoc = { version = "0.2.5", default-features = false }
 embedded-io = { version = "0.6.1", features = ["alloc"] }
 log = "0.4.22"
