@@ -233,6 +233,7 @@ fn create_subdir_file() {
 
 #[test]
 fn create_lots_of_files() {
+    use regex::Regex;
     use std::io::Cursor;
 
     const FILE_COUNT: usize = 1_000;
@@ -250,11 +251,38 @@ fn create_lots_of_files() {
         drop(file);
     }
 
-    for i in 1..=FILE_COUNT {
-        let name = PathBuf::from(&format!("/another root directory/{i}.txt"));
-        let mut file = fs.get_ro_file(&name).unwrap();
-        assert_file_is_i_dont_need_a_badge(&mut file);
+    let dir = fs.read_dir("/another root directory/").unwrap();
+    let mut found = [false; FILE_COUNT];
+    let re = Regex::new(r"([0-9]*).txt").unwrap();
+    for entry in dir {
+        let entry = entry.unwrap();
+        if entry.is_file() {
+            let file_name = entry.path().file_name().unwrap();
+            if let Some(c_id) = re.captures(file_name) {
+                let id: usize = c_id[1].parse().unwrap();
+                if (1..=FILE_COUNT).contains(&id) {
+                    found[id - 1] = true;
+                    let mut file = entry.to_ro_file().unwrap();
+                    assert_file_is_i_dont_need_a_badge(&mut file);
+                } else {
+                    log::error!("Found unexpected file with name \"{id}\"")
+                }
+            }
+        }
     }
+
+    let mut all_found = true;
+    for (id, id_found) in found.iter().enumerate() {
+        if !id_found {
+            all_found = false;
+            log::error!("File /another root directory/{id}.txt not found")
+        }
+    }
+
+    assert!(
+        all_found,
+        "Some files that were created weren't found during directory iteration"
+    )
 }
 
 #[test]
@@ -1040,6 +1068,35 @@ fn attempt_to_remove_file_as_directory() {
             _ => panic!("unexpected IOError: {err:?}"),
         },
         _ => panic!("the filesystem struct should have detected that this isn't a directory"),
+    }
+}
+
+#[test]
+fn read_dir_and_go_back() {
+    use std::io::Cursor;
+
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+
+    for entry in fs.read_dir("/").unwrap() {
+        let entry = entry.unwrap();
+
+        if entry.path() == "/secret/" {
+            let mut secret_dir = entry.to_dir().unwrap();
+
+            let bee_movie_script_found = secret_dir.any(|res| {
+                if let Ok(entry) = res {
+                    entry.is_file() && entry.path() == "/secret/bee movie script.txt"
+                } else {
+                    false
+                }
+            });
+
+            assert!(
+                bee_movie_script_found,
+                "couldn't find \"/secret/bee movie script.txt\""
+            )
+        }
     }
 }
 

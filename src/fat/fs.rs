@@ -573,7 +573,7 @@ where
     S: Read + Seek,
 {
     pub(crate) fn process_current_dir<'a>(&'a self) -> ReadDirInt<'a, S> {
-        ReadDirInt::new(self)
+        ReadDirInt::new(self, &self.dir_info.borrow().chain_start)
     }
 
     /// Goes to the parent directory.
@@ -1677,10 +1677,11 @@ where
 
         self.go_to_dir(&path)?;
 
-        let entries = self.process_current_dir();
-
-        // let's map the private ReadDirInt to the public ReadDir and return
-        Ok(ReadDir::from(entries))
+        Ok(ReadDir::new(
+            self,
+            &self.dir_info.borrow().chain_start,
+            &self.dir_info.borrow().path,
+        ))
     }
 
     /// Get a corresponding [`ROFile`] object from a [`Path`]
@@ -2122,9 +2123,9 @@ where
             };
 
             if entry.is_dir() {
-                read_dir.get_fs().remove_dir_all_unchecked(&entry.path)?;
+                self.remove_dir_all_unchecked(&entry.path)?;
             } else if entry.is_file() {
-                read_dir.get_fs().remove_file_unchecked(&entry.path)?;
+                self.remove_file_unchecked(&entry.path)?;
             } else {
                 unreachable!()
             }
@@ -2155,7 +2156,7 @@ where
             };
 
             let read_only_found = if entry.is_dir() {
-                read_dir.get_fs().check_for_readonly_files(&entry.path)?
+                self.check_for_readonly_files(&entry.path)?
             } else if entry.is_file() {
                 entry.attributes.read_only
             } else {

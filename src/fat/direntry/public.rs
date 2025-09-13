@@ -239,9 +239,9 @@ impl<'a, S> DirEntry<'a, S>
 where
     S: Read + Seek,
 {
-    /// Get the corresponding [`ROFile`] object of this [`DirEntry`]
+    /// Get the corresponding [`ROFile`] object for this [`DirEntry`]
     ///
-    /// Will return `None` if the entry is a directory
+    /// Will return [`None`] if the entry isn't a file
     pub fn to_ro_file(&self) -> Option<ROFile<'a, S>> {
         self.is_file().then(|| ROFile {
             fs: self.fs,
@@ -253,14 +253,18 @@ where
         })
     }
 
-    /*
-    TODO: we also need a way to store the current directory state
-    before going to another directory
-
-    pub fn to_dir(&self) -> ReadDir<'a, S> {
-        // code goes here
+    /// Get the corresponding [`ReadDir`] object for this [`DirEntry`]
+    ///
+    /// Will return [`None`] if the entry isn't a directory
+    pub fn to_dir(&self) -> Option<ReadDir<'a, S>> {
+        self.is_dir().then(|| {
+            ReadDir::new(
+                self.fs,
+                &EntryLocationUnit::DataCluster(self.data_cluster),
+                self.path(),
+            )
+        })
     }
-    */
 }
 
 impl<'a, S> DirEntry<'a, S>
@@ -292,26 +296,26 @@ where
 /// The order in which this iterator returns entries can vary
 /// and shouldn't be relied upon
 #[derive(Debug)]
-pub struct ReadDir<'a, S>(pub(crate) ReadDirInt<'a, S>)
-where
-    S: Read + Seek;
-
-impl<S> ReadDir<'_, S>
+pub struct ReadDir<'a, S>
 where
     S: Read + Seek,
 {
-    #[inline]
-    pub(crate) fn get_fs(&self) -> &FileSystem<S> {
-        self.0.get_fs()
-    }
+    inner: ReadDirInt<'a, S>,
+    parent: Box<Path>,
 }
 
-impl<'a, S> From<ReadDirInt<'a, S>> for ReadDir<'a, S>
+impl<'a, S> ReadDir<'a, S>
 where
     S: Read + Seek,
 {
-    fn from(value: ReadDirInt<'a, S>) -> Self {
-        Self(value)
+    pub(crate) fn new<P>(fs: &'a FileSystem<S>, chain_start: &EntryLocationUnit, parent: P) -> Self
+    where
+        P: AsRef<Path>,
+    {
+        Self {
+            inner: ReadDirInt::new(fs, chain_start),
+            parent: parent.as_ref().into(),
+        }
     }
 }
 
@@ -323,18 +327,15 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            match self.0.next() {
+            match self.inner.next() {
                 Some(res) => match res {
                     Ok(value) => {
-                        if self.get_fs().filter.borrow().filter(&value)
+                        if self.inner.fs.filter.borrow().filter(&value)
                             // we shouldn't expose the special entries to the user
                             && ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
                                 .contains(&value.name.as_str())
                         {
-                            return Some(Ok(value.into_dir_entry(
-                                &self.get_fs().dir_info.borrow().path,
-                                self.0.fs,
-                            )));
+                            return Some(Ok(value.into_dir_entry(&self.parent, self.inner.fs)));
                         } else {
                             continue;
                         }

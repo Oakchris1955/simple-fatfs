@@ -28,4 +28,5 @@ std = ["time/std", "time/local-offset"]
 
 [dev-dependencies]
 embedded-io-adapters = { version = "0.6.2", features = ["std"] }
+regex = "1.11.2"
 test-log = "0.2.16"
