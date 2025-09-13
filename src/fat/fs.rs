@@ -1630,14 +1630,14 @@ where
         if *self.fsinfo_modified.borrow() {
             if let BootRecord::Fat(boot_record_fat) = &*self.boot_record.borrow() {
                 if let Ebr::FAT32(ebr_fat32, fsinfo) = &boot_record_fat.ebr {
-                    // FIXME: unnecessary memory usage?
-                    let mut bytes = [0_u8; FSINFO_SIZE];
-
-                    bincode::encode_into_slice(fsinfo, &mut bytes, BINCODE_CONFIG)
-                        .map_err(utils::bincode::map_err_enc)?;
-
                     self.load_nth_sector(ebr_fat32.fat_info.into())?;
-                    self.sector_buffer.borrow_mut()[..FSINFO_SIZE].copy_from_slice(&bytes);
+
+                    bincode::encode_into_slice(
+                        fsinfo,
+                        &mut self.sector_buffer.borrow_mut()[..FSINFO_SIZE],
+                        BINCODE_CONFIG,
+                    )
+                    .map_err(utils::bincode::map_err_enc)?;
                 }
             }
 

@@ -1,7 +1,5 @@
 use super::*;
 
-use core::fmt;
-
 use bincode::{Decode, Encode};
 use bitfield_struct::bitfield;
 
@@ -188,21 +186,14 @@ pub(crate) struct BpbFat {
 }
 
 pub(crate) const EBR_SIZE: usize = MIN_SECTOR_SIZE - BPBFAT_SIZE;
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum Ebr {
     FAT12_16(EBRFAT12_16),
     FAT32(EBRFAT32, FSInfoFAT32),
 }
 
-impl fmt::Debug for Ebr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: find a good way of printing this
-        write!(f, "FAT12-16/32 Extended boot record...")
-    }
-}
-
-#[derive(Encode, Decode, Clone)]
+#[derive(Debug, Encode, Decode, Clone)]
 pub(crate) struct EBRFAT12_16 {
     pub _drive_num: u8,
     pub _windows_nt_flags: u8,
@@ -235,7 +226,7 @@ pub(crate) struct FATVersion {
     major: u8,
 }
 
-#[derive(Encode, Decode, Clone)]
+#[derive(Debug, Encode, Decode, Clone)]
 pub(crate) struct EBRFAT32 {
     pub table_size_32: u32,
     pub extended_flags: FAT32ExtendedFlags,
