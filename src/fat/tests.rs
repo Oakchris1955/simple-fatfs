@@ -10,22 +10,6 @@ static FAT12: &[u8] = include_bytes!("../../imgs/fat12.img");
 static FAT16: &[u8] = include_bytes!("../../imgs/fat16.img");
 static FAT32: &[u8] = include_bytes!("../../imgs/fat32.img");
 
-/*struct DummyStorage(Box<[u8]>);
-
-impl ErrorType for DummyStorage {
-    type Error = std::io::Error;
-}
-
-impl Read for DummyStorage {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {}
-}
-
-impl From<&[u8]> for DummyStorage {
-    fn from(value: &[u8]) -> Self {
-        Self(Box::from(value))
-    }
-}*/
-
 #[test]
 #[allow(non_snake_case)]
 fn check_FAT_offset() {

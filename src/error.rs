@@ -72,7 +72,7 @@ where
     PermissionDenied,
     /// A parameter was incorrect.
     InvalidInput,
-    /// The underlying sotrage is full.
+    /// The underlying storage is full.
     StorageFull,
     /**
      There aren't enough free entries on the root directory to perform

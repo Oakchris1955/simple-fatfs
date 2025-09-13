@@ -35,9 +35,9 @@ pub(crate) struct LFNEntry {
     pub(crate) _lfn_attribute: u8,
     /// Both OSDev and the FAT specification say this is always 0
     pub(crate) _long_entry_type: u8,
-    /// If this doesn't match with the computed cksum, then the set of LFNs is considered corrupt
+    /// If this doesn't match with the computed checksum, then the set of LFNs is considered corrupt
     ///
-    /// A [`LFNEntry`] will be marked as corrupt even if it isn't, if the Sfn is modifed by a legacy system,
+    /// A [`LFNEntry`] will be marked as corrupt even if it isn't, if the Sfn is modified by a legacy system,
     /// since the new Sfn's signature and the one on this field won't (probably) match
     pub(crate) checksum: u8,
     pub(crate) mid_chars: [u8; LFN_MID_CHARS * 2],
@@ -68,7 +68,7 @@ impl LFNEntry {
     }
 }
 
-/// Estimate how many entries a file with the provided file_name would take
+/// Estimate how many entries a file with the provided file name would take
 ///
 /// This only takes into account the [`DirEntries`](DirEntry) needed,
 /// not the contents of the file

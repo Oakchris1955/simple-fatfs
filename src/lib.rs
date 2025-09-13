@@ -15,7 +15,7 @@
 //! The library uses [`embedded-io`](embedded_io) for IO operations.
 //! Most notably, the storage medium is expected to implement at least the
 //! [`Read`] and [`Seek`] traits (RO storage), while [`Write`] is optional
-//! (R/W storage). Furthemore, [`ROFile`] & [`RWFile`] both implement [`Read`]
+//! (R/W storage). Furthermore, [`ROFile`] & [`RWFile`] both implement [`Read`]
 //! & [`Seek`], while [`RWFile`] also implements [`Write`]
 //!
 //! To use [`std::io`]'s respective traits, use the

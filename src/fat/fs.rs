@@ -22,7 +22,7 @@ use time::PrimitiveDateTime;
 // no need for enum variant documentation here
 pub enum FATType {
     /// One of the earliest versions, originally used all the way back to 1980.
-    /// This probably won't be encountered anywhere outside ancient MSDOS versions
+    /// This probably won't be encountered anywhere outside ancient MS-DOS versions
     /// or pretty low-size volumes, like microcontrollers
     ///
     /// Max volume size: 8 MB
@@ -37,7 +37,7 @@ pub enum FATType {
     /// Min volume size: 256 MB,
     /// Max volume size: 16 TB
     FAT32,
-    /// An ex-proprietory filesystem that allowes for even larger storage sizes
+    /// An ex-proprietory filesystem that allows for even larger storage sizes
     /// and its use is currently on the rise
     ///
     /// Not currently supported
@@ -447,7 +447,7 @@ where
     }
 }
 
-/// Constructors for a  [`FileSystem`]
+/// Constructors for a [`FileSystem`]
 impl<S> FileSystem<S>
 where
     S: Read + Seek,
@@ -535,8 +535,6 @@ where
         };
 
         let props = FSProperties::from(&boot_record);
-
-        //buffer.
 
         let fs = Self {
             storage: storage.into(),
@@ -676,7 +674,7 @@ where
     }
 
     /// Make sure that the sector stored in the sector buffer is the same as
-    /// the first sector of cahced directory chain
+    /// the first sector of cached directory chain
     fn _go_to_cached_dir(&self) -> FSResult<(), S::Error> {
         let dir_chain = self.dir_info.borrow().chain_start;
         let target_sector = dir_chain.get_entry_sector(self);
@@ -2084,7 +2082,7 @@ where
     /// Use with caution!
     ///
     /// This will fail if there is at least 1 (one) read-only file
-    /// in this directory or in any subdirectory. To avoid this behaviour,
+    /// in this directory or in any subdirectory. To avoid this behavior,
     /// use [`remove_dir_all_unchecked()`](FileSystem::remove_dir_all_unchecked)
     pub fn remove_dir_all<P: AsRef<Path>>(&self, path: P) -> FSResult<(), S::Error> {
         // before we actually start removing stuff,

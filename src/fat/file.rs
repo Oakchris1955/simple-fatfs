@@ -25,7 +25,7 @@ pub(crate) struct FileProps {
 ///
 /// Note: whether or not your FileSystem is RO or R/W, this won't update
 /// the [`ROFile::last_accessed_date()`](Properties::last_accessed_date())
-/// If you want to avoid this behaviour in a R/W filesystem, use [`RWFile`]
+/// If you want to avoid this behavior in a R/W filesystem, use [`RWFile`]
 #[derive(Debug)]
 pub struct ROFile<'a, S>
 where
@@ -71,7 +71,7 @@ where
     S: Read + Seek,
 {
     #[inline]
-    /// Panics if the current cluser doesn't point to another clluster
+    /// Panics if the current cluster doesn't point to another cluster
     fn next_cluster(&mut self) -> Result<(), <Self as ErrorType>::Error> {
         // when a `ROFile` is created, `cluster_chain_is_healthy` is called, if it fails, that ROFile is dropped
         self.props.current_cluster = self.get_next_cluster()?.unwrap();

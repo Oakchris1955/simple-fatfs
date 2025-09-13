@@ -4,7 +4,7 @@ use crate::*;
 use alloc::boxed::Box;
 
 #[derive(Debug)]
-/// Filesystem mount options
+/// FileSystem mount options
 pub struct FSOptions {
     pub(crate) clock: Box<dyn Clock>,
     pub(crate) codepage: codepage::Codepage,
