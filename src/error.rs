@@ -6,7 +6,7 @@ use crate::*;
 /// An error type that denotes that there is something wrong
 /// with the filesystem's structure itself (perhaps the FS itself is malformed/corrupted)
 #[non_exhaustive]
-#[derive(Debug, displaydoc::Display)]
+#[derive(Debug)]
 pub enum InternalFSError {
     /// The storage medium isn't large enough to accompany a FAT filesystem
     StorageTooSmall,
@@ -32,13 +32,12 @@ pub enum InternalFSError {
 
 /// An error indicating that a filesystem-related operation has failed
 #[non_exhaustive]
-#[derive(Debug, displaydoc::Display)]
+#[derive(Debug)]
 pub enum FSError<I>
 where
     I: Error,
 {
     /// An internal FS error occured
-    #[displaydoc("An internal FS error occured: {0}")]
     InternalFSError(InternalFSError),
     /**
      The [Path](`crate::Path`) provided is malformed.
@@ -91,7 +90,6 @@ where
     /// Unexpected EOF
     UnexpectedEof,
     /// An IO error occured
-    #[displaydoc("An IO error occured: {0:?}")]
     IOError(I),
 }
 
