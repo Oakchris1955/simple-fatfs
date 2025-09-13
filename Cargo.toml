@@ -8,7 +8,6 @@ repository = "https://github.com/Oakchris1955/simple-fatfs"
 exclude = ["/.github", ".vscode", "/imgs", "**/*cliff*"]
 
 [dependencies]
-akin = "0.4.0"
 bincode = "2.0.1"
 bitfield-struct = "0.8.0"
 bitflags = { version = "2.6.0", features = ["serde"] }
@@ -25,6 +24,7 @@ default = ["std"]
 std = ["time/std", "time/local-offset"]
 
 [dev-dependencies]
+akin = "0.4.0"
 embedded-io-adapters = { version = "0.6.2", features = ["std"] }
 regex = "1.11.2"
 test-log = "0.2.16"

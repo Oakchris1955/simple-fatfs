@@ -3,7 +3,6 @@ use core::num;
 use crate::time::EPOCH;
 
 use ::time;
-use akin::akin;
 use bincode::{impl_borrow_decode, Decode, Encode};
 use bitfield_struct::bitfield;
 use time::{Date, PrimitiveDateTime, Time};
@@ -120,11 +119,9 @@ impl bincode::Encode for EntryCreationTime {
                 bincode::Encode::encode(&creation_time, encoder)?;
             }
             None => {
-                akin! {
-                    let &field_type = [u8, u16, u16];
-
-                    bincode::Encode::encode(&0_~*field_type, encoder)?;
-                };
+                bincode::Encode::encode(&0_u8, encoder)?;
+                bincode::Encode::encode(&0_u16, encoder)?;
+                bincode::Encode::encode(&0_u16, encoder)?;
             }
         }
 
