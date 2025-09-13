@@ -55,9 +55,6 @@
 //!
 //!     // the disk image we currently use has a file named "root.txt"
 //!     // in the root directory. Let's read it
-//!
-//!     // please keep in mind that opening a `ROFile` or `RWFile` borrows
-//!     // the parent `FileSystem` until that `ROFile` or `RWFile` is dropped
 //!     let mut file = fs.get_ro_file("/root.txt").unwrap();
 //!     let mut file_buf = vec![0; file.file_size() as usize];
 //!     file.read_exact(&mut file_buf).unwrap();
