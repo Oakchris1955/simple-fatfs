@@ -598,7 +598,7 @@ fn FAT_tables_after_write_are_identical() {
     file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
     assert!(file.fs.FAT_tables_are_identical().unwrap());
 
-    file.truncate(10_000).unwrap();
+    file.seek(SeekFrom::Start(10_000)).unwrap();
     assert!(file.fs.FAT_tables_are_identical().unwrap());
 }
 
@@ -613,8 +613,10 @@ fn truncate_file() {
 
     // we are gonna truncate the bee movie script down to 20 000 bytes
     const NEW_SIZE: usize = 20_000;
-    file.truncate(u32::try_from(NEW_SIZE).unwrap()).unwrap();
+    file.seek(SeekFrom::Start(20_000)).unwrap();
+    file.truncate().unwrap();
 
+    file.rewind().unwrap();
     let mut file_buf = vec![0; file.file_size() as usize];
     file.read_exact(&mut file_buf).unwrap();
     let file_string = str::from_utf8(&file_buf).unwrap();
@@ -959,9 +961,11 @@ fn truncate_fat32_file() {
     const EXPECTED_STR: &str = "Hello fr";
 
     let mut file = fs.get_rw_file("/hello.txt").unwrap();
-    file.truncate(u32::try_from(EXPECTED_STR.len()).unwrap())
+    file.seek(SeekFrom::Start(EXPECTED_STR.len() as u64))
         .unwrap();
+    file.truncate().unwrap();
 
+    file.rewind().unwrap();
     let mut file_buf = vec![0; file.file_size() as usize];
     file.read_exact(&mut file_buf).unwrap();
     let string = str::from_utf8(&file_buf).unwrap();
@@ -1120,7 +1124,8 @@ fn FAT_tables_after_fat32_write_are_identical() {
     file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
     assert!(file.fs.FAT_tables_are_identical().unwrap());
 
-    file.truncate(10_000).unwrap();
+    file.seek(SeekFrom::Start(10_000)).unwrap();
+    file.truncate().unwrap();
     assert!(file.fs.FAT_tables_are_identical().unwrap());
 }
 

@@ -344,14 +344,10 @@ where
         self.entry_modified = true;
     }
 
-    /// Truncates the file to a given size, deleting everything past the new EOF
-    ///
-    /// If `size` is greater or equal to the current file size
-    /// till the end of the last cluster allocated, this has no effect
-    /// to the file contents
-    ///
-    /// Furthermore, if the cursor point is beyond the new EOF, it will be moved there
-    pub fn truncate(&mut self, size: FileSize) -> Result<(), <Self as ErrorType>::Error> {
+    /// Truncates the file to the cursor position
+    pub fn truncate(&mut self) -> Result<(), <Self as ErrorType>::Error> {
+        let size = self.props.offset;
+
         // looks like the new truncated size would be smaller than the current one, so we just return
         if size.next_multiple_of(self.fs.props.cluster_size) >= self.file_size {
             if size < self.file_size {
