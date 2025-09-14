@@ -70,6 +70,7 @@ commit_parsers = [
   { message = "^ci", skip = true },
   { message = "^test", skip = true },
   { message = "^refactor", skip = true },
+  { message = "^docs", skip = true },
   { message = "^.*: add", group = "Added" },
   { message = "^.*: create", group = "Added" },
   { message = "^.*support", group = "Added" },
