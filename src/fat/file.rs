@@ -5,7 +5,7 @@ use core::{cmp, num, ops};
 use time::{Date, PrimitiveDateTime};
 
 use crate::utils::{self, bincode::BINCODE_CONFIG};
-use crate::{FSError, FSResult, InternalFSError};
+use crate::{Clock, FSError, FSResult, InternalFSError};
 
 use embedded_io::*;
 
@@ -25,17 +25,19 @@ pub(crate) struct FileProps {
 /// the [`ROFile::last_accessed_date()`](Properties::last_accessed_date())
 /// If you want to avoid this behavior in a R/W filesystem, use [`RWFile`]
 #[derive(Debug)]
-pub struct ROFile<'a, S>
+pub struct ROFile<'a, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
-    pub(crate) fs: &'a FileSystem<S>,
+    pub(crate) fs: &'a FileSystem<S, C>,
     pub(crate) props: FileProps,
 }
 
-impl<S> ops::Deref for ROFile<'_, S>
+impl<S, C> ops::Deref for ROFile<'_, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     type Target = Properties;
 
@@ -44,9 +46,10 @@ where
     }
 }
 
-impl<S> ops::DerefMut for ROFile<'_, S>
+impl<S, C> ops::DerefMut for ROFile<'_, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.props.entry
@@ -54,19 +57,21 @@ where
 }
 
 // Constructors
-impl<'a, S> ROFile<'a, S>
+impl<'a, S, C> ROFile<'a, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
-    pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S>) -> Self {
+    pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S, C>) -> Self {
         Self { fs, props }
     }
 }
 
 // Internal functions
-impl<S> ROFile<'_, S>
+impl<S, C> ROFile<'_, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     #[inline]
     /// Panics if the current cluster doesn't point to another cluster
@@ -135,16 +140,18 @@ where
     }
 }
 
-impl<S> ErrorType for ROFile<'_, S>
+impl<S, C> ErrorType for ROFile<'_, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     type Error = S::Error;
 }
 
-impl<S> Read for ROFile<'_, S>
+impl<S, C> Read for ROFile<'_, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         let mut bytes_read = 0;
@@ -214,9 +221,10 @@ where
     }
 }
 
-impl<S> Seek for ROFile<'_, S>
+impl<S, C> Seek for ROFile<'_, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error> {
         let mut offset = self.offset_from_seekfrom(pos);
@@ -265,20 +273,22 @@ where
 ///
 /// To reduce a file's size, use the [`truncate`](RWFile::truncate) method
 #[derive(Debug)]
-pub struct RWFile<'a, S>
+pub struct RWFile<'a, S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
-    pub(crate) ro_file: ROFile<'a, S>,
+    pub(crate) ro_file: ROFile<'a, S, C>,
     /// Represents whether or not the file has been written to
     pub(crate) entry_modified: bool,
 }
 
-impl<'a, S> From<ROFile<'a, S>> for RWFile<'a, S>
+impl<'a, S, C> From<ROFile<'a, S, C>> for RWFile<'a, S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
-    fn from(value: ROFile<'a, S>) -> Self {
+    fn from(value: ROFile<'a, S, C>) -> Self {
         Self {
             ro_file: value,
             entry_modified: false,
@@ -286,20 +296,22 @@ where
     }
 }
 
-impl<'a, S> ops::Deref for RWFile<'a, S>
+impl<'a, S, C> ops::Deref for RWFile<'a, S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
-    type Target = ROFile<'a, S>;
+    type Target = ROFile<'a, S, C>;
 
     fn deref(&self) -> &Self::Target {
         &self.ro_file
     }
 }
 
-impl<S> ops::DerefMut for RWFile<'_, S>
+impl<S, C> ops::DerefMut for RWFile<'_, S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.ro_file
@@ -307,19 +319,21 @@ where
 }
 
 // Constructors
-impl<'a, S> RWFile<'a, S>
+impl<'a, S, C> RWFile<'a, S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
-    pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S>) -> Self {
+    pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S, C>) -> Self {
         ROFile::from_props(props, fs).into()
     }
 }
 
 // Public functions
-impl<S> RWFile<'_, S>
+impl<S, C> RWFile<'_, S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
     /// Set the last accessed [`Date`] attribute of this file
     pub fn set_accessed(&mut self, accessed: Date) {
@@ -419,9 +433,10 @@ where
 }
 
 // Private functions
-impl<S> RWFile<'_, S>
+impl<S, C> RWFile<'_, S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
     fn sync_entry(&mut self) -> FSResult<(), S::Error> {
         if self.entry_modified {
@@ -522,16 +537,18 @@ where
     }
 }
 
-impl<S> ErrorType for RWFile<'_, S>
+impl<S, C> ErrorType for RWFile<'_, S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
     type Error = RWFileError<S::Error>;
 }
 
-impl<S> Read for RWFile<'_, S>
+impl<S, C> Read for RWFile<'_, S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
     #[inline]
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
@@ -559,9 +576,10 @@ where
     }
 }
 
-impl<S> Write for RWFile<'_, S>
+impl<S, C> Write for RWFile<'_, S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
     fn write(&mut self, mut buf: &[u8]) -> Result<usize, Self::Error> {
         let cur_offset = self.props.offset;
@@ -642,9 +660,10 @@ where
     }
 }
 
-impl<S> Seek for RWFile<'_, S>
+impl<S, C> Seek for RWFile<'_, S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error> {
         let offset = self.offset_from_seekfrom(pos);
@@ -697,9 +716,10 @@ where
     }
 }
 
-impl<S> Drop for RWFile<'_, S>
+impl<S, C> Drop for RWFile<'_, S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
     fn drop(&mut self) {
         // nothing to do if this errors out while dropping

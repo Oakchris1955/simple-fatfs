@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::{error::*, path::*, utils};
+use crate::{error::*, path::*, utils, Clock};
 
 use core::{
     cell::{Ref, RefCell},
@@ -108,9 +108,10 @@ struct FATEntryProps {
 
 impl FATEntryProps {
     /// Get the [`FATEntryProps`] of the `n`-th [`FATEntry`] of a [`FileSystem`]
-    pub fn new<S>(n: FATEntryIndex, fs: &FileSystem<S>) -> Self
+    pub fn new<S, C>(n: FATEntryIndex, fs: &FileSystem<S, C>) -> Self
     where
         S: Read + Seek,
+        C: Clock,
     {
         let fat_byte_offset: u64 = u64::from(n) * u64::from(fs.fat_type.bits_per_entry()) / 8;
         let fat_sector = SectorIndex::try_from(
@@ -143,9 +144,10 @@ struct FATSectorProps {
 
 impl FATSectorProps {
     /// Returns [`None`] if this sector doesn't belong to a FAT table
-    pub fn new<S>(sector: SectorIndex, fs: &FileSystem<S>) -> Option<Self>
+    pub fn new<S, C>(sector: SectorIndex, fs: &FileSystem<S, C>) -> Option<Self>
     where
         S: Read + Seek,
+        C: Clock,
     {
         if !fs.sector_belongs_to_FAT(sector) {
             return None;
@@ -164,9 +166,10 @@ impl FATSectorProps {
     }
 
     #[allow(non_snake_case)]
-    pub fn get_corresponding_FAT_sectors<S>(&self, fs: &FileSystem<S>) -> Box<[SectorIndex]>
+    pub fn get_corresponding_FAT_sectors<S, C>(&self, fs: &FileSystem<S, C>) -> Box<[SectorIndex]>
     where
         S: Read + Seek,
+        C: Clock,
     {
         let mut vec = Vec::with_capacity(fs.props.fat_table_count.into());
 
@@ -212,7 +215,12 @@ impl DirInfo {
     }
 }
 
-impl<S> iter::FusedIterator for ReadDir<'_, S> where S: Read + Seek {}
+impl<S, C> iter::FusedIterator for ReadDir<'_, S, C>
+where
+    S: Read + Seek,
+    C: Clock,
+{
+}
 
 pub(crate) trait OffsetConversions {
     fn sector_size(&self) -> u16;
@@ -248,9 +256,10 @@ pub(crate) trait OffsetConversions {
     }
 }
 
-impl<S> OffsetConversions for FileSystem<S>
+impl<S, C> OffsetConversions for FileSystem<S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     #[inline]
     fn sector_size(&self) -> u16 {
@@ -380,14 +389,15 @@ impl Default for FileFilter {
     }
 }
 
-type SyncSectorBufferFn<S> = fn(&FileSystem<S>) -> Result<(), <S as ErrorType>::Error>;
-type UnmountFn<S> = fn(&FileSystem<S>) -> FSResult<(), <S as ErrorType>::Error>;
+type SyncSectorBufferFn<S, C> = fn(&FileSystem<S, C>) -> Result<(), <S as ErrorType>::Error>;
+type UnmountFn<S, C> = fn(&FileSystem<S, C>) -> FSResult<(), <S as ErrorType>::Error>;
 
 /// An API to process a FAT filesystem
 #[derive(Debug)]
-pub struct FileSystem<S>
+pub struct FileSystem<S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     /// Any struct that implements the [`Read`], [`Seek`] and optionally [`Write`] traits
     storage: RefCell<S>,
@@ -398,10 +408,10 @@ where
 
     pub(crate) dir_info: RefCell<DirInfo>,
 
-    sync_f: RefCell<Option<SyncSectorBufferFn<S>>>,
-    unmount_f: RefCell<Option<UnmountFn<S>>>,
+    sync_f: RefCell<Option<SyncSectorBufferFn<S, C>>>,
+    unmount_f: RefCell<Option<UnmountFn<S, C>>>,
 
-    pub(crate) options: FSOptions,
+    pub(crate) options: FSOptions<C>,
 
     pub(crate) boot_record: RefCell<BootRecord>,
     // since `self.boot_record.fat_type()` calls like 5 nested functions, we keep this cached and expose it with a public getter function
@@ -415,9 +425,10 @@ where
 }
 
 /// Getter functions
-impl<S> FileSystem<S>
+impl<S, C> FileSystem<S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     /// What is the [`FATType`] of the filesystem
     pub fn fat_type(&self) -> FATType {
@@ -426,9 +437,10 @@ where
 }
 
 /// Setter functions
-impl<S> FileSystem<S>
+impl<S, C> FileSystem<S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     /// Whether or not to list hidden files
     ///
@@ -448,15 +460,16 @@ where
 }
 
 /// Constructors for a [`FileSystem`]
-impl<S> FileSystem<S>
+impl<S, C> FileSystem<S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     /// Create a [`FileSystem`] from a storage object
     ///
     /// Fails if the storage is way too small to support a FAT filesystem.
     /// For most use cases, that shouldn't be an issue, you can just call [`.unwrap()`](Result::unwrap)
-    pub fn new(mut storage: S, options: FSOptions) -> FSResult<Self, S::Error> {
+    pub fn new(mut storage: S, options: FSOptions<C>) -> FSResult<Self, S::Error> {
         use utils::bincode::BINCODE_CONFIG;
 
         // Begin by reading the boot record
@@ -566,11 +579,12 @@ where
 }
 
 /// Internal [`Read`]-related low-level functions
-impl<S> FileSystem<S>
+impl<S, C> FileSystem<S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
-    pub(crate) fn process_current_dir<'a>(&'a self) -> ReadDirInt<'a, S> {
+    pub(crate) fn process_current_dir<'a>(&'a self) -> ReadDirInt<'a, S, C> {
         ReadDirInt::new(self, &self.dir_info.borrow().chain_start)
     }
 
@@ -1005,9 +1019,10 @@ where
 }
 
 /// Internal [`Write`]-related low-level functions
-impl<S> FileSystem<S>
+impl<S, C> FileSystem<S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
     #[allow(non_snake_case)]
     pub(crate) fn write_nth_FAT_entry(
@@ -1648,7 +1663,10 @@ where
     /// Like [`Self::get_rw_file`], but will ignore the read-only flag (if it is present)
     ///
     /// This is a private function for obvious reasons
-    fn get_rw_file_unchecked<P: AsRef<Path>>(&self, path: P) -> FSResult<RWFile<'_, S>, S::Error> {
+    fn get_rw_file_unchecked<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> FSResult<RWFile<'_, S, C>, S::Error> {
         let ro_file = self.get_ro_file(path)?;
 
         Ok(ro_file.into())
@@ -1656,14 +1674,15 @@ where
 }
 
 /// Public [`Read`]-related functions
-impl<S> FileSystem<S>
+impl<S, C> FileSystem<S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     /// Read all the entries of a directory ([`Path`]) into [`ReadDir`]
     ///
     /// Fails if `path` doesn't represent a directory, or if that directory doesn't exist
-    pub fn read_dir<P: AsRef<Path>>(&self, path: P) -> FSResult<ReadDir<'_, S>, S::Error> {
+    pub fn read_dir<P: AsRef<Path>>(&self, path: P) -> FSResult<ReadDir<'_, S, C>, S::Error> {
         // normalize the given path
         let path = path.as_ref();
 
@@ -1685,7 +1704,7 @@ where
     /// Get a corresponding [`ROFile`] object from a [`Path`]
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
-    pub fn get_ro_file<P: AsRef<Path>>(&self, path: P) -> FSResult<ROFile<'_, S>, S::Error> {
+    pub fn get_ro_file<P: AsRef<Path>>(&self, path: P) -> FSResult<ROFile<'_, S, C>, S::Error> {
         let path = path.as_ref();
 
         if !path.is_valid() {
@@ -1749,13 +1768,14 @@ where
 }
 
 /// [`Write`]-related functions
-impl<S> FileSystem<S>
+impl<S, C> FileSystem<S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
     /// Create a new [`RWFile`] and return its handle
     #[inline]
-    pub fn create_file<P: AsRef<Path>>(&self, path: P) -> FSResult<RWFile<'_, S>, S::Error> {
+    pub fn create_file<P: AsRef<Path>>(&self, path: P) -> FSResult<RWFile<'_, S, C>, S::Error> {
         let path = path.as_ref();
 
         if !path.is_valid() {
@@ -2174,7 +2194,7 @@ where
     /// Get a corresponding [`RWFile`] object from a [`Path`]
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
-    pub fn get_rw_file<P: AsRef<Path>>(&self, path: P) -> FSResult<RWFile<'_, S>, S::Error> {
+    pub fn get_rw_file<P: AsRef<Path>>(&self, path: P) -> FSResult<RWFile<'_, S, C>, S::Error> {
         let rw_file = self.get_rw_file_unchecked(path)?;
 
         if rw_file.attributes.read_only {
@@ -2200,9 +2220,10 @@ where
     }
 }
 
-impl<S> ops::Drop for FileSystem<S>
+impl<S, C> ops::Drop for FileSystem<S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     fn drop(&mut self) {
         if let Some(unmount) = *self.unmount_f.borrow() {
