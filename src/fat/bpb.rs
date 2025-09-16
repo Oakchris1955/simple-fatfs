@@ -7,6 +7,7 @@ use bitfield_struct::bitfield;
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum BootRecord {
     Fat(BootRecordFAT),
+    #[allow(dead_code)]
     ExFAT(BootRecordExFAT),
 }
 
@@ -27,11 +28,12 @@ impl BootRecord {
                 SectorIndex::from(boot_record_fat.first_fat_sector())
                     + SectorIndex::from(n) * boot_record_fat.fat_sector_size()
             }
-            BootRecord::ExFAT(boot_record_exfat) => {
+            #[allow(unreachable_code)]
+            BootRecord::ExFAT(_boot_record_exfat) => {
                 // this should work, but ExFAT is not yet implemented, so...
                 todo!("ExFAT not yet implemented");
-                SectorIndex::from(boot_record_exfat.fat_count)
-                    + SectorIndex::from(n) * boot_record_exfat.fat_len
+                SectorIndex::from(_boot_record_exfat.fat_count)
+                    + SectorIndex::from(n) * _boot_record_exfat.fat_len
             }
         }
     }
@@ -127,6 +129,7 @@ impl BootRecordFAT {
     pub(crate) fn fat_type(&self) -> FATType {
         if self.bpb.bytes_per_sector == 0 {
             todo!("ExFAT not yet implemented");
+            #[allow(unreachable_code)]
             FATType::ExFAT
         } else {
             let total_clusters = self.total_clusters();
@@ -148,20 +151,20 @@ pub(crate) struct BootRecordExFAT {
     pub _oem_identifier: [u8; 8],
     pub _zeroed: [u8; 53],
     pub _partition_offset: u64,
-    pub volume_len: u64,
-    pub fat_offset: u32,
+    pub _volume_len: u64,
+    pub _fat_offset: u32,
     pub fat_len: u32,
-    pub cluster_heap_offset: u32,
-    pub cluster_count: u32,
-    pub root_dir_cluster: u32,
-    pub partition_serial_num: u32,
-    pub fs_revision: u16,
-    pub flags: u16,
+    pub _cluster_heap_offset: u32,
+    pub _cluster_count: u32,
+    pub _root_dir_cluster: u32,
+    pub _partition_serial_num: u32,
+    pub _fs_revision: u16,
+    pub _flags: u16,
     pub sector_shift: u8,
     pub cluster_shift: u8,
     pub fat_count: u8,
-    pub drive_select: u8,
-    pub used_percentage: u8,
+    pub _drive_select: u8,
+    pub _used_percentage: u8,
     pub _reserved: [u8; 7],
 }
 
