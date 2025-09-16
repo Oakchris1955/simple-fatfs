@@ -3,7 +3,7 @@ use super::*;
 use core::{cmp, num, ops};
 
 #[cfg(not(feature = "std"))]
-use alloc::{borrow::ToOwned, string::String, vec::Vec};
+use alloc::borrow::ToOwned;
 use time::{Date, PrimitiveDateTime};
 
 use crate::utils::{self, bincode::BINCODE_CONFIG};
