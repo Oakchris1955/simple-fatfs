@@ -1,5 +1,5 @@
 #[cfg(not(feature = "std"))]
-use alloc::{format, string::String};
+use alloc::string::String;
 
 use alloc::string::FromUtf16Error;
 
@@ -18,97 +18,87 @@ pub(crate) fn string_from_lfn(utf16_src: &[u16]) -> Result<String, FromUtf16Erro
 }
 
 pub(crate) fn as_sfn(string: &str, codepage: Codepage) -> Option<Sfn> {
-    // anything non-ascii should be represented as a LFN
-    if !string.chars().all(|c| codepage.contains(c)) {
-        return None;
-    }
-
-    // since everything is in ascii, 1 byte = 1 char
-    if string.len() > SFN_NAME_LEN + 1 + SFN_EXT_LEN {
-        return None;
-    }
-
-    // all alphabetic characters must be capitalized
-    if !string
-        .chars()
-        .filter(|c| c.is_alphabetic())
-        .all(|c| c.is_uppercase())
-    {
-        return None;
-    }
-
     // a file can still not have an extension
     let (name, ext) = string.split_once('.').unwrap_or((string, ""));
 
-    if name.len() > SFN_NAME_LEN || ext.len() > SFN_EXT_LEN {
-        return None;
+    // create a sfn with padding
+    let mut result = Sfn {
+        name: *b"        ",
+        ext: *b"   ",
+    };
+
+    copy_cp_chars(&mut result.name, name, codepage)?;
+
+    copy_cp_chars(&mut result.ext, ext, codepage)?;
+
+    Some(result)
+}
+
+fn copy_cp_chars(mut destination: &mut [u8], string: &str, codepage: Codepage) -> Option<()> {
+    for c in string.chars() {
+        let c = encode_valid_char_checked(c, codepage)?;
+        if destination.is_empty() {
+            // no space left
+            return None;
+        }
+        destination[0] = c;
+        destination = &mut destination[1..];
     }
 
-    // don't forget the padding
-    // here, 8 is SFN_NAME_LEN and 3 is SFN_EXT_LEN
-    let (name, ext) = (format!("{name:<8}"), format!("{ext:<3}"));
+    Some(())
+}
 
-    // this shouldn't panic, as we have checked that both the name
-    // and the extension should fit into a SFN
-    Some(Sfn {
-        name: name.as_bytes().try_into().unwrap(),
-        ext: ext.as_bytes().try_into().unwrap(),
-    })
+fn encode_valid_char_checked(c: char, codepage: Codepage) -> Option<u8> {
+    let c = codepage.encode_char_checked(c)?;
+    if c.is_ascii_digit() || c.is_ascii_uppercase() || b"$%-_@~`!(){}^#&".contains(&c) || c >= 128 {
+        return Some(c);
+    }
+    None
 }
 
 #[derive(Debug)]
 struct SfnGenerator {
-    name: String,
-    // we won't be messing with this anyways, so we might as well keep it around as a byte array
-    ext: [u8; 3],
-
-    index: usize,
-    next_pow_of_ten: usize,
+    name: [u8; SFN_NAME_LEN],
+    ext: [u8; SFN_EXT_LEN],
+    position: usize,
 }
 
 impl SfnGenerator {
     fn new(string: &str, codepage: Codepage) -> Self {
-        let (name, ext) = Self::_sfn_name_ext_from_string(string, codepage);
+        let (name, ext) = string.rsplit_once('.').unwrap_or((string, ""));
 
-        Self {
-            name,
-            ext: ext.as_bytes().try_into().unwrap(),
+        let mut result = Self {
+            name: [b' '; SFN_NAME_LEN],
+            ext: [b' '; SFN_EXT_LEN],
+            position: 0,
+        };
 
-            index: 1,
-            next_pow_of_ten: 10,
-        }
+        Self::_as_sfn_part(&mut result.name, name, codepage);
+        Self::_as_sfn_part(&mut result.ext, ext, codepage);
+
+        let len = result
+            .name
+            .iter()
+            .position(|&c| c == b' ')
+            .unwrap_or(name.len())
+            .min(SFN_NAME_LEN - 2);
+        result.name[len] = b'~';
+        result.name[len + 1] = b'0';
+        result.position = len + 1;
+
+        result
     }
 
-    fn _sfn_name_ext_from_string(string: &str, codepage: Codepage) -> (String, String) {
-        let ascii_string: String = string.chars().filter(|c| codepage.contains(*c)).collect();
-
-        // a file can still not have an extension
-        let (mut name, mut ext) = ascii_string
-            .rsplit_once('.')
-            .map(|(n, e)| (n.replace(".", ""), String::from(e)))
-            .unwrap_or((ascii_string, String::new()));
-
-        (name, ext) = (
-            name.chars().take(SFN_NAME_LEN - 2).collect::<String>(),
-            ext.chars().take(SFN_EXT_LEN).collect::<String>(),
-        );
-        (name, ext) = (name.to_ascii_uppercase(), ext.to_ascii_uppercase());
-
-        // here, 6 is (SFN_NAME_LEN - 2) and 3 is SFN_EXT_LEN
-        (format!("{name:<6}"), format!("{ext:<3}"))
-    }
-
-    /**
-     Returns a [`bool`] indicating whether the operation was successfull (that is, the name wasn't already empty)
-    */
-    fn reduce_name_by_a_char(&mut self) -> bool {
-        if self.name.is_empty() {
-            return false;
+    fn _as_sfn_part(mut destination: &mut [u8], input: &str, codepage: Codepage) {
+        for ch in input.chars() {
+            if let Some(c) = encode_valid_char_checked(ch.to_ascii_uppercase(), codepage) {
+                destination[0] = c;
+                destination = &mut destination[1..];
+                if destination.is_empty() {
+                    break;
+                }
+            }
         }
-
-        self.name.truncate(self.name.len() - 1);
-
-        true
     }
 }
 
@@ -117,27 +107,52 @@ impl Iterator for SfnGenerator {
 
     // TODO: check beforehands how many similar SFNs exist so that we can increment the index past that number
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.next_pow_of_ten {
-            if !self.reduce_name_by_a_char() {
-                return None;
-            }
+        // increment by one
+        let mut pos = self.position;
+        loop {
+            let c = self.name[pos];
+            if c == b'~' {
+                // by adding with overflow we reached the front
+                if self.position < 7 {
+                    // there are still unused spaces at the end, extend there
+                    self.position += 1;
 
-            self.next_pow_of_ten *= 10;
+                    // move `NAME~9  ` to `NAME~10 `
+                    pos += 1;
+                    self.name[pos] = b'1';
+                    pos += 1;
+                    while pos <= self.position {
+                        self.name[pos] = b'0';
+                        pos += 1;
+                    }
+
+                    break;
+                } else {
+                    // the name needs to be shortened
+                    if pos == 1 {
+                        // the name has already only one letter -> abort
+                        return None;
+                    }
+                    // move `NAME~000` to `NAM~1000`
+                    self.name[pos] = b'1';
+                    self.name[pos - 1] = b'~';
+                    break;
+                }
+            } else if c == b'9' {
+                // incrementing generates overflow
+                self.name[pos] = b'0';
+                pos -= 1;
+            } else {
+                // simply increment number
+                self.name[pos] = c + 1;
+                break;
+            }
         }
 
-        // this shouldn't panic, as we have checked that the name
-        // should fit into a SFN
-        let sfn = Sfn {
-            name: format!("{}~{}", self.name, self.index)
-                .as_bytes()
-                .try_into()
-                .unwrap(),
+        Some(Sfn {
+            name: self.name,
             ext: self.ext,
-        };
-
-        self.index += 1;
-
-        Some(sfn)
+        })
     }
 }
 
