@@ -19,8 +19,27 @@ time = { version = "0.3.36", default-features = false, features = [ "parsing", "
 typed-path = { version = "0.10.0", default-features = false }
 
 [features]
-default = ["std"]
+default = ["std", "codepage"]
 std = ["time/std", "time/local-offset"]
+codepage = []
+cp437 = []
+cp720 = []
+cp737 = []
+cp775 = []
+cp850 = []
+cp852 = []
+cp855 = []
+cp857 = []
+cp858 = []
+cp860 = []
+cp861 = []
+cp862 = []
+cp863 = []
+cp864 = []
+cp865 = []
+cp866 = []
+cp869 = []
+cp874 = []
 
 [dev-dependencies]
 akin = "0.4.0"
