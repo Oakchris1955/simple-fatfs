@@ -7,7 +7,7 @@ use alloc::boxed::Box;
 
 #[derive(Debug)]
 pub(crate) struct SectorBuffer {
-    pub(crate) slice: Box<[u8]>,
+    slice: Box<[u8]>,
     pub(crate) stored_sector: SectorIndex,
 }
 
