@@ -62,7 +62,7 @@ impl Default for FSOptions {
     fn default() -> Self {
         Self {
             clock: Box::new(DefaultClock),
-            codepage: codepage::Codepage::CP437,
+            codepage: codepage::Codepage::default(),
             update_file_fields: false,
             check_boot_signature: true,
         }

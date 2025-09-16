@@ -1,7 +1,7 @@
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::String};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 /// Windows codepage to use for encoding/decoding short filenames
 ///
 /// Windows codepages are an extension of ASCII. They were in use by
@@ -11,6 +11,7 @@ use alloc::{boxed::Box, string::String};
 /// Virtually all FAT implementations use the 437 OEM codepage (OEM United States),
 /// which is the default codepage.
 pub enum Codepage {
+    #[default]
     /// OEM United States
     CP437,
     /// Arabic (Transparent ASMO); Arabic (DOS)
