@@ -1308,7 +1308,7 @@ where
         ]);
 
         // this composer will ALWAYS generate 2 entries
-        let entries_iter = EntryComposer::new(entries, &self.options.codepage);
+        let entries_iter = EntryComposer::new(entries, self.options.codepage);
 
         self.load_nth_sector(self.data_cluster_to_partition_sector(dir_cluster))?;
 
@@ -1359,14 +1359,14 @@ where
         self._go_to_cached_dir()?;
 
         for entry in &entries {
-            entries_needed += calc_entries_needed(&*entry.name, &self.options.codepage).get();
+            entries_needed += calc_entries_needed(&*entry.name, self.options.codepage).get();
         }
 
         let first_entry = self.allocate_nth_entries(
             num::NonZero::new(entries_needed).expect("The entries array shouldn't be empty"),
         )?;
 
-        let mut entries_iter = EntryComposer::new(entries, &self.options.codepage);
+        let mut entries_iter = EntryComposer::new(entries, self.options.codepage);
 
         let mut current_entry = first_entry;
         let mut entry_bytes = entries_iter
