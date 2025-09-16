@@ -1,30 +1,7 @@
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
 
-#[cfg(not(any(
-    feature = "codepage",
-    feature = "cp437",
-    feature = "cp720",
-    feature = "cp737",
-    feature = "cp775",
-    feature = "cp850",
-    feature = "cp852",
-    feature = "cp855",
-    feature = "cp857",
-    feature = "cp858",
-    feature = "cp860",
-    feature = "cp861",
-    feature = "cp862",
-    feature = "cp863",
-    feature = "cp864",
-    feature = "cp865",
-    feature = "cp866",
-    feature = "cp869",
-    feature = "cp874"
-)))]
-compile_error!("at least one codepage must be enabled");
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 /// Windows codepage to use for encoding/decoding short filenames
 ///
 /// Windows codepages are an extension of ASCII. They were in use by
@@ -34,7 +11,7 @@ compile_error!("at least one codepage must be enabled");
 /// Virtually all FAT implementations use the 437 OEM codepage (OEM United States),
 /// which is the default codepage.
 pub enum Codepage {
-    #[cfg(any(feature = "codepage", feature = "cp437"))]
+    #[default]
     /// OEM United States
     CP437,
     #[cfg(any(feature = "codepage", feature = "cp720"))]
@@ -96,7 +73,6 @@ impl Codepage {
         use oem_cp::{decode_string_complete_table, decode_string_incomplete_table_lossy};
 
         match self {
-            #[cfg(any(feature = "codepage", feature = "cp437"))]
             Codepage::CP437 => {
                 decode_string_complete_table(v, &oem_cp::code_table::DECODING_TABLE_CP437)
             }
@@ -176,7 +152,6 @@ impl Codepage {
         use oem_cp::encode_char_checked;
 
         match self {
-            #[cfg(any(feature = "codepage", feature = "cp437"))]
             Codepage::CP437 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP437),
             #[cfg(any(feature = "codepage", feature = "cp720"))]
             Codepage::CP720 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP720),
@@ -221,7 +196,6 @@ impl TryFrom<u16> for Codepage {
 
     fn try_from(value: u16) -> Result<Self, Self::Error> {
         match value {
-            #[cfg(any(feature = "codepage", feature = "cp437"))]
             437 => Ok(Codepage::CP437),
             #[cfg(any(feature = "codepage", feature = "cp720"))]
             720 => Ok(Codepage::CP720),
@@ -265,7 +239,6 @@ impl TryFrom<u16> for Codepage {
 impl From<Codepage> for u16 {
     fn from(value: Codepage) -> Self {
         match value {
-            #[cfg(any(feature = "codepage", feature = "cp437"))]
             Codepage::CP437 => 437,
             #[cfg(any(feature = "codepage", feature = "cp720"))]
             Codepage::CP720 => 720,
@@ -301,311 +274,6 @@ impl From<Codepage> for u16 {
             Codepage::CP869 => 869,
             #[cfg(any(feature = "codepage", feature = "cp874"))]
             Codepage::CP874 => 874,
-        }
-    }
-}
-
-impl Default for Codepage {
-    fn default() -> Self {
-        #[cfg(any(feature = "codepage", feature = "cp437"))]
-        {
-            Self::CP437
-        }
-        #[cfg(all(not(any(feature = "codepage", feature = "cp437")), feature = "cp720"))]
-        {
-            Self::CP720
-        }
-        #[cfg(all(
-            not(any(feature = "codepage", feature = "cp437", feature = "cp720")),
-            feature = "cp737"
-        ))]
-        {
-            Self::CP737
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737"
-            )),
-            feature = "cp775"
-        ))]
-        {
-            Self::CP775
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737",
-                feature = "cp775"
-            )),
-            feature = "cp850"
-        ))]
-        {
-            Self::CP850
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737",
-                feature = "cp775",
-                feature = "cp850"
-            )),
-            feature = "cp852"
-        ))]
-        {
-            Self::CP852
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737",
-                feature = "cp775",
-                feature = "cp850",
-                feature = "cp852"
-            )),
-            feature = "cp855"
-        ))]
-        {
-            Self::CP855
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737",
-                feature = "cp775",
-                feature = "cp850",
-                feature = "cp852",
-                feature = "cp855"
-            )),
-            feature = "cp857"
-        ))]
-        {
-            Self::CP857
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737",
-                feature = "cp775",
-                feature = "cp850",
-                feature = "cp852",
-                feature = "cp855",
-                feature = "cp857"
-            )),
-            feature = "cp858"
-        ))]
-        {
-            Self::CP858
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737",
-                feature = "cp775",
-                feature = "cp850",
-                feature = "cp852",
-                feature = "cp855",
-                feature = "cp857",
-                feature = "cp858"
-            )),
-            feature = "cp860"
-        ))]
-        {
-            Self::CP860
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737",
-                feature = "cp775",
-                feature = "cp850",
-                feature = "cp852",
-                feature = "cp855",
-                feature = "cp857",
-                feature = "cp858",
-                feature = "cp860"
-            )),
-            feature = "cp861"
-        ))]
-        {
-            Self::CP861
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737",
-                feature = "cp775",
-                feature = "cp850",
-                feature = "cp852",
-                feature = "cp855",
-                feature = "cp857",
-                feature = "cp858",
-                feature = "cp860",
-                feature = "cp861"
-            )),
-            feature = "cp862"
-        ))]
-        {
-            Self::CP862
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737",
-                feature = "cp775",
-                feature = "cp850",
-                feature = "cp852",
-                feature = "cp855",
-                feature = "cp857",
-                feature = "cp858",
-                feature = "cp860",
-                feature = "cp861",
-                feature = "cp862"
-            )),
-            feature = "cp863"
-        ))]
-        {
-            Self::CP863
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737",
-                feature = "cp775",
-                feature = "cp850",
-                feature = "cp852",
-                feature = "cp855",
-                feature = "cp857",
-                feature = "cp858",
-                feature = "cp860",
-                feature = "cp861",
-                feature = "cp862",
-                feature = "cp863"
-            )),
-            feature = "cp864"
-        ))]
-        {
-            Self::CP864
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737",
-                feature = "cp775",
-                feature = "cp850",
-                feature = "cp852",
-                feature = "cp855",
-                feature = "cp857",
-                feature = "cp858",
-                feature = "cp860",
-                feature = "cp861",
-                feature = "cp862",
-                feature = "cp863",
-                feature = "cp864"
-            )),
-            feature = "cp865"
-        ))]
-        {
-            Self::CP865
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737",
-                feature = "cp775",
-                feature = "cp850",
-                feature = "cp852",
-                feature = "cp855",
-                feature = "cp857",
-                feature = "cp858",
-                feature = "cp860",
-                feature = "cp861",
-                feature = "cp862",
-                feature = "cp863",
-                feature = "cp864",
-                feature = "cp865"
-            )),
-            feature = "cp866"
-        ))]
-        {
-            Self::CP866
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737",
-                feature = "cp775",
-                feature = "cp850",
-                feature = "cp852",
-                feature = "cp855",
-                feature = "cp857",
-                feature = "cp858",
-                feature = "cp860",
-                feature = "cp861",
-                feature = "cp862",
-                feature = "cp863",
-                feature = "cp864",
-                feature = "cp865",
-                feature = "cp866"
-            )),
-            feature = "cp869"
-        ))]
-        {
-            Self::CP869
-        }
-        #[cfg(all(
-            not(any(
-                feature = "codepage",
-                feature = "cp437",
-                feature = "cp720",
-                feature = "cp737",
-                feature = "cp775",
-                feature = "cp850",
-                feature = "cp852",
-                feature = "cp855",
-                feature = "cp857",
-                feature = "cp858",
-                feature = "cp860",
-                feature = "cp861",
-                feature = "cp862",
-                feature = "cp863",
-                feature = "cp864",
-                feature = "cp865",
-                feature = "cp866",
-                feature = "cp869"
-            )),
-            feature = "cp874"
-        ))]
-        {
-            Self::CP874
         }
     }
 }
