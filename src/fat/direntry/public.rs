@@ -109,7 +109,7 @@ impl Sfn {
         sum
     }
 
-    pub(crate) fn decode(&self, codepage: &Codepage) -> String {
+    pub(crate) fn decode(&self, codepage: Codepage) -> String {
         let mut string = String::with_capacity(SFN_LEN);
         // we begin by writing the name (even if it is padded with spaces, they will be trimmed, so we don't care)
         string.push_str(codepage.decode(&self.name).trim_end());
@@ -152,7 +152,7 @@ impl Properties {
     #[inline]
     /// Get the corresponding short filename for this entry
     pub fn sfn(&self) -> String {
-        self.sfn.0.decode(&self.sfn.1)
+        self.sfn.0.decode(self.sfn.1)
     }
 
     #[inline]

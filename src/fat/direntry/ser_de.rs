@@ -72,7 +72,7 @@ impl LFNEntry {
 ///
 /// This only takes into account the [`DirEntries`](DirEntry) needed,
 /// not the contents of the file
-pub(crate) fn calc_entries_needed<S>(file_name: S, codepage: &Codepage) -> num::NonZero<EntryCount>
+pub(crate) fn calc_entries_needed<S>(file_name: S, codepage: Codepage) -> num::NonZero<EntryCount>
 where
     S: ToString,
 {
@@ -190,14 +190,14 @@ pub(crate) struct EntryComposer {
 }
 
 impl EntryComposer {
-    pub(crate) fn new(entries: Box<[MinProperties]>, codepage: &Codepage) -> Self {
+    pub(crate) fn new(entries: Box<[MinProperties]>, codepage: Codepage) -> Self {
         Self {
             entries,
             entry_index: 0,
 
             lfn_iter: None,
 
-            codepage: *codepage,
+            codepage,
         }
     }
 }
@@ -237,7 +237,7 @@ impl Iterator for EntryComposer {
             },
             None => {
                 // no reason to generate a SFN if the filename is already a valid one
-                if utils::string::as_sfn(&current_entry.name, &self.codepage)
+                if utils::string::as_sfn(&current_entry.name, self.codepage)
                     .is_some_and(|sfn| sfn == current_entry.sfn)
                 {
                     self.entry_index += 1;
@@ -391,7 +391,7 @@ where
                     self.lfn_checksum = None;
                     parsed_str
                 } else {
-                    entry.sfn.decode(&self.fs.options.codepage)
+                    entry.sfn.decode(self.fs.options.codepage)
                 };
 
                 if let (Ok(created), Ok(modified), Ok(accessed)) = (

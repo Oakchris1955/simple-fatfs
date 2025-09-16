@@ -440,7 +440,7 @@ where
                 .to_owned();
             // the first entry of the dirchain could belong to a LFNEntry, so we must handle that
             let direntry_location = match num::NonZero::new(
-                EntryCount::from(calc_entries_needed(file_name, &self.fs.options.codepage)) - 1,
+                EntryCount::from(calc_entries_needed(file_name, self.fs.options.codepage)) - 1,
             ) {
                 Some(nonzero) => {
                     chain_start

@@ -17,7 +17,7 @@ pub(crate) fn string_from_lfn(utf16_src: &[u16]) -> Result<String, FromUtf16Erro
     String::from_utf16(&utf16_src[..nul_range_end])
 }
 
-pub(crate) fn as_sfn(string: &str, codepage: &Codepage) -> Option<Sfn> {
+pub(crate) fn as_sfn(string: &str, codepage: Codepage) -> Option<Sfn> {
     // anything non-ascii should be represented as a LFN
     if !string.chars().all(|c| codepage.contains(c)) {
         return None;
@@ -67,7 +67,7 @@ struct SfnGenerator {
 }
 
 impl SfnGenerator {
-    fn new(string: &str, codepage: &Codepage) -> Self {
+    fn new(string: &str, codepage: Codepage) -> Self {
         let (name, ext) = Self::_sfn_name_ext_from_string(string, codepage);
 
         Self {
@@ -79,7 +79,7 @@ impl SfnGenerator {
         }
     }
 
-    fn _sfn_name_ext_from_string(string: &str, codepage: &Codepage) -> (String, String) {
+    fn _sfn_name_ext_from_string(string: &str, codepage: Codepage) -> (String, String) {
         let ascii_string: String = string.chars().filter(|c| codepage.contains(*c)).collect();
 
         // a file can still not have an extension
@@ -152,7 +152,7 @@ where
 {
     // we first check if this string is a valid short filename
     'outer: {
-        if let Some(sfn) = as_sfn(string, &fs.options.codepage) {
+        if let Some(sfn) = as_sfn(string, fs.options.codepage) {
             // don't forget to check if that SFN already exists
             for entry in fs.process_current_dir() {
                 let entry = entry?;
@@ -166,7 +166,7 @@ where
         }
     }
 
-    let generator = SfnGenerator::new(string, &fs.options.codepage);
+    let generator = SfnGenerator::new(string, fs.options.codepage);
 
     // FIXME: this is bad, has best-case O(n) time complexity
     'outer: for sfn in generator {
