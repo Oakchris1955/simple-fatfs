@@ -2,10 +2,10 @@
 // not for the popular serde package
 use super::*;
 
-use core::{iter, mem, num};
+use core::{iter, num};
 
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::boxed::Box;
 
 use crate::*;
 
@@ -21,6 +21,7 @@ const LFN_MID_CHARS: usize = 6;
 const LFN_LAST_CHARS: usize = 2;
 pub(crate) const CHARS_PER_LFN_ENTRY: usize = LFN_FIRST_CHARS + LFN_MID_CHARS + LFN_LAST_CHARS;
 const LONG_ENTRY_TYPE: u8 = 0;
+const LFN_MAX_ENTRIES: usize = LFN_CHAR_LIMIT.div_ceil(CHARS_PER_LFN_ENTRY);
 
 #[derive(Debug, Encode, Decode)]
 pub(crate) struct LFNEntry {
@@ -42,20 +43,20 @@ pub(crate) struct LFNEntry {
 }
 
 impl LFNEntry {
-    pub(crate) fn get_byte_slice(&self) -> [u16; CHARS_PER_LFN_ENTRY] {
-        let mut slice = [0_u8; CHARS_PER_LFN_ENTRY * mem::size_of::<u16>()];
+    pub(crate) fn copy_lfn_name(&self, slice: &mut [u16; CHARS_PER_LFN_ENTRY]) {
+        {
+            // reinterpret the u16 array as an u8 array (which is always sound)
+            let slice = unsafe { &mut *(slice.as_mut_ptr() as *mut [u8; CHARS_PER_LFN_ENTRY * 2]) };
 
-        slice[..LFN_FIRST_CHARS * 2].copy_from_slice(&self.first_chars);
-        slice[LFN_FIRST_CHARS * 2..(LFN_FIRST_CHARS + LFN_MID_CHARS) * 2]
-            .copy_from_slice(&self.mid_chars);
-        slice[(LFN_FIRST_CHARS + LFN_MID_CHARS) * 2..].copy_from_slice(&self.last_chars);
-
-        let mut out_slice = [0_u16; CHARS_PER_LFN_ENTRY];
-        for (i, chunk) in slice.chunks(mem::size_of::<u16>()).enumerate() {
-            out_slice[i] = u16::from_le_bytes(chunk.try_into().unwrap());
+            // copy the bytes from the lfn name into it
+            slice[..LFN_FIRST_CHARS * 2].copy_from_slice(&self.first_chars);
+            slice[LFN_FIRST_CHARS * 2..(LFN_FIRST_CHARS + LFN_MID_CHARS) * 2]
+                .copy_from_slice(&self.mid_chars);
+            slice[(LFN_FIRST_CHARS + LFN_MID_CHARS) * 2..].copy_from_slice(&self.last_chars);
         }
 
-        out_slice
+        // fix endian (if required)
+        slice.iter_mut().for_each(|c| *c = c.to_le());
     }
 
     #[inline]
@@ -267,7 +268,8 @@ where
     S: Read + Seek,
     C: Clock,
 {
-    lfn_buf: Vec<String>,
+    lfn_buf: [u16; CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES],
+    lfn_buf_pos: usize,
     lfn_checksum: Option<u8>,
     current_chain: Option<DirEntryChain>,
 
@@ -284,7 +286,8 @@ where
 {
     pub(crate) fn new(fs: &'a FileSystem<S, C>, chain_start: &EntryLocationUnit) -> Self {
         Self {
-            lfn_buf: Vec::with_capacity(LFN_CHAR_LIMIT.div_ceil(CHARS_PER_LFN_ENTRY)),
+            lfn_buf: [0; CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES],
+            lfn_buf_pos: CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES,
             lfn_checksum: None,
             current_chain: None,
 
@@ -365,7 +368,7 @@ where
                     Some(checksum) => {
                         if checksum != lfn_entry.checksum {
                             self.lfn_checksum = None;
-                            self.lfn_buf.clear();
+                            self.lfn_buf_pos = CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES;
                             self.current_chain = None;
                             break 'outer;
                         }
@@ -373,21 +376,31 @@ where
                     None => self.lfn_checksum = Some(lfn_entry.checksum),
                 }
 
-                let char_arr = lfn_entry.get_byte_slice();
-                if let Ok(temp_str) = utils::string::string_from_lfn(&char_arr) {
-                    self.lfn_buf.push(temp_str);
+                if self.lfn_buf_pos == 0 {
+                    // buffer is full (max number of entries already used)
+                    self.lfn_checksum = None;
+                    self.lfn_buf_pos = CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES;
+                    self.current_chain = None;
+                    break 'outer;
                 }
+
+                self.lfn_buf_pos -= CHARS_PER_LFN_ENTRY;
+                lfn_entry.copy_lfn_name(
+                    (&mut self.lfn_buf[self.lfn_buf_pos..self.lfn_buf_pos + CHARS_PER_LFN_ENTRY])
+                        .try_into()
+                        .unwrap(),
+                );
             } else {
                 let filename = if !self.lfn_buf.is_empty()
                     && self
                         .lfn_checksum
                         .is_some_and(|checksum| checksum == entry.sfn.gen_checksum())
                 {
-                    // for efficiency reasons, we store the LFN string sequences as we read them
-                    let parsed_str: String = self.lfn_buf.iter().cloned().rev().collect();
-                    self.lfn_buf.clear();
+                    let parsed_str =
+                        utils::string::string_from_lfn(&self.lfn_buf[self.lfn_buf_pos..]);
+                    self.lfn_buf_pos = CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES;
                     self.lfn_checksum = None;
-                    parsed_str
+                    parsed_str.unwrap_or(entry.sfn.decode(self.fs.options.codepage))
                 } else {
                     entry.sfn.decode(self.fs.options.codepage)
                 };
