@@ -186,3 +186,122 @@ where
         "can theoretically generate 10^9 - 1 (1 billion minus one) unique short filenames"
     ))
 }
+
+#[test]
+fn test_sfn_generator_long() {
+    let mut generator = SfnGenerator::new("HELLO-WORLD.TXT", Codepage::default());
+
+    assert_eq!(
+        generator.next(),
+        Some(Sfn {
+            name: *b"HELLO-~1",
+            ext: *b"TXT"
+        })
+    );
+    assert_eq!(
+        generator.next(),
+        Some(Sfn {
+            name: *b"HELLO-~2",
+            ext: *b"TXT"
+        })
+    );
+    let mut gen = generator.skip(7);
+    assert_eq!(
+        gen.next(),
+        Some(Sfn {
+            name: *b"HELLO~10",
+            ext: *b"TXT"
+        })
+    );
+}
+
+#[test]
+fn test_sfn_generator_short() {
+    let mut generator = SfnGenerator::new("run.jpeg", Codepage::default());
+
+    assert_eq!(
+        generator.next(),
+        Some(Sfn {
+            name: *b"RUN~1   ",
+            ext: *b"JPE"
+        })
+    );
+    assert_eq!(
+        generator.next(),
+        Some(Sfn {
+            name: *b"RUN~2   ",
+            ext: *b"JPE"
+        })
+    );
+    let mut gen = generator.skip(7);
+    assert_eq!(
+        gen.next(),
+        Some(Sfn {
+            name: *b"RUN~10  ",
+            ext: *b"JPE"
+        })
+    );
+}
+
+#[test]
+fn test_sfn_generator_cp_chars_cp437() {
+    let mut generator = SfnGenerator::new("tëst.txt", Codepage::CP437);
+
+    assert_eq!(
+        generator.next(),
+        Some(Sfn {
+            name: *b"T\x89ST~1  ",
+            ext: *b"TXT"
+        })
+    );
+}
+
+#[test]
+fn test_sfn_generator_unknown_chars() {
+    let mut generator = SfnGenerator::new("😇.😈", Codepage::default());
+
+    assert_eq!(
+        generator.next(),
+        Some(Sfn {
+            name: *b"~1      ",
+            ext: *b"   "
+        })
+    );
+}
+
+#[cfg(all(test, feature = "std"))]
+fn run_gen_sfn(string: &str) -> Option<Sfn> {
+    use crate::FSOptions;
+    use embedded_io_adapters::std::FromStd;
+    use std::io::Cursor;
+
+    const FAT16: &[u8] = include_bytes!("../../imgs/fat16.img");
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+
+    gen_sfn(string, &fs, "/").ok()
+}
+
+#[cfg(all(test, feature = "std"))]
+#[test]
+fn test_gen_sfn_match() {
+    assert_eq!(
+        run_gen_sfn("TEST.TXT"),
+        Some(Sfn {
+            name: *b"TEST    ",
+            ext: *b"TXT"
+        })
+    )
+}
+
+#[cfg(all(test, feature = "std"))]
+#[test]
+fn test_gen_sfn_mismatch() {
+    assert_eq!(
+        run_gen_sfn("test.txt"),
+        Some(Sfn {
+            name: *b"TEST~1  ",
+            ext: *b"TXT"
+        })
+    )
+}
