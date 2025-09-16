@@ -262,9 +262,10 @@ impl Iterator for EntryComposer {
 impl iter::FusedIterator for EntryComposer {}
 
 #[derive(Debug)]
-pub(crate) struct ReadDirInt<'a, S>
+pub(crate) struct ReadDirInt<'a, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     lfn_buf: Vec<String>,
     lfn_checksum: Option<u8>,
@@ -273,14 +274,15 @@ where
     // if `None`, we have exhausted the iterator
     entry_location: Option<EntryLocation>,
 
-    pub(crate) fs: &'a FileSystem<S>,
+    pub(crate) fs: &'a FileSystem<S, C>,
 }
 
-impl<'a, S> ReadDirInt<'a, S>
+impl<'a, S, C> ReadDirInt<'a, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
-    pub(crate) fn new(fs: &'a FileSystem<S>, chain_start: &EntryLocationUnit) -> Self {
+    pub(crate) fn new(fs: &'a FileSystem<S, C>, chain_start: &EntryLocationUnit) -> Self {
         Self {
             lfn_buf: Vec::with_capacity(LFN_CHAR_LIMIT.div_ceil(CHARS_PER_LFN_ENTRY)),
             lfn_checksum: None,
@@ -424,9 +426,10 @@ where
     }
 }
 
-impl<S> Iterator for ReadDirInt<'_, S>
+impl<S, C> Iterator for ReadDirInt<'_, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     type Item = Result<RawProperties, S::Error>;
 
@@ -447,4 +450,9 @@ where
     }
 }
 
-impl<S> iter::FusedIterator for ReadDirInt<'_, S> where S: Read + Seek {}
+impl<S, C> iter::FusedIterator for ReadDirInt<'_, S, C>
+where
+    S: Read + Seek,
+    C: Clock,
+{
+}

@@ -129,11 +129,12 @@ impl From<Properties> for MinProperties {
     }
 }
 
-impl<S> From<DirEntry<'_, S>> for MinProperties
+impl<S, C> From<DirEntry<'_, S, C>> for MinProperties
 where
     S: Read + Seek,
+    C: Clock,
 {
-    fn from(value: DirEntry<'_, S>) -> Self {
+    fn from(value: DirEntry<'_, S, C>) -> Self {
         Self::from(value.entry)
     }
 }
@@ -155,10 +156,15 @@ pub(crate) struct RawProperties {
 }
 
 impl RawProperties {
-    pub(crate) fn into_dir_entry<'a, P, S>(self, path: P, fs: &'a FileSystem<S>) -> DirEntry<'a, S>
+    pub(crate) fn into_dir_entry<'a, P, S, C>(
+        self,
+        path: P,
+        fs: &'a FileSystem<S, C>,
+    ) -> DirEntry<'a, S, C>
     where
         P: AsRef<Path>,
         S: Read + Seek,
+        C: Clock,
     {
         let entry_path = path.as_ref().join(&self.name);
 
