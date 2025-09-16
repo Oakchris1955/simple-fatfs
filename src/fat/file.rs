@@ -2,8 +2,6 @@ use super::*;
 
 use core::{cmp, num, ops};
 
-#[cfg(not(feature = "std"))]
-use alloc::borrow::ToOwned;
 use time::{Date, PrimitiveDateTime};
 
 use crate::utils::{self, bincode::BINCODE_CONFIG};
@@ -436,8 +434,7 @@ where
             let file_name = self
                 .path()
                 .file_name()
-                .expect("This file name should be valid")
-                .to_owned();
+                .expect("This file name should be valid");
             // the first entry of the dirchain could belong to a LFNEntry, so we must handle that
             let direntry_location = match num::NonZero::new(
                 EntryCount::from(calc_entries_needed(file_name, self.fs.options.codepage)) - 1,

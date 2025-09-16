@@ -5,11 +5,7 @@ use super::*;
 use core::{iter, mem, num};
 
 #[cfg(not(feature = "std"))]
-use alloc::{
-    boxed::Box,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{boxed::Box, string::String, vec::Vec};
 
 use crate::*;
 
@@ -74,13 +70,13 @@ impl LFNEntry {
 /// not the contents of the file
 pub(crate) fn calc_entries_needed<S>(file_name: S, codepage: Codepage) -> num::NonZero<EntryCount>
 where
-    S: ToString,
+    S: AsRef<str>,
 {
     use crate::utils::string::as_sfn;
 
-    let file_name = file_name.to_string();
+    let file_name = file_name.as_ref();
     let char_count = file_name.chars().count();
-    let lfn_entries_needed = if as_sfn(&file_name, codepage).is_some() {
+    let lfn_entries_needed = if as_sfn(file_name, codepage).is_some() {
         0
     } else {
         char_count.div_ceil(CHARS_PER_LFN_ENTRY)
@@ -108,9 +104,9 @@ pub(crate) struct LFNEntryGenerator {
 impl LFNEntryGenerator {
     pub(crate) fn new<S>(filename: S, checksum: u8) -> Self
     where
-        S: ToString,
+        S: AsRef<str>,
     {
-        let filename = filename.to_string();
+        let filename = filename.as_ref();
         let chars: Box<[Box<[u8]>]> = filename
             .encode_utf16()
             .collect::<Box<[u16]>>()
