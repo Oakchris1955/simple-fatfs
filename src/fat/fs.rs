@@ -526,7 +526,7 @@ where
 
         match &boot_record {
             BootRecord::Fat(boot_record_fat) => {
-                if boot_record_fat.verify_signature() {
+                if options.check_boot_signature && boot_record_fat.verify_signature() {
                     log::error!("FAT boot record has invalid signature(s)");
                     return Err(FSError::InternalFSError(InternalFSError::InvalidBPBSig));
                 }
