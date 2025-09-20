@@ -9,6 +9,7 @@ pub struct FSOptions {
     pub(crate) clock: Box<dyn Clock>,
     pub(crate) codepage: codepage::Codepage,
     pub(crate) update_file_fields: bool,
+    pub(crate) check_boot_signature: bool,
 }
 
 impl FSOptions {
@@ -43,6 +44,18 @@ impl FSOptions {
 
         self
     }
+
+    /// Whether to check for the `[0x55, 0xAA]` boot signature
+    pub fn set_boot_signature_check(&mut self, check: bool) {
+        self.check_boot_signature = check
+    }
+
+    /// Whether to check for the `[0x55, 0xAA]` boot signature (chainable)
+    pub fn with_boot_signature_check(mut self, check: bool) -> Self {
+        self.check_boot_signature = check;
+
+        self
+    }
 }
 
 impl Default for FSOptions {
@@ -51,6 +64,7 @@ impl Default for FSOptions {
             clock: Box::new(DefaultClock),
             codepage: codepage::Codepage::CP437,
             update_file_fields: false,
+            check_boot_signature: true,
         }
     }
 }
