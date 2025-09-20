@@ -248,7 +248,7 @@ pub(crate) struct EBRFAT32 {
 pub(crate) const FSINFO_SIZE: usize = 512;
 const FSINFO_LEAD_SIGNATURE: u32 = 0x41615252;
 const FSINFO_MID_SIGNATURE: u32 = 0x61417272;
-const FSINFO_TRAIL_SIGNAUTE: u32 = 0xAA550000;
+const FSINFO_TRAIL_SIGNATURE: u32 = 0xAA550000;
 #[derive(Encode, Decode, Debug, Clone)]
 pub(crate) struct FSInfoFAT32 {
     pub lead_signature: u32,
@@ -264,6 +264,6 @@ impl FSInfoFAT32 {
     pub(crate) fn verify_signature(&self) -> bool {
         self.lead_signature == FSINFO_LEAD_SIGNATURE
             && self.mid_signature == FSINFO_MID_SIGNATURE
-            && self.trail_signature == FSINFO_TRAIL_SIGNAUTE
+            && self.trail_signature == FSINFO_TRAIL_SIGNATURE
     }
 }
