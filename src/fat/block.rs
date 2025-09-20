@@ -149,3 +149,129 @@ pub(crate) mod from_std {
 
 #[cfg(feature = "std")]
 pub use from_std::FromStd;
+
+/// TODO
+#[derive(Debug)]
+pub struct BlockTranslator<'a, const RBS: usize, const VBS: usize, S: BlockWrite> {
+    storage: S,
+    buffer: &'a mut [u8; RBS],
+    stored_sector: u32,
+    status: BlockTranslatorStatus,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum BlockTranslatorStatus {
+    Unknown,
+    Read,
+    Modified,
+}
+
+impl<'a, const RBS: usize, const VBS: usize, S: BlockWrite> BlockTranslator<'a, RBS, VBS, S> {
+    const fn check() {
+        if S::SIZE != RBS {
+            panic!("block size mismatch");
+        }
+        if RBS <= VBS {
+            panic!("real block size must be bigger than virtual block size");
+        }
+        if !RBS.is_power_of_two() || !VBS.is_power_of_two() {
+            panic!("real and virtual block size must be a power of two");
+        }
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    const VBS_PER_RBS: u16 = (RBS / VBS) as u16;
+
+    /// TODO
+    pub fn new(storage: S, buffer: &'a mut [u8; RBS]) -> Self {
+        let _check: () = Self::check();
+
+        Self {
+            storage,
+            buffer,
+            stored_sector: 0,
+            status: BlockTranslatorStatus::Unknown,
+        }
+    }
+
+    fn go_to_sector(&mut self, sector_in_vbs: u32) -> Result<usize, S::Error> {
+        let real_sector = sector_in_vbs / u32::from(Self::VBS_PER_RBS);
+        if self.stored_sector != real_sector || self.status == BlockTranslatorStatus::Unknown {
+            if self.status == BlockTranslatorStatus::Modified {
+                self.storage.write(self.stored_sector, 1, self.buffer)?;
+            }
+            self.stored_sector = real_sector;
+            self.storage.read(self.stored_sector, 1, self.buffer)?;
+            self.status = BlockTranslatorStatus::Read;
+        }
+        Ok((sector_in_vbs % u32::from(Self::VBS_PER_RBS)) as usize)
+    }
+}
+
+impl<const RBS: usize, const VBS: usize, S> ErrorType for BlockTranslator<'_, RBS, VBS, S>
+where
+    S: BlockWrite,
+{
+    type Error = S::Error;
+}
+
+impl<const RBS: usize, const VBS: usize, S> BlockRead for BlockTranslator<'_, RBS, VBS, S>
+where
+    S: BlockWrite,
+{
+    const SIZE: usize = VBS;
+
+    fn read(
+        &mut self,
+        sector: SectorIndex,
+        blocks_per_sector: u16,
+        mut buf: &mut [u8],
+    ) -> Result<(), Self::Error> {
+        let mut sector_in_vbs = sector * u32::from(blocks_per_sector);
+        while !buf.is_empty() {
+            let (this, next) = buf.split_at_mut(VBS);
+            let offset = self.go_to_sector(sector_in_vbs)?;
+            this.copy_from_slice(&self.buffer[offset..offset + VBS]);
+            // advance
+            buf = next;
+            sector_in_vbs += 1;
+        }
+
+        Ok(())
+    }
+}
+
+impl<const RBS: usize, const VBS: usize, S> BlockWrite for BlockTranslator<'_, RBS, VBS, S>
+where
+    S: BlockWrite,
+{
+    fn write(
+        &mut self,
+        sector: SectorIndex,
+        blocks_per_sector: u16,
+        mut buf: &[u8],
+    ) -> Result<(), Self::Error> {
+        let mut sector_in_vbs = sector * u32::from(blocks_per_sector);
+        while !buf.is_empty() {
+            let (this, next) = buf.split_at(VBS);
+            let offset = self.go_to_sector(sector_in_vbs)?;
+            self.buffer[offset..offset + VBS].copy_from_slice(this);
+            self.status = BlockTranslatorStatus::Modified;
+
+            // advance
+            buf = next;
+            sector_in_vbs += 1;
+        }
+
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        if self.status == BlockTranslatorStatus::Modified {
+            self.storage.write(self.stored_sector, 1, self.buffer)?;
+            self.status = BlockTranslatorStatus::Read;
+        }
+
+        self.storage.flush()
+    }
+}
