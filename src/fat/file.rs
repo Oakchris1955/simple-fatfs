@@ -27,7 +27,7 @@ pub(crate) struct FileProps {
 #[derive(Debug)]
 pub struct ROFile<'a, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     pub(crate) fs: &'a FileSystem<S, C>,
@@ -36,7 +36,7 @@ where
 
 impl<S, C> ops::Deref for ROFile<'_, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     type Target = Properties;
@@ -48,7 +48,7 @@ where
 
 impl<S, C> ops::DerefMut for ROFile<'_, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
@@ -59,7 +59,7 @@ where
 // Constructors
 impl<'a, S, C> ROFile<'a, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S, C>) -> Self {
@@ -70,7 +70,7 @@ where
 // Internal functions
 impl<S, C> ROFile<'_, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     #[inline]
@@ -142,7 +142,7 @@ where
 
 impl<S, C> ErrorType for ROFile<'_, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     type Error = S::Error;
@@ -150,7 +150,7 @@ where
 
 impl<S, C> Read for ROFile<'_, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
@@ -223,7 +223,7 @@ where
 
 impl<S, C> Seek for ROFile<'_, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error> {
@@ -275,7 +275,7 @@ where
 #[derive(Debug)]
 pub struct RWFile<'a, S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     pub(crate) ro_file: ROFile<'a, S, C>,
@@ -285,7 +285,7 @@ where
 
 impl<'a, S, C> From<ROFile<'a, S, C>> for RWFile<'a, S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     fn from(value: ROFile<'a, S, C>) -> Self {
@@ -298,7 +298,7 @@ where
 
 impl<'a, S, C> ops::Deref for RWFile<'a, S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     type Target = ROFile<'a, S, C>;
@@ -310,7 +310,7 @@ where
 
 impl<S, C> ops::DerefMut for RWFile<'_, S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
@@ -321,7 +321,7 @@ where
 // Constructors
 impl<'a, S, C> RWFile<'a, S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S, C>) -> Self {
@@ -332,7 +332,7 @@ where
 // Public functions
 impl<S, C> RWFile<'_, S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     /// Set the last accessed [`Date`] attribute of this file
@@ -435,7 +435,7 @@ where
 // Private functions
 impl<S, C> RWFile<'_, S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     fn sync_entry(&mut self) -> FSResult<(), S::Error> {
@@ -539,7 +539,7 @@ where
 
 impl<S, C> ErrorType for RWFile<'_, S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     type Error = RWFileError<S::Error>;
@@ -547,7 +547,7 @@ where
 
 impl<S, C> Read for RWFile<'_, S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     #[inline]
@@ -578,7 +578,7 @@ where
 
 impl<S, C> Write for RWFile<'_, S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     fn write(&mut self, mut buf: &[u8]) -> Result<usize, Self::Error> {
@@ -662,7 +662,7 @@ where
 
 impl<S, C> Seek for RWFile<'_, S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error> {
@@ -718,7 +718,7 @@ where
 
 impl<S, C> Drop for RWFile<'_, S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     fn drop(&mut self) {

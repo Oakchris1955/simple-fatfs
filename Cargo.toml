@@ -19,7 +19,7 @@ typed-path = { version = "0.10.0", default-features = false }
 
 [features]
 default = ["std", "codepage"]
-std = ["time/std", "time/local-offset"]
+std = ["time/std", "time/local-offset", "embedded-io/std"]
 codepage = []
 cp437 = []
 cp720 = []

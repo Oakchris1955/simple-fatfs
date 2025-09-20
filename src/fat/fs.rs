@@ -110,7 +110,7 @@ impl FATEntryProps {
     /// Get the [`FATEntryProps`] of the `n`-th [`FATEntry`] of a [`FileSystem`]
     pub fn new<S, C>(n: FATEntryIndex, fs: &FileSystem<S, C>) -> Self
     where
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         let fat_byte_offset: u64 = u64::from(n) * u64::from(fs.fat_type.bits_per_entry()) / 8;
@@ -146,7 +146,7 @@ impl FATSectorProps {
     /// Returns [`None`] if this sector doesn't belong to a FAT table
     pub fn new<S, C>(sector: SectorIndex, fs: &FileSystem<S, C>) -> Option<Self>
     where
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         if !fs.sector_belongs_to_FAT(sector) {
@@ -168,7 +168,7 @@ impl FATSectorProps {
     #[allow(non_snake_case)]
     pub fn get_corresponding_FAT_sectors<S, C>(&self, fs: &FileSystem<S, C>) -> Box<[SectorIndex]>
     where
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         let mut vec = Vec::with_capacity(fs.props.fat_table_count.into());
@@ -217,7 +217,7 @@ impl DirInfo {
 
 impl<S, C> iter::FusedIterator for ReadDir<'_, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
 }
@@ -240,11 +240,6 @@ pub(crate) trait OffsetConversions {
     }
 
     #[inline]
-    fn sector_to_partition_offset(&self, sector: SectorIndex) -> u64 {
-        u64::from(sector) * u64::from(self.sector_size())
-    }
-
-    #[inline]
     fn data_cluster_to_partition_sector(&self, cluster: ClusterIndex) -> SectorIndex {
         self.cluster_to_sector(cluster - RESERVED_FAT_ENTRIES) + self.first_data_sector()
     }
@@ -258,7 +253,7 @@ pub(crate) trait OffsetConversions {
 
 impl<S, C> OffsetConversions for FileSystem<S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     #[inline]
@@ -396,14 +391,14 @@ type UnmountFn<S, C> = fn(&FileSystem<S, C>) -> FSResult<(), <S as ErrorType>::E
 #[derive(Debug)]
 pub struct FileSystem<S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
-    /// Any struct that implements the [`Read`], [`Seek`] and optionally [`Write`] traits
+    /// Any struct that implements the [`BlockRead`], and optionally [`BlockWrite`] traits
     storage: RefCell<S>,
 
     /// The length of this will be the sector size of the FS for all FAT types except FAT12, in that case, it will be double that value
-    pub(crate) sector_buffer: RefCell<SectorBuffer>,
+    pub(crate) sector_buffer: RefCell<SectorBuffer<true>>,
     fsinfo_modified: RefCell<bool>,
 
     pub(crate) dir_info: RefCell<DirInfo>,
@@ -427,7 +422,7 @@ where
 /// Getter functions
 impl<S, C> FileSystem<S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     /// What is the [`FATType`] of the filesystem
@@ -439,7 +434,7 @@ where
 /// Setter functions
 impl<S, C> FileSystem<S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     /// Whether or not to list hidden files
@@ -462,7 +457,7 @@ where
 /// Constructors for a [`FileSystem`]
 impl<S, C> FileSystem<S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     /// Create a [`FileSystem`] from a storage object
@@ -470,22 +465,32 @@ where
     /// Fails if the storage is way too small to support a FAT filesystem.
     /// For most use cases, that shouldn't be an issue, you can just call [`.unwrap()`](Result::unwrap)
     pub fn new(mut storage: S, options: FSOptions<C>) -> FSResult<Self, S::Error> {
+        if !S::SIZE.is_power_of_two() {
+            // block size is 0 or not a power of 2
+            return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
+        }
+        if S::SIZE > MAX_SECTOR_SIZE {
+            // block size is larger than MAX_SECTOR_SIZE
+            return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
+        }
+
         use utils::bincode::BINCODE_CONFIG;
 
         // Begin by reading the boot record
         // We don't know the sector size yet, so we just go with the biggest possible one for now
-        let mut buffer = [0u8; MAX_SECTOR_SIZE];
-
-        let bytes_read = storage.read(&mut buffer)?;
-        let mut stored_sector = 0;
-
-        if bytes_read < MIN_SECTOR_SIZE {
-            return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));
-        }
+        let buffer = SectorBuffer::new(&mut storage)?;
 
         let bpb: BpbFat = bincode::decode_from_slice(&buffer[..BPBFAT_SIZE], BINCODE_CONFIG)
             .map(|(v, _)| v)
             .map_err(utils::bincode::map_err_dec)?;
+
+        if S::SIZE > usize::from(bpb.bytes_per_sector) {
+            // block size is larger than sector size
+            return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
+        }
+
+        let mut buffer = buffer.init(&mut storage, bpb.bytes_per_sector)?;
+        let storage = RefCell::from(storage);
 
         let ebr = if bpb.table_size_16 == 0 {
             let ebr_fat32: EBRFAT32 = bincode::decode_from_slice(
@@ -495,17 +500,11 @@ where
             .map(|(v, _)| v)
             .map_err(utils::bincode::map_err_dec)?;
 
-            storage.seek(SeekFrom::Start(
-                u64::from(ebr_fat32.fat_info) * u64::from(bpb.bytes_per_sector),
-            ))?;
-            stored_sector = ebr_fat32.fat_info.into();
-            storage.read_exact(&mut buffer[..usize::from(bpb.bytes_per_sector)])?;
-            let fsinfo: FSInfoFAT32 = bincode::decode_from_slice(
-                &buffer[..usize::from(bpb.bytes_per_sector)],
-                BINCODE_CONFIG,
-            )
-            .map(|(v, _)| v)
-            .map_err(utils::bincode::map_err_dec)?;
+            buffer.read(&storage, ebr_fat32.fat_info.into())?;
+
+            let fsinfo: FSInfoFAT32 = bincode::decode_from_slice(&buffer, BINCODE_CONFIG)
+                .map(|(v, _)| v)
+                .map_err(utils::bincode::map_err_dec)?;
 
             if !fsinfo.verify_signature() {
                 log::error!("FAT32 FSInfo has invalid signature(s)");
@@ -550,12 +549,8 @@ where
         let props = FSProperties::from(&boot_record);
 
         let fs = Self {
-            storage: storage.into(),
-            sector_buffer: SectorBuffer::new(
-                Box::from(&buffer[..usize::from(props.sector_size)]),
-                stored_sector,
-            )
-            .into(),
+            storage,
+            sector_buffer: buffer.into(),
             fsinfo_modified: false.into(),
             options,
             dir_info: DirInfo::at_root_dir(&boot_record).into(),
@@ -581,7 +576,7 @@ where
 /// Internal [`Read`]-related low-level functions
 impl<S, C> FileSystem<S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     pub(crate) fn process_current_dir<'a>(&'a self) -> ReadDirInt<'a, S, C> {
@@ -693,7 +688,7 @@ where
         let dir_chain = self.dir_info.borrow().chain_start;
         let target_sector = dir_chain.get_entry_sector(self);
 
-        if target_sector != self.sector_buffer.borrow().stored_sector {
+        if target_sector != self.sector_buffer.borrow().stored_sector() {
             self.load_nth_sector(target_sector)?;
         }
 
@@ -818,6 +813,7 @@ where
 
         /// How many bytes to probe at max for each FAT per iteration (must be a multiple of [`MAX_SECTOR_SIZE`])
         const MAX_PROBE_SIZE: u32 = 1 << 20;
+        let max_probe_size_in_sectors: u32 = MAX_PROBE_SIZE / u32::from(self.sector_size());
 
         let fat_byte_size = match &*self.boot_record.borrow() {
             BootRecord::Fat(boot_record_fat) => boot_record_fat.fat_sector_size(),
@@ -828,30 +824,25 @@ where
             let mut tables: Vec<Vec<u8>> = Vec::new();
 
             for i in 0..self.props.fat_table_count {
-                let fat_start = u32::try_from(
-                    self.sector_to_partition_offset(self.boot_record.borrow().nth_FAT_table_sector(i)),
-                )
-                .expect("there's no way the FAT is more that 4GBs away from the start of the storage medium");
-                let current_offset = fat_start + nth_iteration * MAX_PROBE_SIZE;
-                let bytes_left = fat_byte_size - nth_iteration * MAX_PROBE_SIZE;
+                let current_offset = self.boot_record.borrow().nth_FAT_table_sector(i)
+                    + nth_iteration * max_probe_size_in_sectors;
+                let bytes_left = fat_byte_size - nth_iteration * max_probe_size_in_sectors;
 
-                self.storage
-                    .borrow_mut()
-                    .seek(SeekFrom::Start(current_offset.into()))?;
-                let mut buf = vec![
-                    0_u8;
-                    usize::try_from(cmp::min(MAX_PROBE_SIZE, bytes_left))
-                        .unwrap_or(usize::MAX)
-                ];
-                self.storage
-                    .borrow_mut()
-                    .read_exact(buf.as_mut_slice())
-                    .map_err(|e| match e {
-                        ReadExactError::UnexpectedEof => {
-                            panic!("Unexpected EOF while reading FAT table")
-                        }
-                        ReadExactError::Other(e) => e,
-                    })?;
+                let bytes_to_check =
+                    usize::try_from(cmp::min(MAX_PROBE_SIZE, bytes_left)).unwrap_or(usize::MAX);
+
+                // ensure it's a multiple of block size
+                let bytes_to_read = bytes_to_check.div_ceil(S::SIZE) * S::SIZE;
+
+                let mut buf = vec![0_u8; bytes_to_read];
+
+                self.sector_buffer
+                    .borrow()
+                    .read_into(&self.storage, current_offset, &mut buf)?;
+
+                // truncate in case less than a sector has to be read
+                buf.truncate(bytes_to_check);
+
                 tables.push(buf);
             }
 
@@ -888,7 +879,7 @@ where
         }
 
         // nothing to do if the sector we wanna read is already cached
-        let stored_sector = self.sector_buffer.borrow().stored_sector;
+        let stored_sector = self.sector_buffer.borrow().stored_sector();
         if n != stored_sector {
             // let's sync the current sector first
             let sync_sector_option = *self.sync_f.borrow();
@@ -901,24 +892,8 @@ where
                 // to sync it again if there have been no changes
                 *self.sync_f.borrow_mut() = None;
             }
-            self.storage
-                .borrow_mut()
-                .seek(SeekFrom::Start(self.sector_to_partition_offset(n)))?;
-            self.storage
-                .borrow_mut()
-                .read_exact(&mut self.sector_buffer.borrow_mut())
-                .map_err(|e| match e {
-                    ReadExactError::UnexpectedEof => {
-                        panic!("Unexpected EOF while reading sector {n}\n\
-                        This is most likely an interal error, please report it: https://github.com/Oakchris1955/simple-fatfs/issues")
-                    }
-                    ReadExactError::Other(e) => e,
-                })?;
-            self.storage
-                .borrow_mut()
-                .seek(SeekFrom::Current(-i64::from(self.props.sector_size)))?;
 
-            self.sector_buffer.borrow_mut().stored_sector = n;
+            self.sector_buffer.borrow_mut().read(&self.storage, n)?;
         }
 
         Ok(Ref::map(self.sector_buffer.borrow(), |s| &**s))
@@ -1021,7 +996,7 @@ where
 /// Internal [`Write`]-related low-level functions
 impl<S, C> FileSystem<S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     #[allow(non_snake_case)]
@@ -1142,7 +1117,7 @@ where
         // we may not even need to allocate new entries.
         // let's check if there is a chain of unused entries big enough to be used
         let mut first_entry = self.dir_info.borrow().chain_end.unwrap_or_else(|| {
-            let stored_sector = self.sector_buffer.borrow().stored_sector;
+            let stored_sector = self.sector_buffer.borrow().stored_sector();
             EntryLocation::from_partition_sector(stored_sector, self)
         });
 
@@ -1349,7 +1324,7 @@ where
         self.set_modified();
 
         // we also zero everything else in the cluster
-        let stored_sector = self.sector_buffer.borrow().stored_sector;
+        let stored_sector = self.sector_buffer.borrow().stored_sector();
         for sector in
             (stored_sector + 1)..(stored_sector + SectorCount::from(self.sectors_per_cluster()))
         {
@@ -1565,33 +1540,17 @@ where
 
     /// Syncs `self.sector_buffer` back to the storage
     fn _sync_current_sector(&self) -> Result<(), S::Error> {
-        self.storage
-            .borrow_mut()
-            .write_all(&self.sector_buffer.borrow())?;
-        self.storage
-            .borrow_mut()
-            .seek(SeekFrom::Current(-i64::from(self.props.sector_size)))?;
-
-        Ok(())
+        self.sector_buffer.borrow().write(&self.storage)
     }
 
     /// Syncs a FAT sector to ALL OTHER FAT COPIES on the device medium
     #[allow(non_snake_case)]
     fn _sync_FAT_sector(&self, fat_sector_props: &FATSectorProps) -> Result<(), S::Error> {
-        let current_offset = self.storage.borrow_mut().stream_position()?;
-
         for sector in fat_sector_props.get_corresponding_FAT_sectors(self) {
-            self.storage.borrow_mut().seek(SeekFrom::Start(u64::from(
-                sector * u32::from(self.props.sector_size),
-            )))?;
-            self.storage
-                .borrow_mut()
-                .write_all(&self.sector_buffer.borrow())?;
+            self.sector_buffer
+                .borrow()
+                .write_copy(&self.storage, sector)?;
         }
-
-        self.storage
-            .borrow_mut()
-            .seek(SeekFrom::Start(current_offset))?;
 
         Ok(())
     }
@@ -1604,7 +1563,7 @@ where
 
     pub(crate) fn sync_sector_buffer(&self) -> Result<(), S::Error> {
         // If this is called, we assume the sector buffer has been modified
-        let stored_sector = self.sector_buffer.borrow().stored_sector;
+        let stored_sector = self.sector_buffer.borrow().stored_sector();
         if let Some(fat_sector_props) = FATSectorProps::new(stored_sector, self) {
             log::trace!("syncing FAT sector {}", fat_sector_props.sector_offset,);
             match &*self.boot_record.borrow() {
@@ -1625,7 +1584,7 @@ where
         } else {
             log::trace!(
                 "syncing sector {}",
-                self.sector_buffer.borrow().stored_sector
+                self.sector_buffer.borrow().stored_sector()
             );
             self._sync_current_sector()?;
         }
@@ -1677,7 +1636,7 @@ where
 /// Public [`Read`]-related functions
 impl<S, C> FileSystem<S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     /// Read all the entries of a directory ([`Path`]) into [`ReadDir`]
@@ -1771,7 +1730,7 @@ where
 /// [`Write`]-related functions
 impl<S, C> FileSystem<S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     /// Create a new [`RWFile`] and return its handle
@@ -2223,7 +2182,7 @@ where
 
 impl<S, C> ops::Drop for FileSystem<S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     fn drop(&mut self) {

@@ -10,7 +10,6 @@ use alloc::boxed::Box;
 use crate::*;
 
 use bincode::{Decode, Encode};
-use embedded_io::*;
 
 pub(crate) const DIRENTRY_LIMIT: EntryCount = EntryCount::MAX;
 
@@ -266,7 +265,7 @@ impl iter::FusedIterator for EntryComposer {}
 #[derive(Debug)]
 pub(crate) struct ReadDirInt<'a, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     lfn_buf: [u16; CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES],
@@ -282,7 +281,7 @@ where
 
 impl<'a, S, C> ReadDirInt<'a, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     pub(crate) fn new(fs: &'a FileSystem<S, C>, chain_start: &EntryLocationUnit) -> Self {
@@ -442,7 +441,7 @@ where
 
 impl<S, C> Iterator for ReadDirInt<'_, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     type Item = Result<RawProperties, S::Error>;
@@ -466,7 +465,7 @@ where
 
 impl<S, C> iter::FusedIterator for ReadDirInt<'_, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
 }
