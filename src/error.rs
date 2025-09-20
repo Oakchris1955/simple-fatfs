@@ -28,6 +28,8 @@ pub enum InternalFSError {
     MalformedClusterChain,
     /// Encountered a malformed directory entry chain
     MalformedEntryChain,
+    /// TODO
+    BlockSizeError,
 }
 
 /// An error indicating that a filesystem-related operation has failed

@@ -28,8 +28,6 @@
 //! use simple_fatfs::*;
 //! use simple_fatfs::io::*;
 //!
-//! use embedded_io_adapters::std::FromStd;
-//!
 //! const FAT_IMG: &[u8] = include_bytes!("../imgs/fat12.img");
 //!
 //! fn main() {

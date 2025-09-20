@@ -9,7 +9,6 @@ use alloc::{borrow::ToOwned, boxed::Box, string::String};
 
 use ::time;
 use bincode::{Decode, Encode};
-use embedded_io::*;
 use time::{Date, PrimitiveDateTime};
 
 /// A list of the various attributes specified for a file/directory
@@ -229,7 +228,7 @@ impl Properties {
 #[derive(Debug)]
 pub struct DirEntry<'a, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     pub(crate) entry: Properties,
@@ -238,7 +237,7 @@ where
 
 impl<'a, S, C> DirEntry<'a, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     /// Get the corresponding [`ROFile`] object for this [`DirEntry`]
@@ -271,7 +270,7 @@ where
 
 impl<'a, S, C> DirEntry<'a, S, C>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
 {
     /// Get the corresponding [`RWFile`] object of this [`DirEntry`]
@@ -284,7 +283,7 @@ where
 
 impl<S, C> ops::Deref for DirEntry<'_, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     type Target = Properties;
@@ -302,7 +301,7 @@ where
 #[derive(Debug)]
 pub struct ReadDir<'a, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     inner: ReadDirInt<'a, S, C>,
@@ -311,7 +310,7 @@ where
 
 impl<'a, S, C> ReadDir<'a, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     pub(crate) fn new<P>(
@@ -331,7 +330,7 @@ where
 
 impl<'a, S, C> Iterator for ReadDir<'a, S, C>
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     type Item = Result<DirEntry<'a, S, C>, S::Error>;

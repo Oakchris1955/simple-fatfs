@@ -1,3 +1,4 @@
+mod block;
 mod bpb;
 mod consts;
 mod direntry;
@@ -9,6 +10,7 @@ mod storage;
 mod tests;
 mod types;
 
+pub use block::*;
 pub(crate) use bpb::*;
 pub use consts::*;
 pub use direntry::*;
