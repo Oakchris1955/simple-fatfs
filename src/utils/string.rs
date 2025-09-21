@@ -221,9 +221,9 @@ fn test_sfn_generator_long() {
             ext: *b"TXT"
         })
     );
-    let mut gen = generator.skip(7);
+    let mut generator = generator.skip(7);
     assert_eq!(
-        gen.next(),
+        generator.next(),
         Some(Sfn {
             name: *b"HELLO~10",
             ext: *b"TXT"
@@ -249,9 +249,9 @@ fn test_sfn_generator_short() {
             ext: *b"JPE"
         })
     );
-    let mut gen = generator.skip(7);
+    let mut generator = generator.skip(7);
     assert_eq!(
-        gen.next(),
+        generator.next(),
         Some(Sfn {
             name: *b"RUN~10  ",
             ext: *b"JPE"
