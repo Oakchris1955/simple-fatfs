@@ -48,12 +48,16 @@ fn copy_cp_chars(mut destination: &mut [u8], string: &str, codepage: Codepage) -
     Some(())
 }
 
+const OTHER_PERMITTED_CHARS: &[u8] = b"$%-_@~`!(){}^#&";
+
 fn encode_valid_char_checked(c: char, codepage: Codepage) -> Option<u8> {
     let c = codepage.encode_char_checked(c)?;
-    if c.is_ascii_digit() || c.is_ascii_uppercase() || b"$%-_@~`!(){}^#&".contains(&c) || c >= 128 {
-        return Some(c);
-    }
-    None
+
+    (c.is_ascii_digit()
+        || c.is_ascii_uppercase()
+        || OTHER_PERMITTED_CHARS.contains(&c)
+        || !c.is_ascii())
+    .then_some(c)
 }
 
 #[derive(Debug)]
