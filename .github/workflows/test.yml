@@ -2,8 +2,9 @@ name: Cargo Build & Test
 
 on:
   push:
+    branches:
+      - main
   pull_request:
-    types: [opened, reopened]
   workflow_dispatch:
 
 env:
