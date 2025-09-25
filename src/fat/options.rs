@@ -19,6 +19,23 @@ impl FSOptions<DefaultClock> {
     }
 }
 
+impl<C> FSOptions<C>
+where
+    C: Clock,
+{
+    #[inline]
+    /// Create a new options struct with the default options
+    /// and a provided clock
+    pub fn new_with_clock(clock: C) -> Self {
+        Self {
+            clock,
+            codepage: codepage::Codepage::default(),
+            update_file_fields: false,
+            check_boot_signature: true,
+        }
+    }
+}
+
 impl<C: Clock> FSOptions<C> {
     /// Set the codepage to be used by the filesystem
     pub fn set_codepage(&mut self, codepage: Codepage) {
@@ -59,11 +76,6 @@ impl<C: Clock> FSOptions<C> {
 
 impl Default for FSOptions<DefaultClock> {
     fn default() -> Self {
-        Self {
-            clock: DefaultClock,
-            codepage: codepage::Codepage::default(),
-            update_file_fields: false,
-            check_boot_signature: true,
-        }
+        Self::new_with_clock(DefaultClock)
     }
 }
