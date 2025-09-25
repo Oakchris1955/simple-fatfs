@@ -45,7 +45,8 @@ pub(crate) struct LFNEntry {
 impl LFNEntry {
     pub(crate) fn copy_lfn_name(&self, slice: &mut [u16; CHARS_PER_LFN_ENTRY]) {
         {
-            // reinterpret the u16 array as an u8 array (which is always sound)
+            // SAFETY: The pointer below is properly aligned and we aren't accessing
+            // the original reference for as long as this pointer is in-scope
             let slice = unsafe { &mut *(slice.as_mut_ptr() as *mut [u8; CHARS_PER_LFN_ENTRY * 2]) };
 
             // copy the bytes from the lfn name into it
