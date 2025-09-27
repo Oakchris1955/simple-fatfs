@@ -57,6 +57,7 @@ impl LFNEntry {
         }
 
         // fix endian (if required)
+        // FIXME: check whether or not this is necessary for Big-Endian systems
         slice.iter_mut().for_each(|c| *c = c.to_le());
     }
 
