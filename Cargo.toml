@@ -8,7 +8,7 @@ repository = "https://github.com/Oakchris1955/simple-fatfs"
 exclude = ["/.github", ".vscode", "/imgs", "**/*cliff*", "/tests"]
 
 [dependencies]
-bincode = "2.0.1"
+bincode = { version = "2.0.1", default-features = false, features = [ "alloc", "derive" ]}
 bitfield-struct = "0.8.0"
 bitflags = { version = "2.6.0" }
 embedded-io = { version = "0.6.1" }
