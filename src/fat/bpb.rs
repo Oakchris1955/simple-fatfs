@@ -7,6 +7,7 @@ use bitfield_struct::bitfield;
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum BootRecord {
     Fat(BootRecordFAT),
+    #[expect(dead_code)]
     ExFAT(BootRecordExFAT),
 }
 
@@ -27,6 +28,7 @@ impl BootRecord {
                 SectorIndex::from(boot_record_fat.first_fat_sector())
                     + SectorIndex::from(n) * boot_record_fat.fat_sector_size()
             }
+            #[expect(unused_variables, unreachable_code)]
             BootRecord::ExFAT(boot_record_exfat) => {
                 // this should work, but ExFAT is not yet implemented, so...
                 todo!("ExFAT not yet implemented");
@@ -125,6 +127,7 @@ impl BootRecordFAT {
     #[inline]
     /// The FAT type of this file system
     pub(crate) fn fat_type(&self) -> FATType {
+        #[expect(unreachable_code)]
         if self.bpb.bytes_per_sector == 0 {
             todo!("ExFAT not yet implemented");
             FATType::ExFAT
@@ -148,19 +151,29 @@ pub(crate) struct BootRecordExFAT {
     pub _oem_identifier: [u8; 8],
     pub _zeroed: [u8; 53],
     pub _partition_offset: u64,
+    #[expect(dead_code)]
     pub volume_len: u64,
+    #[expect(dead_code)]
     pub fat_offset: u32,
     pub fat_len: u32,
+    #[expect(dead_code)]
     pub cluster_heap_offset: u32,
+    #[expect(dead_code)]
     pub cluster_count: u32,
+    #[expect(dead_code)]
     pub root_dir_cluster: u32,
+    #[expect(dead_code)]
     pub partition_serial_num: u32,
+    #[expect(dead_code)]
     pub fs_revision: u16,
+    #[expect(dead_code)]
     pub flags: u16,
     pub sector_shift: u8,
     pub cluster_shift: u8,
     pub fat_count: u8,
+    #[expect(dead_code)]
     pub drive_select: u8,
+    #[expect(dead_code)]
     pub used_percentage: u8,
     pub _reserved: [u8; 7],
 }

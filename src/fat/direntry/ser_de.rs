@@ -2,14 +2,10 @@
 // not for the popular serde package
 use super::*;
 
-use core::{iter, mem, num};
+use core::{iter, num};
 
 #[cfg(not(feature = "std"))]
-use alloc::{
-    boxed::Box,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::boxed::Box;
 
 use crate::*;
 
@@ -25,6 +21,7 @@ const LFN_MID_CHARS: usize = 6;
 const LFN_LAST_CHARS: usize = 2;
 pub(crate) const CHARS_PER_LFN_ENTRY: usize = LFN_FIRST_CHARS + LFN_MID_CHARS + LFN_LAST_CHARS;
 const LONG_ENTRY_TYPE: u8 = 0;
+const LFN_MAX_ENTRIES: usize = LFN_CHAR_LIMIT.div_ceil(CHARS_PER_LFN_ENTRY);
 
 #[derive(Debug, Encode, Decode)]
 pub(crate) struct LFNEntry {
@@ -46,20 +43,21 @@ pub(crate) struct LFNEntry {
 }
 
 impl LFNEntry {
-    pub(crate) fn get_byte_slice(&self) -> [u16; CHARS_PER_LFN_ENTRY] {
-        let mut slice = [0_u8; CHARS_PER_LFN_ENTRY * mem::size_of::<u16>()];
+    pub(crate) fn copy_lfn_name(&self, slice: &mut [u16; CHARS_PER_LFN_ENTRY]) {
+        {
+            // SAFETY: The pointer below is properly aligned and we aren't accessing
+            // the original reference for as long as this pointer is in-scope
+            let slice = unsafe { &mut *(slice.as_mut_ptr() as *mut [u8; CHARS_PER_LFN_ENTRY * 2]) };
 
-        slice[..LFN_FIRST_CHARS * 2].copy_from_slice(&self.first_chars);
-        slice[LFN_FIRST_CHARS * 2..(LFN_FIRST_CHARS + LFN_MID_CHARS) * 2]
-            .copy_from_slice(&self.mid_chars);
-        slice[(LFN_FIRST_CHARS + LFN_MID_CHARS) * 2..].copy_from_slice(&self.last_chars);
-
-        let mut out_slice = [0_u16; CHARS_PER_LFN_ENTRY];
-        for (i, chunk) in slice.chunks(mem::size_of::<u16>()).enumerate() {
-            out_slice[i] = u16::from_le_bytes(chunk.try_into().unwrap());
+            // copy the bytes from the lfn name into it
+            slice[..LFN_FIRST_CHARS * 2].copy_from_slice(&self.first_chars);
+            slice[LFN_FIRST_CHARS * 2..(LFN_FIRST_CHARS + LFN_MID_CHARS) * 2]
+                .copy_from_slice(&self.mid_chars);
+            slice[(LFN_FIRST_CHARS + LFN_MID_CHARS) * 2..].copy_from_slice(&self.last_chars);
         }
 
-        out_slice
+        // fix endian (if required)
+        slice.iter_mut().for_each(|c| *c = c.to_le());
     }
 
     #[inline]
@@ -72,15 +70,15 @@ impl LFNEntry {
 ///
 /// This only takes into account the [`DirEntries`](DirEntry) needed,
 /// not the contents of the file
-pub(crate) fn calc_entries_needed<S>(file_name: S, codepage: &Codepage) -> num::NonZero<EntryCount>
+pub(crate) fn calc_entries_needed<S>(file_name: S, codepage: Codepage) -> num::NonZero<EntryCount>
 where
-    S: ToString,
+    S: AsRef<str>,
 {
     use crate::utils::string::as_sfn;
 
-    let file_name = file_name.to_string();
+    let file_name = file_name.as_ref();
     let char_count = file_name.chars().count();
-    let lfn_entries_needed = if as_sfn(&file_name, codepage).is_some() {
+    let lfn_entries_needed = if as_sfn(file_name, codepage).is_some() {
         0
     } else {
         char_count.div_ceil(CHARS_PER_LFN_ENTRY)
@@ -108,9 +106,9 @@ pub(crate) struct LFNEntryGenerator {
 impl LFNEntryGenerator {
     pub(crate) fn new<S>(filename: S, checksum: u8) -> Self
     where
-        S: ToString,
+        S: AsRef<str>,
     {
-        let filename = filename.to_string();
+        let filename = filename.as_ref();
         let chars: Box<[Box<[u8]>]> = filename
             .encode_utf16()
             .collect::<Box<[u16]>>()
@@ -190,14 +188,14 @@ pub(crate) struct EntryComposer {
 }
 
 impl EntryComposer {
-    pub(crate) fn new(entries: Box<[MinProperties]>, codepage: &Codepage) -> Self {
+    pub(crate) fn new(entries: Box<[MinProperties]>, codepage: Codepage) -> Self {
         Self {
             entries,
             entry_index: 0,
 
             lfn_iter: None,
 
-            codepage: *codepage,
+            codepage,
         }
     }
 }
@@ -237,7 +235,7 @@ impl Iterator for EntryComposer {
             },
             None => {
                 // no reason to generate a SFN if the filename is already a valid one
-                if utils::string::as_sfn(&current_entry.name, &self.codepage)
+                if utils::string::as_sfn(&current_entry.name, self.codepage)
                     .is_some_and(|sfn| sfn == current_entry.sfn)
                 {
                     self.entry_index += 1;
@@ -266,27 +264,31 @@ impl Iterator for EntryComposer {
 impl iter::FusedIterator for EntryComposer {}
 
 #[derive(Debug)]
-pub(crate) struct ReadDirInt<'a, S>
+pub(crate) struct ReadDirInt<'a, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
-    lfn_buf: Vec<String>,
+    lfn_buf: [u16; CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES],
+    lfn_buf_pos: usize,
     lfn_checksum: Option<u8>,
     current_chain: Option<DirEntryChain>,
 
     // if `None`, we have exhausted the iterator
     entry_location: Option<EntryLocation>,
 
-    pub(crate) fs: &'a FileSystem<S>,
+    pub(crate) fs: &'a FileSystem<S, C>,
 }
 
-impl<'a, S> ReadDirInt<'a, S>
+impl<'a, S, C> ReadDirInt<'a, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
-    pub(crate) fn new(fs: &'a FileSystem<S>, chain_start: &EntryLocationUnit) -> Self {
+    pub(crate) fn new(fs: &'a FileSystem<S, C>, chain_start: &EntryLocationUnit) -> Self {
         Self {
-            lfn_buf: Vec::with_capacity(LFN_CHAR_LIMIT.div_ceil(CHARS_PER_LFN_ENTRY)),
+            lfn_buf: [0; CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES],
+            lfn_buf_pos: CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES,
             lfn_checksum: None,
             current_chain: None,
 
@@ -367,7 +369,7 @@ where
                     Some(checksum) => {
                         if checksum != lfn_entry.checksum {
                             self.lfn_checksum = None;
-                            self.lfn_buf.clear();
+                            self.lfn_buf_pos = CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES;
                             self.current_chain = None;
                             break 'outer;
                         }
@@ -375,23 +377,33 @@ where
                     None => self.lfn_checksum = Some(lfn_entry.checksum),
                 }
 
-                let char_arr = lfn_entry.get_byte_slice();
-                if let Ok(temp_str) = utils::string::string_from_lfn(&char_arr) {
-                    self.lfn_buf.push(temp_str);
+                if self.lfn_buf_pos == 0 {
+                    // buffer is full (max number of entries already used)
+                    self.lfn_checksum = None;
+                    self.lfn_buf_pos = CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES;
+                    self.current_chain = None;
+                    break 'outer;
                 }
+
+                self.lfn_buf_pos -= CHARS_PER_LFN_ENTRY;
+                lfn_entry.copy_lfn_name(
+                    (&mut self.lfn_buf[self.lfn_buf_pos..self.lfn_buf_pos + CHARS_PER_LFN_ENTRY])
+                        .try_into()
+                        .unwrap(),
+                );
             } else {
                 let filename = if !self.lfn_buf.is_empty()
                     && self
                         .lfn_checksum
                         .is_some_and(|checksum| checksum == entry.sfn.gen_checksum())
                 {
-                    // for efficiency reasons, we store the LFN string sequences as we read them
-                    let parsed_str: String = self.lfn_buf.iter().cloned().rev().collect();
-                    self.lfn_buf.clear();
+                    let parsed_str =
+                        utils::string::string_from_lfn(&self.lfn_buf[self.lfn_buf_pos..]);
+                    self.lfn_buf_pos = CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES;
                     self.lfn_checksum = None;
-                    parsed_str
+                    parsed_str.unwrap_or(entry.sfn.decode(self.fs.options.codepage))
                 } else {
-                    entry.sfn.decode(&self.fs.options.codepage)
+                    entry.sfn.decode(self.fs.options.codepage)
                 };
 
                 if let (Ok(created), Ok(modified), Ok(accessed)) = (
@@ -428,9 +440,10 @@ where
     }
 }
 
-impl<S> Iterator for ReadDirInt<'_, S>
+impl<S, C> Iterator for ReadDirInt<'_, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     type Item = Result<RawProperties, S::Error>;
 
@@ -451,4 +464,9 @@ where
     }
 }
 
-impl<S> iter::FusedIterator for ReadDirInt<'_, S> where S: Read + Seek {}
+impl<S, C> iter::FusedIterator for ReadDirInt<'_, S, C>
+where
+    S: Read + Seek,
+    C: Clock,
+{
+}

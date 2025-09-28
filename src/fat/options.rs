@@ -1,18 +1,15 @@
 use crate::*;
 
-#[cfg(not(feature = "std"))]
-use alloc::boxed::Box;
-
 #[derive(Debug)]
 /// FileSystem mount options
-pub struct FSOptions {
-    pub(crate) clock: Box<dyn Clock>,
+pub struct FSOptions<C: Clock> {
+    pub(crate) clock: C,
     pub(crate) codepage: codepage::Codepage,
     pub(crate) update_file_fields: bool,
     pub(crate) check_boot_signature: bool,
 }
 
-impl FSOptions {
+impl FSOptions<DefaultClock> {
     #[inline]
     /// Create a new options struct with the default options
     ///
@@ -20,7 +17,26 @@ impl FSOptions {
     pub fn new() -> Self {
         Self::default()
     }
+}
 
+impl<C> FSOptions<C>
+where
+    C: Clock,
+{
+    #[inline]
+    /// Create a new options struct with the default options
+    /// and a provided clock
+    pub fn new_with_clock(clock: C) -> Self {
+        Self {
+            clock,
+            codepage: codepage::Codepage::default(),
+            update_file_fields: false,
+            check_boot_signature: true,
+        }
+    }
+}
+
+impl<C: Clock> FSOptions<C> {
     /// Set the codepage to be used by the filesystem
     pub fn set_codepage(&mut self, codepage: Codepage) {
         self.codepage = codepage
@@ -58,13 +74,8 @@ impl FSOptions {
     }
 }
 
-impl Default for FSOptions {
+impl Default for FSOptions<DefaultClock> {
     fn default() -> Self {
-        Self {
-            clock: Box::new(DefaultClock),
-            codepage: codepage::Codepage::CP437,
-            update_file_fields: false,
-            check_boot_signature: true,
-        }
+        Self::new_with_clock(DefaultClock)
     }
 }

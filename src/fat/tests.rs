@@ -63,9 +63,10 @@ fn assert_vec_is_string(buf: &[u8], expected_string: &str) {
 
     assert_eq!(string, expected_string);
 }
-fn assert_file_against_string<S>(file: &mut ROFile<'_, S>, expected_string: &str)
+fn assert_file_against_string<S, C>(file: &mut ROFile<'_, S, C>, expected_string: &str)
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
     let mut buf = vec![0; file.file_size() as usize];
     file.read_exact(&mut buf).unwrap();
@@ -77,16 +78,18 @@ static BEE_MOVIE_SCRIPT: &str = include_str!("../../tests/bee movie script.txt")
 fn assert_vec_is_bee_movie_script(buf: &[u8]) {
     assert_vec_is_string(buf, BEE_MOVIE_SCRIPT)
 }
-fn assert_file_is_bee_movie_script<S>(file: &mut ROFile<'_, S>)
+fn assert_file_is_bee_movie_script<S, C>(file: &mut ROFile<'_, S, C>)
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
     assert_file_against_string(file, BEE_MOVIE_SCRIPT);
 }
 static I_DONT_NEED_A_BADGE: &str = include_str!("../../tests/I don't need a badge.txt");
-fn assert_file_is_i_dont_need_a_badge<S>(file: &mut ROFile<'_, S>)
+fn assert_file_is_i_dont_need_a_badge<S, C>(file: &mut ROFile<'_, S, C>)
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
     assert_file_against_string(file, I_DONT_NEED_A_BADGE);
 }

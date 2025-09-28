@@ -11,16 +11,35 @@ exclude = ["/.github", ".vscode", "/imgs", "**/*cliff*", "/tests"]
 bincode = "2.0.1"
 bitfield-struct = "0.8.0"
 bitflags = { version = "2.6.0" }
-embedded-io = { version = "0.6.1", features = ["alloc"] }
+embedded-io = { version = "0.6.1" }
 log = "0.4.22"
 oem_cp = "2.1.0"
 setbits = "0.1.0"
-time = { version = "0.3.36", default-features = false, features = [ "alloc", "parsing", "macros", "local-offset" ]}
+time = { version = "0.3.36", default-features = false, features = [ "parsing", "macros" ]}
 typed-path = { version = "0.10.0", default-features = false }
 
 [features]
-default = ["std"]
+default = ["std", "codepage"]
 std = ["time/std", "time/local-offset"]
+codepage = []
+cp437 = []
+cp720 = []
+cp737 = []
+cp775 = []
+cp850 = []
+cp852 = []
+cp855 = []
+cp857 = []
+cp858 = []
+cp860 = []
+cp861 = []
+cp862 = []
+cp863 = []
+cp864 = []
+cp865 = []
+cp866 = []
+cp869 = []
+cp874 = []
 
 [dev-dependencies]
 akin = "0.4.0"

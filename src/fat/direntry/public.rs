@@ -109,7 +109,7 @@ impl Sfn {
         sum
     }
 
-    pub(crate) fn decode(&self, codepage: &Codepage) -> String {
+    pub(crate) fn decode(&self, codepage: Codepage) -> String {
         let mut string = String::with_capacity(SFN_LEN);
         // we begin by writing the name (even if it is padded with spaces, they will be trimmed, so we don't care)
         string.push_str(codepage.decode(&self.name).trim_end());
@@ -152,7 +152,7 @@ impl Properties {
     #[inline]
     /// Get the corresponding short filename for this entry
     pub fn sfn(&self) -> String {
-        self.sfn.0.decode(&self.sfn.1)
+        self.sfn.0.decode(self.sfn.1)
     }
 
     #[inline]
@@ -227,22 +227,24 @@ impl Properties {
 
 /// A thin wrapper for [`Properties`] representing a directory entry
 #[derive(Debug)]
-pub struct DirEntry<'a, S>
+pub struct DirEntry<'a, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     pub(crate) entry: Properties,
-    pub(crate) fs: &'a FileSystem<S>,
+    pub(crate) fs: &'a FileSystem<S, C>,
 }
 
-impl<'a, S> DirEntry<'a, S>
+impl<'a, S, C> DirEntry<'a, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     /// Get the corresponding [`ROFile`] object for this [`DirEntry`]
     ///
     /// Will return [`None`] if the entry isn't a file
-    pub fn to_ro_file(&self) -> Option<ROFile<'a, S>> {
+    pub fn to_ro_file(&self) -> Option<ROFile<'a, S, C>> {
         self.is_file().then(|| ROFile {
             fs: self.fs,
             props: FileProps {
@@ -256,7 +258,7 @@ where
     /// Get the corresponding [`ReadDir`] object for this [`DirEntry`]
     ///
     /// Will return [`None`] if the entry isn't a directory
-    pub fn to_dir(&self) -> Option<ReadDir<'a, S>> {
+    pub fn to_dir(&self) -> Option<ReadDir<'a, S, C>> {
         self.is_dir().then(|| {
             ReadDir::new(
                 self.fs,
@@ -267,21 +269,23 @@ where
     }
 }
 
-impl<'a, S> DirEntry<'a, S>
+impl<'a, S, C> DirEntry<'a, S, C>
 where
     S: Read + Write + Seek,
+    C: Clock,
 {
     /// Get the corresponding [`RWFile`] object of this [`DirEntry`]
     ///
     /// Will return `None` if the entry is a directory
-    pub fn to_rw_file(self) -> Option<RWFile<'a, S>> {
+    pub fn to_rw_file(self) -> Option<RWFile<'a, S, C>> {
         self.to_ro_file().map(|ro_file| ro_file.into())
     }
 }
 
-impl<S> ops::Deref for DirEntry<'_, S>
+impl<S, C> ops::Deref for DirEntry<'_, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
     type Target = Properties;
 
@@ -296,19 +300,25 @@ where
 /// The order in which this iterator returns entries can vary
 /// and shouldn't be relied upon
 #[derive(Debug)]
-pub struct ReadDir<'a, S>
+pub struct ReadDir<'a, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
-    inner: ReadDirInt<'a, S>,
+    inner: ReadDirInt<'a, S, C>,
     parent: Box<Path>,
 }
 
-impl<'a, S> ReadDir<'a, S>
+impl<'a, S, C> ReadDir<'a, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
-    pub(crate) fn new<P>(fs: &'a FileSystem<S>, chain_start: &EntryLocationUnit, parent: P) -> Self
+    pub(crate) fn new<P>(
+        fs: &'a FileSystem<S, C>,
+        chain_start: &EntryLocationUnit,
+        parent: P,
+    ) -> Self
     where
         P: AsRef<Path>,
     {
@@ -319,11 +329,12 @@ where
     }
 }
 
-impl<'a, S> Iterator for ReadDir<'a, S>
+impl<'a, S, C> Iterator for ReadDir<'a, S, C>
 where
     S: Read + Seek,
+    C: Clock,
 {
-    type Item = Result<DirEntry<'a, S>, S::Error>;
+    type Item = Result<DirEntry<'a, S, C>, S::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
