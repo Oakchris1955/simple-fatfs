@@ -405,15 +405,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "setbits"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19b72f25593a9587b64ae980eafe6fdf049d60b755fc95b70e4343868806c517"
-dependencies = [
- "akin",
-]
-
-[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -435,7 +426,6 @@ dependencies = [
  "log",
  "oem_cp",
  "regex",
- "setbits",
  "test-log",
  "time",
  "typed-path",

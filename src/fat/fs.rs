@@ -1034,7 +1034,8 @@ where
         let entry_size = self.fat_type.entry_size();
         let entry_props = FATEntryProps::new(n, self);
 
-        let mask = utils::bits::setbits_u32_lo(self.fat_type.bits_per_entry());
+        // the previous solution would overflow, here's a correct implementation
+        let mask = utils::bits::setbits_u32(self.fat_type.bits_per_entry());
         let mut value: FATEntryValue = FATEntryValue::from(entry.clone()) & mask;
 
         if self.fat_type == FATType::FAT32 {
