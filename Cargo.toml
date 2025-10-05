@@ -15,7 +15,7 @@ embedded-io = { version = "0.6.1" }
 log = "0.4.22"
 oem_cp = "2.1.0"
 time = { version = "0.3.36", default-features = false, features = [ "parsing", "macros" ]}
-typed-path = { version = "0.10.0", default-features = false }
+typed-path = { version = "0.12.0", default-features = false }
 
 [features]
 default = ["std", "codepage"]
