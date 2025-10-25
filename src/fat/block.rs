@@ -8,23 +8,13 @@ pub trait BlockRead: ErrorType {
     const SIZE: usize;
 
     /// read a block (or multiple)
-    fn read(
-        &mut self,
-        sector: SectorIndex,
-        blocks_per_sector: u16,
-        buf: &mut [u8],
-    ) -> Result<(), Self::Error>;
+    fn read(&mut self, sector: SectorIndex, count: u16, buf: &mut [u8]) -> Result<(), Self::Error>;
 }
 
 /// how to write blocks
 pub trait BlockWrite: BlockRead {
     /// write a block (or multiple)
-    fn write(
-        &mut self,
-        sector: SectorIndex,
-        blocks_per_sector: u16,
-        buf: &[u8],
-    ) -> Result<(), Self::Error>;
+    fn write(&mut self, sector: SectorIndex, count: u16, buf: &[u8]) -> Result<(), Self::Error>;
 
     /// flush
     fn flush(&mut self) -> Result<(), Self::Error>;
@@ -34,24 +24,14 @@ impl<T: BlockRead> BlockRead for &mut T {
     const SIZE: usize = T::SIZE;
 
     #[inline]
-    fn read(
-        &mut self,
-        sector: SectorIndex,
-        blocks_per_sector: u16,
-        buf: &mut [u8],
-    ) -> Result<(), Self::Error> {
-        T::read(self, sector, blocks_per_sector, buf)
+    fn read(&mut self, sector: SectorIndex, count: u16, buf: &mut [u8]) -> Result<(), Self::Error> {
+        T::read(self, sector, count, buf)
     }
 }
 impl<T: BlockWrite> BlockWrite for &mut T {
     #[inline]
-    fn write(
-        &mut self,
-        sector: SectorIndex,
-        blocks_per_sector: u16,
-        buf: &[u8],
-    ) -> Result<(), Self::Error> {
-        T::write(self, sector, blocks_per_sector, buf)
+    fn write(&mut self, sector: SectorIndex, count: u16, buf: &[u8]) -> Result<(), Self::Error> {
+        T::write(self, sector, count, buf)
     }
 
     #[inline]
@@ -62,7 +42,7 @@ impl<T: BlockWrite> BlockWrite for &mut T {
 
 #[cfg(feature = "std")]
 pub(crate) mod from_std {
-    use crate::{BlockRead, BlockWrite, SectorIndex};
+    use crate::{BlockRead, BlockWrite, SectorIndex, MIN_SECTOR_SIZE};
     use std::io::{Error, ErrorKind, Read, Seek, SeekFrom, Write};
 
     /// Adapter from `std::io` traits.
@@ -100,17 +80,28 @@ pub(crate) mod from_std {
     }
 
     impl<T: Read + Seek + ?Sized> BlockRead for FromStd<T> {
-        const SIZE: usize = 512;
+        const SIZE: usize = MIN_SECTOR_SIZE;
 
         fn read(
             &mut self,
             sector: SectorIndex,
-            blocks_per_sector: u16,
+            count: u16,
             mut buf: &mut [u8],
         ) -> Result<(), Self::Error> {
-            self.inner.seek(SeekFrom::Start(
-                u64::from(sector) * u64::from(blocks_per_sector) * (Self::SIZE as u64),
-            ))?;
+            let bytes_to_read = Self::SIZE * usize::from(count);
+
+            assert!(
+                buf.len() >= bytes_to_read,
+                "expected buf to fit at least {} bytes, actual length is {} bytes",
+                bytes_to_read,
+                buf.len()
+            );
+
+            buf = &mut buf[..Self::SIZE * usize::from(count)];
+
+            self.inner
+                .seek(SeekFrom::Start(u64::from(sector) * (Self::SIZE as u64)))?;
+
             while !buf.is_empty() {
                 let n = self.inner.read(buf)?;
                 if n == 0 {
@@ -129,12 +120,22 @@ pub(crate) mod from_std {
         fn write(
             &mut self,
             sector: SectorIndex,
-            blocks_per_sector: u16,
-            buf: &[u8],
+            count: u16,
+            mut buf: &[u8],
         ) -> Result<(), Self::Error> {
-            self.inner.seek(SeekFrom::Start(
-                u64::from(sector) * u64::from(blocks_per_sector) * (Self::SIZE as u64),
-            ))?;
+            let bytes_to_read = Self::SIZE * usize::from(count);
+
+            assert!(
+                buf.len() >= bytes_to_read,
+                "expected buf to fit at least {} bytes, actual length is {} bytes",
+                bytes_to_read,
+                buf.len()
+            );
+
+            buf = &buf[..Self::SIZE * usize::from(count)];
+
+            self.inner
+                .seek(SeekFrom::Start(u64::from(sector) * (Self::SIZE as u64)))?;
             self.inner.write_all(buf)?;
 
             Ok(())
@@ -224,10 +225,10 @@ where
     fn read(
         &mut self,
         sector: SectorIndex,
-        blocks_per_sector: u16,
+        count: u16,
         mut buf: &mut [u8],
     ) -> Result<(), Self::Error> {
-        let mut sector_in_vbs = sector * u32::from(blocks_per_sector);
+        let mut sector_in_vbs = sector * u32::from(count);
         while !buf.is_empty() {
             let (this, next) = buf.split_at_mut(VBS);
             let offset = self.go_to_sector(sector_in_vbs)?;
@@ -248,10 +249,10 @@ where
     fn write(
         &mut self,
         sector: SectorIndex,
-        blocks_per_sector: u16,
+        count: u16,
         mut buf: &[u8],
     ) -> Result<(), Self::Error> {
-        let mut sector_in_vbs = sector * u32::from(blocks_per_sector);
+        let mut sector_in_vbs = sector * u32::from(count);
         while !buf.is_empty() {
             let (this, next) = buf.split_at(VBS);
             let offset = self.go_to_sector(sector_in_vbs)?;

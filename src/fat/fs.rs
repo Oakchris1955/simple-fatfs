@@ -831,8 +831,9 @@ where
                 let bytes_to_check =
                     usize::try_from(cmp::min(MAX_PROBE_SIZE, bytes_left)).unwrap_or(usize::MAX);
 
-                // ensure it's a multiple of block size
-                let bytes_to_read = bytes_to_check.div_ceil(S::SIZE) * S::SIZE;
+                // ensure it's a multiple of sector size
+                let bytes_to_read = bytes_to_check.div_ceil(self.props.sector_size.into())
+                    * usize::from(self.props.sector_size);
 
                 let mut buf = vec![0_u8; bytes_to_read];
 
