@@ -159,7 +159,7 @@ impl<'a, const RBS: usize, const VBS: usize, S: BlockWrite> BlockTranslator<'a, 
 
     /// TODO
     pub fn new(storage: S, buffer: &'a mut [u8; RBS]) -> Self {
-        let _check: () = Self::check();
+        Self::check();
 
         Self {
             storage,
