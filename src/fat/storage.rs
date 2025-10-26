@@ -22,7 +22,7 @@ impl SectorBuffer<false> {
             blocks_per_sector: 1,
         };
 
-        storage.read(0, 1, &mut slf[0..MIN_SECTOR_SIZE.max(S::SIZE)])?;
+        storage.read(0, &mut slf[0..MIN_SECTOR_SIZE.max(S::SIZE)])?;
 
         Ok(slf)
     }
@@ -42,7 +42,7 @@ impl SectorBuffer<false> {
         };
 
         if usize::from(sector_size) > S::SIZE {
-            storage.read(0, slf.blocks_per_sector, &mut slf)?;
+            storage.read(0, &mut slf)?;
         }
 
         Ok(slf)
@@ -60,11 +60,9 @@ impl SectorBuffer<true> {
         sector: SectorIndex,
     ) -> Result<(), S::Error> {
         if self.stored_sector != sector {
-            storage.borrow_mut().read(
-                sector * u32::from(self.blocks_per_sector),
-                self.blocks_per_sector,
-                &mut self.slice,
-            )?;
+            storage
+                .borrow_mut()
+                .read(sector * u32::from(self.blocks_per_sector), &mut self.slice)?;
             self.stored_sector = sector;
         }
 
@@ -81,11 +79,9 @@ impl SectorBuffer<true> {
             buf.len() & (usize::from(self.blocks_per_sector) * S::SIZE - 1),
             0
         );
-        storage.borrow_mut().read(
-            sector * u32::from(self.blocks_per_sector),
-            self.blocks_per_sector,
-            buf,
-        )?;
+        storage
+            .borrow_mut()
+            .read(sector * u32::from(self.blocks_per_sector), buf)?;
 
         Ok(())
     }
@@ -93,7 +89,6 @@ impl SectorBuffer<true> {
     pub(crate) fn write<S: BlockWrite>(&self, storage: &RefCell<S>) -> Result<(), S::Error> {
         storage.borrow_mut().write(
             self.stored_sector * u32::from(self.blocks_per_sector),
-            self.blocks_per_sector,
             &self.slice,
         )
     }
@@ -103,11 +98,9 @@ impl SectorBuffer<true> {
         storage: &RefCell<S>,
         sector: SectorIndex,
     ) -> Result<(), S::Error> {
-        storage.borrow_mut().write(
-            sector * u32::from(self.blocks_per_sector),
-            self.blocks_per_sector,
-            &self.slice,
-        )
+        storage
+            .borrow_mut()
+            .write(sector * u32::from(self.blocks_per_sector), &self.slice)
     }
 }
 
