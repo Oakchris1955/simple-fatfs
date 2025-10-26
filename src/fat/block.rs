@@ -43,7 +43,7 @@ impl<T: BlockWrite> BlockWrite for &mut T {
 #[cfg(feature = "std")]
 pub(crate) mod from_std {
     use crate::{BlockRead, BlockWrite, SectorIndex, MIN_SECTOR_SIZE};
-    use std::io::{Error, ErrorKind, Read, Seek, SeekFrom, Write};
+    use std::io::{Error, Read, Seek, SeekFrom, Write};
 
     /// Adapter from `std::io` traits.
     #[derive(Clone, Debug)]
@@ -102,16 +102,8 @@ pub(crate) mod from_std {
             self.inner
                 .seek(SeekFrom::Start(u64::from(sector) * (Self::SIZE as u64)))?;
 
-            while !buf.is_empty() {
-                let n = self.inner.read(buf)?;
-                if n == 0 {
-                    return Err(Error::new(
-                        ErrorKind::UnexpectedEof,
-                        "failed to fill whole buffer",
-                    ));
-                }
-                buf = &mut buf[n..];
-            }
+            self.inner.read_exact(buf)?;
+
             Ok(())
         }
     }
