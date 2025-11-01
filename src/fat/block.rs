@@ -47,23 +47,32 @@ pub(crate) mod from_std {
 
     /// Adapter from `std::io` traits.
     #[derive(Clone, Debug)]
-    pub struct FromStd<T: ?Sized> {
+    pub struct FromStd<T: ?Sized, const SIZE: usize = MIN_SECTOR_SIZE> {
         inner: T,
     }
 
     impl<T> FromStd<T> {
-        /// Create a new adapter.
+        /// Create a new adapter with the default block size.
         pub fn new(inner: T) -> Self {
             Self { inner }
         }
+    }
 
+    impl<T, const SIZE: usize> FromStd<T, SIZE> {
+        /// Create a new adapter with the default block size.
+        pub fn with_block_size(inner: T) -> Self {
+            Self { inner }
+        }
+    }
+
+    impl<T, const SIZE: usize> FromStd<T, SIZE> {
         /// Consume the adapter, returning the inner object.
         pub fn into_inner(self) -> T {
             self.inner
         }
     }
 
-    impl<T: ?Sized> FromStd<T> {
+    impl<T: ?Sized, const SIZE: usize> FromStd<T, SIZE> {
         /// Borrow the inner object.
         pub fn inner(&self) -> &T {
             &self.inner
@@ -75,12 +84,12 @@ pub(crate) mod from_std {
         }
     }
 
-    impl<T: ?Sized> embedded_io::ErrorType for FromStd<T> {
+    impl<T: ?Sized, const SIZE: usize> embedded_io::ErrorType for FromStd<T, SIZE> {
         type Error = Error;
     }
 
-    impl<T: Read + Seek + ?Sized> BlockRead for FromStd<T> {
-        const SIZE: usize = MIN_SECTOR_SIZE;
+    impl<T: Read + Seek + ?Sized, const SIZE: usize> BlockRead for FromStd<T, SIZE> {
+        const SIZE: usize = SIZE;
 
         fn read(&mut self, sector: SectorIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
             assert!(
@@ -99,7 +108,7 @@ pub(crate) mod from_std {
         }
     }
 
-    impl<T: Read + Write + Seek + ?Sized> BlockWrite for FromStd<T> {
+    impl<T: Read + Write + Seek + ?Sized, const SIZE: usize> BlockWrite for FromStd<T, SIZE> {
         fn write(&mut self, sector: SectorIndex, buf: &[u8]) -> Result<(), Self::Error> {
             assert!(
                 buf.len().is_multiple_of(Self::SIZE),
