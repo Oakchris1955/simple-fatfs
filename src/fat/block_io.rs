@@ -1,22 +1,35 @@
+//! Block device-related IO traits and adapters
+//!
+//! Low-level storage devices, like flash memories, operate in units of data
+//! which will hereby after be referred as blocks. This library assumes that
+//! both for read and write operations the block size will be the same.
+
 use super::*;
 
 use embedded_io::ErrorType;
 
-/// how to read blocks
+/// The `BlockRead` traits allows to read data from a source in units of blocks.
 pub trait BlockRead: ErrorType {
-    /// size of a block, must be a power of two
+    /// Size of a block, must be a power of two. A panic may occur if this isn't
+    /// a power of two other than zero.
     const SIZE: usize;
 
-    /// read a block (or multiple)
-    fn read(&mut self, sector: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error>;
+    /// Read one or multiple blocks from the device medium, starting at `block`
+    ///
+    /// The underlying implementation should expect a `buf` with a length multiple
+    /// of `SIZE`. If that isn't the case, a panic may occur.
+    fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error>;
 }
 
-/// how to write blocks
+/// The `BlockRead` traits allows to write data to a sink in units of blocks.
 pub trait BlockWrite: BlockRead {
-    /// write a block (or multiple)
-    fn write(&mut self, sector: BlockIndex, buf: &[u8]) -> Result<(), Self::Error>;
+    /// Write one or multiple blocks to the device medium, starting at `block`
+    ///
+    /// The underlying implementation should expect a `buf` with a length multiple
+    /// of `SIZE`. If that isn't the case, a panic may occur.
+    fn write(&mut self, block: BlockIndex, buf: &[u8]) -> Result<(), Self::Error>;
 
-    /// flush
+    /// Flushes this output stream, ensuring that all intermediately buffered contents reach their destination.
     fn flush(&mut self) -> Result<(), Self::Error>;
 }
 
@@ -24,14 +37,14 @@ impl<T: BlockRead> BlockRead for &mut T {
     const SIZE: usize = T::SIZE;
 
     #[inline]
-    fn read(&mut self, sector: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
-        T::read(self, sector, buf)
+    fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
+        T::read(self, block, buf)
     }
 }
 impl<T: BlockWrite> BlockWrite for &mut T {
     #[inline]
-    fn write(&mut self, sector: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
-        T::write(self, sector, buf)
+    fn write(&mut self, block: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
+        T::write(self, block, buf)
     }
 
     #[inline]
@@ -91,7 +104,7 @@ pub(crate) mod from_std {
     impl<T: Read + Seek + ?Sized, const SIZE: usize> BlockRead for FromStd<T, SIZE> {
         const SIZE: usize = SIZE;
 
-        fn read(&mut self, sector: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
+        fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
             assert!(
                 buf.len().is_multiple_of(Self::SIZE),
                 "expected the buffer size ({}) to be a multiple of the medium's block size ({})",
@@ -100,7 +113,7 @@ pub(crate) mod from_std {
             );
 
             self.inner
-                .seek(SeekFrom::Start(u64::from(sector) * (Self::SIZE as u64)))?;
+                .seek(SeekFrom::Start(u64::from(block) * (Self::SIZE as u64)))?;
 
             self.inner.read_exact(buf)?;
 
@@ -109,7 +122,7 @@ pub(crate) mod from_std {
     }
 
     impl<T: Read + Write + Seek + ?Sized, const SIZE: usize> BlockWrite for FromStd<T, SIZE> {
-        fn write(&mut self, sector: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
+        fn write(&mut self, block: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
             assert!(
                 buf.len().is_multiple_of(Self::SIZE),
                 "expected the buffer size ({}) to be a multiple of the medium's block size ({})",
@@ -118,7 +131,7 @@ pub(crate) mod from_std {
             );
 
             self.inner
-                .seek(SeekFrom::Start(u64::from(sector) * (Self::SIZE as u64)))?;
+                .seek(SeekFrom::Start(u64::from(block) * (Self::SIZE as u64)))?;
             self.inner.write_all(buf)?;
 
             Ok(())
@@ -205,8 +218,8 @@ where
 {
     const SIZE: usize = VBS;
 
-    fn read(&mut self, sector: BlockIndex, mut buf: &mut [u8]) -> Result<(), Self::Error> {
-        let mut sector_in_vbs = sector * SectorCount::from(Self::VBS_PER_RBS);
+    fn read(&mut self, block: BlockIndex, mut buf: &mut [u8]) -> Result<(), Self::Error> {
+        let mut sector_in_vbs = block * BlockCount::from(Self::VBS_PER_RBS);
         while !buf.is_empty() {
             let (this, next) = buf.split_at_mut(VBS);
             let offset = self.go_to_sector(sector_in_vbs)?;
@@ -224,8 +237,8 @@ impl<const RBS: usize, const VBS: usize, S> BlockWrite for BlockTranslator<'_, R
 where
     S: BlockWrite,
 {
-    fn write(&mut self, sector: BlockIndex, mut buf: &[u8]) -> Result<(), Self::Error> {
-        let mut sector_in_vbs = sector * SectorCount::from(Self::VBS_PER_RBS);
+    fn write(&mut self, block: BlockIndex, mut buf: &[u8]) -> Result<(), Self::Error> {
+        let mut sector_in_vbs = block * BlockCount::from(Self::VBS_PER_RBS);
         while !buf.is_empty() {
             let (this, next) = buf.split_at(VBS);
             let offset = self.go_to_sector(sector_in_vbs)?;
