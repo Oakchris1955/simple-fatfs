@@ -27,6 +27,7 @@
 //! extern crate simple_fatfs;
 //! use simple_fatfs::*;
 //! use simple_fatfs::io::*;
+//! use simple_fatfs::block_io::FromStd;
 //!
 //! const FAT_IMG: &[u8] = include_bytes!("../imgs/fat12.img");
 //!

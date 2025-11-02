@@ -152,7 +152,7 @@ pub use from_std::FromStd;
 pub struct BlockTranslator<'a, const RBS: usize, const VBS: usize, S: BlockWrite> {
     storage: S,
     buffer: &'a mut [u8; RBS],
-    stored_sector: u32,
+    stored_sector: SectorIndex,
     status: BlockTranslatorStatus,
 }
 
@@ -191,17 +191,19 @@ impl<'a, const RBS: usize, const VBS: usize, S: BlockWrite> BlockTranslator<'a, 
         }
     }
 
-    fn go_to_sector(&mut self, sector_in_vbs: u32) -> Result<usize, S::Error> {
-        let real_sector = sector_in_vbs / u32::from(Self::VBS_PER_RBS);
+    fn go_to_sector(&mut self, sector_in_vbs: SectorIndex) -> Result<usize, S::Error> {
+        let real_sector = sector_in_vbs / SectorIndex::from(Self::VBS_PER_RBS);
         if self.stored_sector != real_sector || self.status == BlockTranslatorStatus::Unknown {
             if self.status == BlockTranslatorStatus::Modified {
-                self.storage.write(self.stored_sector, self.buffer)?;
+                self.storage
+                    .write(BlockIndex::from(self.stored_sector), self.buffer)?;
             }
             self.stored_sector = real_sector;
-            self.storage.read(self.stored_sector, self.buffer)?;
+            self.storage
+                .read(BlockIndex::from(self.stored_sector), self.buffer)?;
             self.status = BlockTranslatorStatus::Read;
         }
-        Ok((sector_in_vbs % u32::from(Self::VBS_PER_RBS)) as usize)
+        Ok((sector_in_vbs % SectorIndex::from(Self::VBS_PER_RBS)) as usize)
     }
 }
 
@@ -222,7 +224,7 @@ where
         let mut sector_in_vbs = block * BlockCount::from(Self::VBS_PER_RBS);
         while !buf.is_empty() {
             let (this, next) = buf.split_at_mut(VBS);
-            let offset = self.go_to_sector(sector_in_vbs)?;
+            let offset = self.go_to_sector(sector_in_vbs as SectorIndex)?; // FIXME
             this.copy_from_slice(&self.buffer[offset..offset + VBS]);
             // advance
             buf = next;
@@ -241,7 +243,7 @@ where
         let mut sector_in_vbs = block * BlockCount::from(Self::VBS_PER_RBS);
         while !buf.is_empty() {
             let (this, next) = buf.split_at(VBS);
-            let offset = self.go_to_sector(sector_in_vbs)?;
+            let offset = self.go_to_sector(sector_in_vbs as SectorIndex)?; // FIXME
             self.buffer[offset..offset + VBS].copy_from_slice(this);
             self.status = BlockTranslatorStatus::Modified;
 
@@ -255,7 +257,8 @@ where
 
     fn flush(&mut self) -> Result<(), Self::Error> {
         if self.status == BlockTranslatorStatus::Modified {
-            self.storage.write(self.stored_sector, self.buffer)?;
+            self.storage
+                .write(BlockIndex::from(self.stored_sector), self.buffer)?;
             self.status = BlockTranslatorStatus::Read;
         }
 
