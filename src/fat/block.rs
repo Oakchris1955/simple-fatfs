@@ -8,13 +8,13 @@ pub trait BlockRead: ErrorType {
     const SIZE: usize;
 
     /// read a block (or multiple)
-    fn read(&mut self, sector: SectorIndex, buf: &mut [u8]) -> Result<(), Self::Error>;
+    fn read(&mut self, sector: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error>;
 }
 
 /// how to write blocks
 pub trait BlockWrite: BlockRead {
     /// write a block (or multiple)
-    fn write(&mut self, sector: SectorIndex, buf: &[u8]) -> Result<(), Self::Error>;
+    fn write(&mut self, sector: BlockIndex, buf: &[u8]) -> Result<(), Self::Error>;
 
     /// flush
     fn flush(&mut self) -> Result<(), Self::Error>;
@@ -24,13 +24,13 @@ impl<T: BlockRead> BlockRead for &mut T {
     const SIZE: usize = T::SIZE;
 
     #[inline]
-    fn read(&mut self, sector: SectorIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
+    fn read(&mut self, sector: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
         T::read(self, sector, buf)
     }
 }
 impl<T: BlockWrite> BlockWrite for &mut T {
     #[inline]
-    fn write(&mut self, sector: SectorIndex, buf: &[u8]) -> Result<(), Self::Error> {
+    fn write(&mut self, sector: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
         T::write(self, sector, buf)
     }
 
@@ -42,7 +42,7 @@ impl<T: BlockWrite> BlockWrite for &mut T {
 
 #[cfg(feature = "std")]
 pub(crate) mod from_std {
-    use crate::{BlockRead, BlockWrite, SectorIndex, MIN_SECTOR_SIZE};
+    use crate::{BlockIndex, BlockRead, BlockWrite, MIN_SECTOR_SIZE};
     use std::io::{Error, Read, Seek, SeekFrom, Write};
 
     /// Adapter from `std::io` traits.
@@ -91,7 +91,7 @@ pub(crate) mod from_std {
     impl<T: Read + Seek + ?Sized, const SIZE: usize> BlockRead for FromStd<T, SIZE> {
         const SIZE: usize = SIZE;
 
-        fn read(&mut self, sector: SectorIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
+        fn read(&mut self, sector: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
             assert!(
                 buf.len().is_multiple_of(Self::SIZE),
                 "expected the buffer size ({}) to be a multiple of the medium's block size ({})",
@@ -109,7 +109,7 @@ pub(crate) mod from_std {
     }
 
     impl<T: Read + Write + Seek + ?Sized, const SIZE: usize> BlockWrite for FromStd<T, SIZE> {
-        fn write(&mut self, sector: SectorIndex, buf: &[u8]) -> Result<(), Self::Error> {
+        fn write(&mut self, sector: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
             assert!(
                 buf.len().is_multiple_of(Self::SIZE),
                 "expected the buffer size ({}) to be a multiple of the medium's block size ({})",
@@ -205,7 +205,7 @@ where
 {
     const SIZE: usize = VBS;
 
-    fn read(&mut self, sector: SectorIndex, mut buf: &mut [u8]) -> Result<(), Self::Error> {
+    fn read(&mut self, sector: BlockIndex, mut buf: &mut [u8]) -> Result<(), Self::Error> {
         let mut sector_in_vbs = sector * SectorCount::from(Self::VBS_PER_RBS);
         while !buf.is_empty() {
             let (this, next) = buf.split_at_mut(VBS);
@@ -224,7 +224,7 @@ impl<const RBS: usize, const VBS: usize, S> BlockWrite for BlockTranslator<'_, R
 where
     S: BlockWrite,
 {
-    fn write(&mut self, sector: SectorIndex, mut buf: &[u8]) -> Result<(), Self::Error> {
+    fn write(&mut self, sector: BlockIndex, mut buf: &[u8]) -> Result<(), Self::Error> {
         let mut sector_in_vbs = sector * SectorCount::from(Self::VBS_PER_RBS);
         while !buf.is_empty() {
             let (this, next) = buf.split_at(VBS);

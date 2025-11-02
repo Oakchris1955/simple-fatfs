@@ -20,6 +20,8 @@ typed-path = { version = "0.10.0", default-features = false }
 [features]
 default = ["std", "codepage"]
 std = ["time/std", "time/local-offset", "embedded-io/std"]
+# 64-bit logical block addressing
+lba64 = []
 codepage = []
 cp437 = []
 cp720 = []
