@@ -16,7 +16,7 @@ fn check_FAT_offset() {
 
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let fat_offset = match &*fs.boot_record.borrow() {
@@ -43,7 +43,7 @@ fn check_FAT_offset() {
 fn read_file_in_root_dir() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file("/root.txt").unwrap();
@@ -96,7 +96,7 @@ where
 fn read_huge_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file("/bee movie script.txt").unwrap();
@@ -110,7 +110,7 @@ fn seek_n_read() {
     // this uses the famous "I'd like to interject for a moment" copypasta as a test file
     // you can find it online by just searching this term
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file("/GNU ⁄ Linux copypasta.txt").unwrap();
@@ -142,7 +142,7 @@ fn seek_n_read() {
 fn write_to_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT12.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT12.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_rw_file("/root.txt").unwrap();
@@ -189,7 +189,7 @@ fn write_to_file() {
 fn create_root_dir_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.create_file("/new.txt").unwrap();
@@ -204,7 +204,7 @@ fn create_root_dir_file() {
 fn create_subdir_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
@@ -224,7 +224,7 @@ fn create_lots_of_files() {
 
     const FILE_COUNT: usize = 1_000;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     for i in 1..=FILE_COUNT {
@@ -275,7 +275,7 @@ fn create_lots_of_files() {
 fn create_directory_in_root_and_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.create_dir("/unbelievable").unwrap();
@@ -291,7 +291,7 @@ fn create_directory_in_root_and_file() {
 fn create_directory_in_subdir_and_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.create_dir("/another root directory2").unwrap();
@@ -311,7 +311,7 @@ fn create_directory_in_subdir_and_file() {
 fn rename_root_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename("/root.txt", "/rootdir/not root.txt").unwrap();
@@ -329,7 +329,7 @@ fn rename_root_file() {
 fn rename_nonroot_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename("/rootdir/example.txt", "/another root directory/hello.txt")
@@ -348,7 +348,7 @@ fn rename_nonroot_file() {
 fn rename_root_directory() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename("/rootdir", "/rootdir2").unwrap();
@@ -366,7 +366,7 @@ fn rename_root_directory() {
 fn rename_root_file_fat32() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename("/hello.txt", "/emptydir/bye.txt").unwrap();
@@ -384,7 +384,7 @@ fn rename_root_file_fat32() {
 fn rename_nonroot_file_fat32() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename("/secret/bee movie script.txt", "/BEES.txt")
@@ -399,7 +399,7 @@ fn rename_nonroot_file_fat32() {
 fn rename_root_directory_fat32() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename("/secret", "/emptydir/secret").unwrap();
@@ -415,7 +415,7 @@ fn rename_root_directory_fat32() {
 fn remove_root_dir_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     // the bee movie script (here) is in the root directory region
@@ -438,7 +438,7 @@ fn remove_root_dir_file() {
 fn remove_data_region_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT12.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT12.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     // the bee movie script (here) is in the data region
@@ -461,7 +461,7 @@ fn remove_data_region_file() {
 fn remove_empty_dir() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = "/another root directory/";
@@ -483,7 +483,7 @@ fn remove_empty_dir() {
 fn remove_nonempty_dir_with_readonly_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = "/rootdir/";
@@ -522,7 +522,7 @@ akin! {
 
         use std::io::Cursor;
 
-        let mut storage = FromStd::new(Cursor::new(~*fat_type.to_owned()));
+        let mut storage = FromStd::new(Cursor::new(~*fat_type.to_owned())).unwrap();
         let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
         fs.show_hidden(true);
 
@@ -582,7 +582,7 @@ akin! {
 fn FAT_tables_after_write_are_identical() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     assert!(
@@ -608,7 +608,7 @@ fn FAT_tables_after_write_are_identical() {
 fn truncate_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_rw_file("/bee movie script.txt").unwrap();
@@ -632,7 +632,7 @@ fn truncate_file() {
 fn read_only_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let file_result = fs.get_rw_file("/rootdir/example.txt");
@@ -650,7 +650,7 @@ fn read_only_file() {
 fn get_hidden_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT12.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT12.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let file_path = "/hidden";
@@ -677,7 +677,7 @@ fn get_hidden_file() {
 fn read_file_in_subdir() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file("/rootdir/example.txt").unwrap();
@@ -695,7 +695,7 @@ fn check_file_timestamps() {
 
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let file = fs.get_ro_file("/rootdir/example.txt").unwrap();
@@ -711,7 +711,7 @@ fn modify_file_timestamps() {
 
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_rw_file("/bee movie script.txt").unwrap();
@@ -730,7 +730,7 @@ fn modify_file_timestamps() {
 fn check_last_accessed_ro() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file("/rootdir/example.txt").unwrap();
@@ -750,7 +750,7 @@ fn check_last_accessed_ro() {
 fn check_last_accessed_rw() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
 
     let mut file = fs.get_rw_file("/bee movie script.txt").unwrap();
@@ -772,7 +772,7 @@ fn check_last_modified() {
 
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
 
     let mut file = fs.get_rw_file("/bee movie script.txt").unwrap();
@@ -793,7 +793,7 @@ fn check_last_modified() {
 fn read_file_fat12() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT12.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT12.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     {
@@ -818,7 +818,7 @@ fn read_file_fat12() {
 fn read_file_fat32() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file("/secret/bee movie script.txt").unwrap();
@@ -830,7 +830,7 @@ fn read_file_fat32() {
 fn create_file_root_dir_fat32() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
@@ -847,7 +847,7 @@ fn create_file_root_dir_fat32() {
 fn create_file_subdir_fat32() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.create_file("/secret/baby i am free.txt").unwrap();
@@ -862,7 +862,7 @@ fn create_file_subdir_fat32() {
 fn create_directory_in_root_and_file_fat32() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.create_dir("/unbelievable").unwrap();
@@ -878,7 +878,7 @@ fn create_directory_in_root_and_file_fat32() {
 fn create_directory_in_subdir_and_file_fat32() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.create_dir("/another root directory").unwrap();
@@ -898,7 +898,7 @@ fn create_directory_in_subdir_and_file_fat32() {
 fn seek_n_read_fat32() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file("/hello.txt").unwrap();
@@ -918,7 +918,7 @@ fn seek_n_read_fat32() {
 fn write_to_fat32_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_rw_file("/hello.txt").unwrap();
@@ -957,7 +957,7 @@ fn write_to_fat32_file() {
 fn truncate_fat32_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     const EXPECTED_STR: &str = "Hello fr";
@@ -978,7 +978,7 @@ fn truncate_fat32_file() {
 fn remove_fat32_file() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let file_path = "/secret/bee movie script.txt";
@@ -1001,7 +1001,7 @@ fn remove_fat32_file() {
 fn remove_empty_fat32_dir() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = "/emptydir/";
@@ -1023,7 +1023,7 @@ fn remove_empty_fat32_dir() {
 fn remove_nonempty_fat32_dir() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = "/secret/";
@@ -1045,7 +1045,7 @@ fn remove_nonempty_fat32_dir() {
 fn attempt_to_remove_file_as_directory() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = "/hello.txt";
@@ -1065,7 +1065,7 @@ fn attempt_to_remove_file_as_directory() {
 fn read_dir_and_go_back() {
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     for entry in fs.read_dir("/").unwrap() {
@@ -1097,7 +1097,7 @@ fn FAT_tables_after_fat32_write_are_identical() {
 
     use std::io::Cursor;
 
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     match &*fs.boot_record.borrow() {
@@ -1143,7 +1143,7 @@ fn assert_img_fat_type() {
     for case in TEST_CASES {
         use std::io::Cursor;
 
-        let mut storage = FromStd::new(Cursor::new(case.0));
+        let mut storage = FromStd::new(Cursor::new(case.0)).unwrap();
         let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
         assert_eq!(fs.fat_type(), case.1)

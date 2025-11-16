@@ -32,7 +32,7 @@
 //! const FAT_IMG: &[u8] = include_bytes!("../imgs/fat12.img");
 //!
 //! fn main() {
-//!     let mut cursor = FromStd::new(std::io::Cursor::new(FAT_IMG.to_owned()));
+//!     let mut cursor = FromStd::new(std::io::Cursor::new(FAT_IMG.to_owned())).unwrap();
 //!
 //!     // We can either pass by value or by (mutable) reference
 //!     // (Yes, the storage medium might be Read-Only, but reading is a mutable action)

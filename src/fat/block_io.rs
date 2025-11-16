@@ -8,12 +8,19 @@ use super::*;
 
 use embedded_io::ErrorType;
 
-/// The `BlockRead` traits allows to read data from a source in units of blocks.
-pub trait BlockRead: ErrorType {
+/// The base trait for all block devices. Used to query infomartion like
+/// block size and block count
+pub trait BlockBase: ErrorType {
     /// Size of a block, must be a power of two. A panic may occur if this isn't
     /// a power of two other than zero.
     const SIZE: usize;
 
+    /// Retrieve the number of available blocks in the storage medium.
+    fn block_count(&self) -> usize;
+}
+
+/// The `BlockRead` traits allows to read data from a source in units of blocks.
+pub trait BlockRead: BlockBase {
     /// Read one or multiple blocks from the device medium, starting at `block`
     ///
     /// The underlying implementation should expect a `buf` with a length multiple
@@ -33,9 +40,15 @@ pub trait BlockWrite: BlockRead {
     fn flush(&mut self) -> Result<(), Self::Error>;
 }
 
-impl<T: BlockRead> BlockRead for &mut T {
+impl<T: BlockBase> BlockBase for &mut T {
     const SIZE: usize = T::SIZE;
 
+    fn block_count(&self) -> usize {
+        T::block_count(self)
+    }
+}
+
+impl<T: BlockRead> BlockRead for &mut T {
     #[inline]
     fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
         T::read(self, block, buf)
@@ -55,26 +68,50 @@ impl<T: BlockWrite> BlockWrite for &mut T {
 
 #[cfg(feature = "std")]
 pub(crate) mod from_std {
-    use crate::{BlockIndex, BlockRead, BlockWrite, MIN_SECTOR_SIZE};
+    use crate::{BlockBase, BlockIndex, BlockRead, BlockWrite, MIN_SECTOR_SIZE};
     use std::io::{Error, Read, Seek, SeekFrom, Write};
+
+    /// Determine the block count of a sotrage medium
+    ///
+    /// This function may fail (return [`None`]) if the underlying [`seek`](std::io::Seek)
+    /// operation fails or if the storage medium's size isn't a multiple of `T::SIZE`
+    fn determine_block_count<T: ?Sized + Seek>(
+        block_size: usize,
+        storage: &mut T,
+    ) -> Option<usize> {
+        let offset = storage.seek(SeekFrom::End(0)).ok()?;
+
+        if !offset.is_multiple_of(u64::try_from(block_size).unwrap()) {
+            return None;
+        }
+
+        let count = offset / u64::try_from(block_size).unwrap();
+
+        usize::try_from(count).ok()
+    }
 
     /// Adapter from `std::io` traits.
     #[derive(Clone, Debug)]
     pub struct FromStd<T: ?Sized, const SIZE: usize = MIN_SECTOR_SIZE> {
+        block_count: usize,
         inner: T,
     }
 
-    impl<T> FromStd<T> {
+    impl<T: Seek> FromStd<T> {
         /// Create a new adapter with the default block size.
-        pub fn new(inner: T) -> Self {
-            Self { inner }
+        pub fn new(mut inner: T) -> Option<Self> {
+            let block_count = determine_block_count(Self::SIZE, &mut inner)?;
+
+            Some(Self { inner, block_count })
         }
     }
 
-    impl<T, const SIZE: usize> FromStd<T, SIZE> {
+    impl<T: Seek, const SIZE: usize> FromStd<T, SIZE> {
         /// Create a new adapter with the default block size.
-        pub fn with_block_size(inner: T) -> Self {
-            Self { inner }
+        pub fn with_block_size(mut inner: T) -> Option<Self> {
+            let block_count = determine_block_count(Self::SIZE, &mut inner)?;
+
+            Some(Self { inner, block_count })
         }
     }
 
@@ -101,9 +138,15 @@ pub(crate) mod from_std {
         type Error = Error;
     }
 
-    impl<T: Read + Seek + ?Sized, const SIZE: usize> BlockRead for FromStd<T, SIZE> {
+    impl<T: ?Sized, const SIZE: usize> BlockBase for FromStd<T, SIZE> {
         const SIZE: usize = SIZE;
 
+        fn block_count(&self) -> usize {
+            self.block_count
+        }
+    }
+
+    impl<T: Read + Seek + ?Sized, const SIZE: usize> BlockRead for FromStd<T, SIZE> {
         fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
             assert!(
                 buf.len().is_multiple_of(Self::SIZE),
@@ -214,12 +257,21 @@ where
     type Error = S::Error;
 }
 
-impl<const RBS: usize, const VBS: usize, S> BlockRead for BlockTranslator<'_, RBS, VBS, S>
+impl<const RBS: usize, const VBS: usize, S> BlockBase for BlockTranslator<'_, RBS, VBS, S>
 where
     S: BlockWrite,
 {
     const SIZE: usize = VBS;
 
+    fn block_count(&self) -> usize {
+        self.storage.block_count()
+    }
+}
+
+impl<const RBS: usize, const VBS: usize, S> BlockRead for BlockTranslator<'_, RBS, VBS, S>
+where
+    S: BlockWrite,
+{
     fn read(&mut self, block: BlockIndex, mut buf: &mut [u8]) -> Result<(), Self::Error> {
         let mut sector_in_vbs = block * BlockCount::from(Self::VBS_PER_RBS);
         while !buf.is_empty() {

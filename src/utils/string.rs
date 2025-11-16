@@ -295,7 +295,7 @@ fn run_gen_sfn(string: &str) -> Option<Sfn> {
     use std::io::Cursor;
 
     const FAT16: &[u8] = include_bytes!("../../imgs/fat16.img");
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     gen_sfn(string, &fs, "/").ok()

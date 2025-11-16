@@ -548,6 +548,13 @@ where
 
         let props = FSProperties::from(&boot_record);
 
+        if usize::try_from(props.total_sectors).unwrap() * usize::from(props.sector_size)
+            > storage.borrow().block_count() * S::SIZE
+        {
+            log::error!("the filesystem seems to be larger than the storage medium");
+            return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));
+        }
+
         let fs = Self {
             storage,
             sector_buffer: buffer.into(),
@@ -870,7 +877,6 @@ where
     ///
     /// This function also returns an immutable reference to [`self.sector_buffer`](Self::sector_buffer)
     pub(crate) fn load_nth_sector(&self, n: SectorIndex) -> Result<Ref<'_, [u8]>, S::Error> {
-        // FIXME: don't rely just on the filesystem for the device storage size
         if n >= self.props.total_sectors {
             panic!(concat!(
                 "seeked past end of device medium. ",
