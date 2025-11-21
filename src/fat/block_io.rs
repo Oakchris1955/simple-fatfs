@@ -156,6 +156,8 @@ pub(crate) mod from_std {
                 Self::SIZE
             );
 
+            #[allow(clippy::useless_conversion)]
+            // silence warning on u64->u64 conversion with feature `lba64` (it's u32->u64 without the feature)
             self.inner
                 .seek(SeekFrom::Start(u64::from(block) * (Self::SIZE as u64)))?;
 
@@ -174,6 +176,8 @@ pub(crate) mod from_std {
                 Self::SIZE
             );
 
+            #[allow(clippy::useless_conversion)]
+            // silence warning on u64->u64 conversion with feature `lba64` (it's u32->u64 without the feature)
             self.inner
                 .seek(SeekFrom::Start(u64::from(block) * (Self::SIZE as u64)))?;
             self.inner.write_all(buf)?;
