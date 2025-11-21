@@ -10,9 +10,19 @@
 //! a particular action or belong to an object.
 
 #[cfg(not(feature = "lba64"))]
-pub(crate) type BlockIndex = u32;
+/// The number/offset/position of a block.
+///
+/// A block is defined by the [`BlockRead`](crate::fat::BlockRead) trait.
+///
+/// Depending on the feature `lba64` it is either u32 or u64.
+pub type BlockIndex = u32;
 #[cfg(feature = "lba64")]
-pub(crate) type BlockIndex = u64;
+/// The number/offset/position of a block.
+///
+/// A block is defined by the [`BlockRead`](crate::fat::BlockRead) trait.
+///
+/// Depending on the feature `lba64` it is either u32 or u64.
+pub type BlockIndex = u64;
 #[allow(dead_code)]
 pub(crate) type BlockCount = BlockIndex;
 

@@ -5,6 +5,7 @@
 //! both for read and write operations the block size will be the same.
 
 use super::*;
+pub use crate::fat::types::BlockIndex;
 
 use embedded_io::ErrorType;
 
