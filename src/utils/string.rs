@@ -5,7 +5,7 @@ use alloc::string::FromUtf16Error;
 
 use crate::{path::*, Clock, Codepage, FSResult, FileSystem, Sfn, SFN_EXT_LEN, SFN_NAME_LEN};
 
-use embedded_io::*;
+use crate::fat::BlockWrite;
 
 /// variation of <https://stackoverflow.com/a/42067321/19247098> for processing LFNs
 pub(crate) fn string_from_lfn(utf16_src: &[u16]) -> Result<String, FromUtf16Error> {
@@ -166,7 +166,7 @@ pub(crate) fn gen_sfn<S, C, P>(
     target_dir: P,
 ) -> FSResult<Sfn, S::Error>
 where
-    S: Read + Write + Seek,
+    S: BlockWrite,
     C: Clock,
     P: AsRef<Path>,
 {
@@ -291,12 +291,11 @@ fn test_sfn_generator_unknown_chars() {
 
 #[cfg(all(test, feature = "std"))]
 fn run_gen_sfn(string: &str) -> Option<Sfn> {
-    use crate::FSOptions;
-    use embedded_io_adapters::std::FromStd;
+    use crate::{FSOptions, FromStd};
     use std::io::Cursor;
 
     const FAT16: &[u8] = include_bytes!("../../imgs/fat16.img");
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned()));
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     gen_sfn(string, &fs, "/").ok()

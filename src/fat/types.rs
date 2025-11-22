@@ -9,6 +9,23 @@
 //! [`ClusterCount`], it could return how many clusters are needed for
 //! a particular action or belong to an object.
 
+#[cfg(not(feature = "lba64"))]
+/// The number/offset/position of a block.
+///
+/// A block is defined by the [`BlockBase`](crate::fat::BlockBase) trait.
+///
+/// Depending on the feature `lba64` it is either [`u32`] or [`u64`].
+pub type BlockIndex = u32;
+#[cfg(feature = "lba64")]
+/// The number/offset/position of a block.
+///
+/// A block is defined by the [`BlockBase`](crate::fat::BlockBase) trait.
+///
+/// Depending on the feature `lba64` it is either [`u32`] or [`u64`].
+pub type BlockIndex = u64;
+#[allow(dead_code)]
+pub(crate) type BlockCount = BlockIndex;
+
 pub(crate) type ClusterIndex = u32;
 pub(crate) type ClusterCount = ClusterIndex;
 

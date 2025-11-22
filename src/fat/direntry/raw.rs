@@ -8,7 +8,6 @@ use crate::*;
 use ::time;
 use bincode::{impl_borrow_decode, Decode, Encode};
 use bitflags::bitflags;
-use embedded_io::*;
 use time::{Date, PrimitiveDateTime};
 
 bitflags! {
@@ -131,7 +130,7 @@ impl From<Properties> for MinProperties {
 
 impl<S, C> From<DirEntry<'_, S, C>> for MinProperties
 where
-    S: Read + Seek,
+    S: BlockRead,
     C: Clock,
 {
     fn from(value: DirEntry<'_, S, C>) -> Self {
@@ -163,7 +162,7 @@ impl RawProperties {
     ) -> DirEntry<'a, S, C>
     where
         P: AsRef<Path>,
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         let entry_path = path.as_ref().join(&self.name);

@@ -4,8 +4,6 @@ use core::num;
 
 use crate::*;
 
-use embedded_io::*;
-
 /// The root directory sector or data cluster a [`FATDirEntry`] belongs too
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntryLocationUnit {
@@ -20,7 +18,7 @@ impl EntryLocationUnit {
     #[allow(unused)]
     pub(crate) fn from_partition_sector<S, C>(sector: SectorIndex, fs: &FileSystem<S, C>) -> Self
     where
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         if sector < fs.first_data_sector() {
@@ -35,7 +33,7 @@ impl EntryLocationUnit {
 
     pub(crate) fn get_max_offset<S, C>(&self, fs: &FileSystem<S, C>) -> u16
     where
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         let unit_size = match self {
@@ -49,7 +47,7 @@ impl EntryLocationUnit {
 
     pub(crate) fn get_entry_sector<S, C>(&self, fs: &FileSystem<S, C>) -> SectorIndex
     where
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         match self {
@@ -67,7 +65,7 @@ impl EntryLocationUnit {
         fs: &FileSystem<S, C>,
     ) -> Result<Option<EntryLocationUnit>, S::Error>
     where
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         match self {
@@ -116,7 +114,7 @@ pub(crate) struct EntryLocation {
 impl EntryLocation {
     pub(crate) fn from_partition_sector<S, C>(sector: SectorIndex, fs: &FileSystem<S, C>) -> Self
     where
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         let unit = EntryLocationUnit::from_partition_sector(sector, fs);
@@ -126,7 +124,7 @@ impl EntryLocation {
 
     pub(crate) fn entry_status<S, C>(&self, fs: &FileSystem<S, C>) -> Result<EntryStatus, S::Error>
     where
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         let entry_sector = self.get_entry_sector(fs);
@@ -143,7 +141,7 @@ impl EntryLocation {
     #[inline]
     pub(crate) fn get_entry_sector<S, C>(&self, fs: &FileSystem<S, C>) -> SectorIndex
     where
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         let sector_offset: SectorCount = SectorCount::from(self.index)
@@ -156,7 +154,7 @@ impl EntryLocation {
     #[inline]
     pub(crate) fn get_sector_byte_offset<S, C>(&self, fs: &FileSystem<S, C>) -> usize
     where
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         (usize::from(self.index) * DIRENTRY_SIZE) % usize::from(fs.props.sector_size)
@@ -169,7 +167,7 @@ impl EntryLocation {
         fs: &FileSystem<S, C>,
     ) -> Result<[u8; DIRENTRY_SIZE], S::Error>
     where
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         let entry_sector = self.get_entry_sector(fs);
@@ -188,7 +186,7 @@ impl EntryLocation {
         bytes: [u8; DIRENTRY_SIZE],
     ) -> Result<(), S::Error>
     where
-        S: Read + Write + Seek,
+        S: BlockWrite,
         C: Clock,
     {
         let entry_sector = self.get_entry_sector(fs);
@@ -207,7 +205,7 @@ impl EntryLocation {
         is_last: bool,
     ) -> Result<(), S::Error>
     where
-        S: Read + Write + Seek,
+        S: BlockWrite,
         C: Clock,
     {
         let entry_sector = self.unit.get_entry_sector(fs);
@@ -229,7 +227,7 @@ impl EntryLocation {
         fs: &FileSystem<S, C>,
     ) -> Result<Option<EntryLocation>, S::Error>
     where
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         self.index += 1;
@@ -255,7 +253,7 @@ impl EntryLocation {
         n: num::NonZero<EntryIndex>,
     ) -> Result<Option<EntryLocation>, S::Error>
     where
-        S: Read + Seek,
+        S: BlockRead,
         C: Clock,
     {
         let mut current_entry = self;
