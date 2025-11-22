@@ -12,16 +12,16 @@
 #[cfg(not(feature = "lba64"))]
 /// The number/offset/position of a block.
 ///
-/// A block is defined by the [`BlockRead`](crate::fat::BlockRead) trait.
+/// A block is defined by the [`BlockBase`](crate::fat::BlockBase) trait.
 ///
-/// Depending on the feature `lba64` it is either u32 or u64.
+/// Depending on the feature `lba64` it is either [`u32`] or [`u64`].
 pub type BlockIndex = u32;
 #[cfg(feature = "lba64")]
 /// The number/offset/position of a block.
 ///
-/// A block is defined by the [`BlockRead`](crate::fat::BlockRead) trait.
+/// A block is defined by the [`BlockBase`](crate::fat::BlockBase) trait.
 ///
-/// Depending on the feature `lba64` it is either u32 or u64.
+/// Depending on the feature `lba64` it is either [`u32`] or [`u64`].
 pub type BlockIndex = u64;
 #[allow(dead_code)]
 pub(crate) type BlockCount = BlockIndex;

@@ -8,7 +8,7 @@ pub use crate::fat::types::BlockIndex;
 
 use embedded_io::ErrorType;
 
-/// The base trait for all block devices. Used to query infomartion like
+/// The base trait for all block devices. Used to query information like
 /// block size and block count
 pub trait BlockBase: ErrorType {
     /// Size of a block, must be a power of two. A panic may occur if this isn't
@@ -73,7 +73,7 @@ pub(crate) mod from_std {
     use crate::{BlockBase, BlockIndex, BlockRead, BlockWrite, MIN_SECTOR_SIZE};
     use std::io::{Error, Read, Seek, SeekFrom, Write};
 
-    /// Determine the block count of a sotrage medium
+    /// Determine the block count of a storage medium
     ///
     /// This function may fail (return [`None`]) if the underlying [`seek`](std::io::Seek)
     /// operation fails or if the storage medium's size isn't a multiple of `T::SIZE`
@@ -92,10 +92,10 @@ pub(crate) mod from_std {
         usize::try_from(count).ok()
     }
 
-    /// The default block size for the `FromStd` adapter
+    /// The default block size for the [`FromStd`] adapter
     pub const DEFAULT_BLOCK_SIZE: usize = MIN_SECTOR_SIZE;
 
-    /// Adapter from `std::io` traits.
+    /// Adapter from [`std::io`] traits.
     #[derive(Clone, Debug)]
     pub struct FromStd<T: ?Sized> {
         block_count: usize,
@@ -115,7 +115,7 @@ pub(crate) mod from_std {
             })
         }
 
-        /// Create a new adapter with the default block size.
+        /// Create a new adapter with a custom block size.
         pub fn with_block_size(mut inner: T, block_size: usize) -> Option<Self> {
             let block_count = determine_block_count(block_size, &mut inner)?;
 
@@ -206,4 +206,4 @@ pub(crate) mod from_std {
 }
 
 #[cfg(feature = "std")]
-pub use from_std::FromStd;
+pub use from_std::*;
