@@ -465,11 +465,13 @@ where
     /// Fails if the storage is way too small to support a FAT filesystem.
     /// For most use cases, that shouldn't be an issue, you can just call [`.unwrap()`](Result::unwrap)
     pub fn new(mut storage: S, options: FSOptions<C>) -> FSResult<Self, S::Error> {
-        if !S::SIZE.is_power_of_two() {
+        let block_size = storage.block_size();
+
+        if !block_size.is_power_of_two() {
             // block size is 0 or not a power of 2
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
-        if S::SIZE > MAX_SECTOR_SIZE {
+        if block_size > MAX_SECTOR_SIZE {
             // block size is larger than MAX_SECTOR_SIZE
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
@@ -484,7 +486,7 @@ where
             .map(|(v, _)| v)
             .map_err(utils::bincode::map_err_dec)?;
 
-        if S::SIZE > usize::from(bpb.bytes_per_sector) {
+        if block_size > usize::from(bpb.bytes_per_sector) {
             // block size is larger than sector size
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
@@ -549,7 +551,7 @@ where
         let props = FSProperties::from(&boot_record);
 
         if usize::try_from(props.total_sectors).unwrap() * usize::from(props.sector_size)
-            > storage.borrow().block_count() * S::SIZE
+            > storage.borrow().block_count() * block_size
         {
             log::error!("the filesystem seems to be larger than the storage medium");
             return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));

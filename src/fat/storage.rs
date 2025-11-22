@@ -11,18 +11,22 @@ pub(crate) struct SectorBuffer<const INIT: bool> {
     slice: Box<[u8]>,
     stored_sector: SectorIndex,
     blocks_per_sector: u16,
+    block_size: usize,
 }
 
 impl SectorBuffer<false> {
     /// Create a new buffer and fill it with the first 512 bytes
     pub(crate) fn new<S: BlockRead>(storage: &mut S) -> Result<Self, S::Error> {
+        let block_size = storage.block_size();
+
         let mut slf = Self {
             slice: [0u8; MAX_SECTOR_SIZE].into(),
             stored_sector: 0,
             blocks_per_sector: 1,
+            block_size,
         };
 
-        storage.read(0, &mut slf[0..MIN_SECTOR_SIZE.max(S::SIZE)])?;
+        storage.read(0, &mut slf[0..MIN_SECTOR_SIZE.max(block_size)])?;
 
         Ok(slf)
     }
@@ -38,10 +42,11 @@ impl SectorBuffer<false> {
             stored_sector: 0,
             #[allow(clippy::cast_possible_truncation)]
             // Safety: S::SIZE is guaranteed to be <= 4096
-            blocks_per_sector: sector_size / (S::SIZE as u16),
+            blocks_per_sector: sector_size / (self.block_size as u16),
+            block_size: self.block_size
         };
 
-        if usize::from(sector_size) > S::SIZE {
+        if usize::from(sector_size) > slf.block_size {
             storage.read(0, &mut slf)?;
         }
 
@@ -77,7 +82,7 @@ impl SectorBuffer<true> {
         buf: &mut [u8],
     ) -> Result<(), S::Error> {
         assert_eq!(
-            buf.len() & (usize::from(self.blocks_per_sector) * S::SIZE - 1),
+            buf.len() & (usize::from(self.blocks_per_sector) * self.block_size - 1),
             0
         );
         storage.borrow_mut().read(
