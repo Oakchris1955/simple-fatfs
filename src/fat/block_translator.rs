@@ -139,7 +139,7 @@ impl core::error::Error for BlockTranslatorError {}
 
 impl embedded_io::Error for BlockTranslatorError {
     fn kind(&self) -> ErrorKind {
-        ErrorKind::Unsupported
+        ErrorKind::InvalidData
     }
 }
 
