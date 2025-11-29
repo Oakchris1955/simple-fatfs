@@ -1,6 +1,5 @@
-use core::array;
 use embedded_io::ErrorType;
-use simple_fatfs::block_io::{BlockBase, BlockIndex, BlockRead, BlockTranslator, BlockWrite};
+use simple_fatfs::block_io::*;
 
 #[derive(Debug)]
 struct Storage<'a, const BS: usize>(&'a mut [u8; 64]);
@@ -30,7 +29,7 @@ impl<const BS: usize> ErrorType for Storage<'_, BS> {
 impl<const BS: usize> BlockWrite for Storage<'_, BS> {
     fn write(&mut self, block: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
         let offset = block as usize * BS;
-        self.0[offset..offset + buf.len()].clone_from_slice(&buf);
+        self.0[offset..offset + buf.len()].clone_from_slice(buf);
         Ok(())
     }
 
@@ -92,13 +91,13 @@ fn test_block_translator8() {
 
 fn run_block_translator<const BUFS: usize>(buffer: [&mut [u8; 4]; BUFS]) {
     // initialize storage with random data, copy it to the second storage
-    let mut storage_a = array::from_fn(|_| rand::random());
-    let mut storage_b = storage_a.clone();
+    let mut array_a: [u8; 64] = rand::random();
+    let mut array_b: [u8; 64] = array_a;
 
     // A = 64 * 1 buffer
-    let mut storage_a = Storage::<1>(&mut storage_a);
+    let mut storage_a = Storage::<1>(&mut array_a);
     // B = 16 * 4 buffer
-    let mut storage_b = Storage::<4>(&mut storage_b);
+    let mut storage_b = Storage::<4>(&mut array_b);
 
     // ensure that total number of bytes are equal
     assert_eq!(
@@ -108,12 +107,6 @@ fn run_block_translator<const BUFS: usize>(buffer: [&mut [u8; 4]; BUFS]) {
 
     // C = translated B into 64 * 1
     let mut translated_c = BlockTranslator::<1, _, _, _>::new(&mut storage_b, buffer).unwrap();
-
-    // ensure that total number of bytes are equal
-    assert_eq!(
-        storage_a.block_size() * storage_a.block_count(),
-        translated_c.block_size() * translated_c.block_count()
-    );
 
     // ensure that block size and count are equal
     assert_eq!(
@@ -142,11 +135,12 @@ fn run_block_translator<const BUFS: usize>(buffer: [&mut [u8; 4]; BUFS]) {
     translated_c.flush().unwrap();
 
     // drop the translation level
+    #[allow(clippy::drop_non_drop)]
     drop(translated_c);
 
     // assure that the underlying storage of both is identical
     assert_eq!(
-        storage_a.0, storage_b.0,
+        array_a, array_b,
         "compare of both storages with {BUFS} buffers"
     );
 }

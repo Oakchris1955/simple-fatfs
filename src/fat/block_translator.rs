@@ -70,6 +70,7 @@ use embedded_io::{ErrorKind, ErrorType};
 /// * buffer size must be greater or equal than the hardware block size
 /// * hardware block size must be a power of two
 /// * hardware block size must greater or equal than virtual block size
+
 #[derive(Debug)]
 pub struct BlockTranslator<'a, const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S> {
     vbs_per_hbs: u32,
@@ -110,7 +111,7 @@ pub enum BlockTranslatorError {
     HardwareBlockSizeToSmall,
 }
 
-impl Debug for BlockTranslatorError {
+impl Display for BlockTranslatorError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
             BlockTranslatorError::BufferSizeTooSmall => {
@@ -126,9 +127,11 @@ impl Debug for BlockTranslatorError {
     }
 }
 
-impl Display for BlockTranslatorError {
+impl Debug for BlockTranslatorError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        <Self as Debug>::fmt(self, f)
+        use core::fmt::Display;
+
+        Display::fmt(self, f)
     }
 }
 
