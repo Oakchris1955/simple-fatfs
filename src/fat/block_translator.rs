@@ -148,7 +148,7 @@ impl<'a, const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S>
 where
     S: BlockWrite,
 {
-    const fn check() {
+    const CHECK: Result<(), ()> = {
         if BUFS == 0 {
             panic!("number of buffers (BUFS) must be greater than zero");
         }
@@ -158,14 +158,16 @@ where
         if !VBS.is_power_of_two() {
             panic!("virtual block size must be a power of two");
         }
-    }
+
+        Ok(())
+    };
 
     /// Create a new BlockTranslator.
     pub fn new(
         storage: S,
         buffer: [&'a mut [u8; BUF_SIZE]; BUFS],
     ) -> Result<Self, BlockTranslatorError> {
-        Self::check();
+        let _ = Self::CHECK;
 
         let hardware_block_size = storage.block_size();
 
