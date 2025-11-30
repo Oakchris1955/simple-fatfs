@@ -1,7 +1,10 @@
 use crate::block_io::{BlockBase, BlockRead, BlockWrite};
 pub use crate::fat::types::BlockIndex;
+use alloc::boxed::Box;
 use core::array;
 use core::fmt::{Debug, Display, Formatter};
+use core::iter;
+use core::ops::{Deref, DerefMut};
 use embedded_io::{ErrorKind, ErrorType};
 
 /// Translate between different hardware and software "virtual" block sizes.
@@ -45,7 +48,7 @@ use embedded_io::{ErrorKind, ErrorType};
 ///
 /// // create buffer and the translation level
 /// let mut buffer = [0u8; 65536];
-/// let mut translated = BlockTranslator::<512, _, _, _>::new(&mut storage, [&mut buffer])?;
+/// let mut translated = BlockTranslator::<512, _, _, _>::new_with_buffer(&mut storage, [&mut buffer])?;
 ///
 /// // write one block and flush it
 /// translated.write(0, &[11; 512])?;
@@ -86,8 +89,14 @@ where
 }
 
 #[derive(Debug)]
+enum BufferLocation<'a, const BUF_SIZE: usize> {
+    Borrowed(&'a mut [u8; BUF_SIZE]),
+    Owned(Box<[u8; BUF_SIZE]>),
+}
+
+#[derive(Debug)]
 struct Buffer<'a, const BUF_SIZE: usize> {
-    buffer: &'a mut [u8; BUF_SIZE],
+    buffer: BufferLocation<'a, BUF_SIZE>,
     stored_block: BlockIndex,
     status: BlockTranslatorStatus,
     /// BUFS<=2: unused
@@ -146,16 +155,51 @@ impl embedded_io::Error for BlockTranslatorError {
     }
 }
 
+impl<const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S>
+    BlockTranslator<'static, VBS, BUF_SIZE, BUFS, S>
+where
+    S: BlockWrite,
+{
+    /// Create a new BlockTranslator.
+    ///
+    /// Example:
+    /// Create a BlockTranslator with 1 buffer of 65536 bytes and 512 bytes of virtual block size.
+    /// ```no_compile
+    /// let mut translated = BlockTranslator::<512, 65536, 1, _>::new(&mut storage)?;
+    /// ```
+    pub fn new(storage: S) -> Result<Self, BlockTranslatorError> {
+        Self::new_internal(
+            storage,
+            iter::from_fn(|| Some(BufferLocation::Owned(Box::new([0; BUF_SIZE])))),
+        )
+    }
+}
+
 impl<'a, const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S>
     BlockTranslator<'a, VBS, BUF_SIZE, BUFS, S>
 where
     S: BlockWrite,
 {
     /// Create a new BlockTranslator.
-    pub fn new(
+    ///
+    /// Example:
+    /// Create a BlockTranslator with 1 buffer of 65536 bytes and 512 bytes of virtual block size.
+    /// ```no_compile
+    /// let mut buffer = [0u8; 65536];
+    /// let mut translated = BlockTranslator::<512, _, _, _>::new_with_buffer(&mut storage, [&mut buffer])?;
+    /// ```
+    pub fn new_with_buffer(
         storage: S,
         buffer: [&'a mut [u8; BUF_SIZE]; BUFS],
     ) -> Result<Self, BlockTranslatorError> {
+        Self::new_internal(storage, buffer.into_iter().map(BufferLocation::Borrowed))
+    }
+
+    /// Create a new BlockTranslator.
+    fn new_internal<I>(storage: S, mut buffers: I) -> Result<Self, BlockTranslatorError>
+    where
+        I: Iterator<Item = BufferLocation<'a, BUF_SIZE>>,
+    {
         // Compile-time check
         const {
             if BUFS == 0 {
@@ -183,12 +227,10 @@ where
             return Err(BlockTranslatorError::HardwareBlockSizeToSmall);
         }
 
-        let mut buffer = buffer.into_iter();
-
         Ok(Self {
             storage,
             buffers: array::from_fn::<_, BUFS, _>(|i| Buffer {
-                buffer: buffer.next().unwrap(),
+                buffer: buffers.next().unwrap(),
                 stored_block: 0,
                 status: BlockTranslatorStatus::Unknown,
                 last_used: i,
@@ -294,12 +336,13 @@ where
 
         // store block, if required
         if buffer.status == BlockTranslatorStatus::Modified {
-            self.storage.write(buffer.stored_block, buffer.buffer)?;
+            self.storage.write(buffer.stored_block, &*buffer.buffer)?;
         }
 
         // read block
         buffer.stored_block = real_block;
-        self.storage.read(buffer.stored_block, buffer.buffer)?;
+        self.storage
+            .read(buffer.stored_block, &mut *buffer.buffer)?;
         buffer.status = BlockTranslatorStatus::Read;
 
         Ok((buffer, offset))
@@ -378,7 +421,7 @@ where
     fn flush(&mut self) -> Result<(), Self::Error> {
         for buffer in self.buffers.iter_mut() {
             if buffer.status == BlockTranslatorStatus::Modified {
-                self.storage.write(buffer.stored_block, buffer.buffer)?;
+                self.storage.write(buffer.stored_block, &*buffer.buffer)?;
                 buffer.status = BlockTranslatorStatus::Read;
             }
         }
@@ -394,5 +437,25 @@ where
 {
     fn drop(&mut self) {
         let _ = self.flush();
+    }
+}
+
+impl<const BUF_SIZE: usize> Deref for BufferLocation<'_, BUF_SIZE> {
+    type Target = [u8; BUF_SIZE];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            BufferLocation::Borrowed(e) => e,
+            BufferLocation::Owned(b) => b.deref(),
+        }
+    }
+}
+
+impl<const BUF_SIZE: usize> DerefMut for BufferLocation<'_, BUF_SIZE> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            BufferLocation::Borrowed(e) => e,
+            BufferLocation::Owned(b) => b.deref_mut(),
+        }
     }
 }

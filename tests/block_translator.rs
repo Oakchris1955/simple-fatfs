@@ -42,7 +42,7 @@ impl<const BS: usize> BlockWrite for Storage<'_, BS> {
 fn test_block_translator1() {
     let mut translated_c_buffer1 = [0u8; 4];
 
-    run_block_translator([&mut translated_c_buffer1]);
+    run_block_translator(Some([&mut translated_c_buffer1]));
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn test_block_translator2() {
     let mut translated_c_buffer1 = [0u8; 4];
     let mut translated_c_buffer2 = [0u8; 4];
 
-    run_block_translator([&mut translated_c_buffer1, &mut translated_c_buffer2]);
+    run_block_translator(Some([&mut translated_c_buffer1, &mut translated_c_buffer2]));
 }
 
 #[test]
@@ -59,11 +59,11 @@ fn test_block_translator3() {
     let mut translated_c_buffer2 = [0u8; 4];
     let mut translated_c_buffer3 = [0u8; 4];
 
-    run_block_translator([
+    run_block_translator(Some([
         &mut translated_c_buffer1,
         &mut translated_c_buffer2,
         &mut translated_c_buffer3,
-    ]);
+    ]));
 }
 
 #[test]
@@ -77,7 +77,7 @@ fn test_block_translator8() {
     let mut translated_c_buffer7 = [0u8; 4];
     let mut translated_c_buffer8 = [0u8; 4];
 
-    run_block_translator([
+    run_block_translator(Some([
         &mut translated_c_buffer1,
         &mut translated_c_buffer2,
         &mut translated_c_buffer3,
@@ -86,10 +86,30 @@ fn test_block_translator8() {
         &mut translated_c_buffer6,
         &mut translated_c_buffer7,
         &mut translated_c_buffer8,
-    ]);
+    ]));
 }
 
-fn run_block_translator<const BUFS: usize>(buffer: [&mut [u8; 4]; BUFS]) {
+#[test]
+fn test_block_translator1_heap() {
+    run_block_translator::<1>(None);
+}
+
+#[test]
+fn test_block_translator2_heap() {
+    run_block_translator::<2>(None);
+}
+
+#[test]
+fn test_block_translator3_heap() {
+    run_block_translator::<3>(None);
+}
+
+#[test]
+fn test_block_translator8_heap() {
+    run_block_translator::<8>(None);
+}
+
+fn run_block_translator<const BUFS: usize>(buffer: Option<[&mut [u8; 4]; BUFS]>) {
     // initialize storage with random data, copy it to the second storage
     let mut array_a: [u8; 64] = rand::random();
     let mut array_b: [u8; 64] = array_a;
@@ -106,7 +126,11 @@ fn run_block_translator<const BUFS: usize>(buffer: [&mut [u8; 4]; BUFS]) {
     );
 
     // C = translated B into 64 * 1
-    let mut translated_c = BlockTranslator::<1, _, _, _>::new(&mut storage_b, buffer).unwrap();
+    let mut translated_c = match buffer {
+        None => BlockTranslator::<1, _, _, _>::new(&mut storage_b),
+        Some(buffer) => BlockTranslator::<1, _, _, _>::new_with_buffer(&mut storage_b, buffer),
+    }
+    .unwrap();
 
     // ensure that block size and count are equal
     assert_eq!(
