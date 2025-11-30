@@ -135,7 +135,6 @@ fn run_block_translator<const BUFS: usize>(buffer: [&mut [u8; 4]; BUFS]) {
     translated_c.flush().unwrap();
 
     // drop the translation level
-    #[allow(clippy::drop_non_drop)]
     drop(translated_c);
 
     // assure that the underlying storage of both is identical

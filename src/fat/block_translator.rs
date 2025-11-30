@@ -72,7 +72,10 @@ use embedded_io::{ErrorKind, ErrorType};
 /// * hardware block size must greater or equal than virtual block size
 
 #[derive(Debug)]
-pub struct BlockTranslator<'a, const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S> {
+pub struct BlockTranslator<'a, const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S>
+where
+    S: BlockWrite,
+{
     vbs_per_hbs: u32,
     buffers: [Buffer<'a, BUF_SIZE>; BUFS],
     storage: S,
@@ -381,5 +384,15 @@ where
         }
 
         self.storage.flush()
+    }
+}
+
+impl<const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S> Drop
+    for BlockTranslator<'_, VBS, BUF_SIZE, BUFS, S>
+where
+    S: BlockWrite,
+{
+    fn drop(&mut self) {
+        let _ = self.flush();
     }
 }
