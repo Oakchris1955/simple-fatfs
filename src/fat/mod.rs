@@ -1,4 +1,5 @@
 pub mod block_io;
+mod block_translator;
 mod bpb;
 mod consts;
 mod direntry;
