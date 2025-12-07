@@ -236,7 +236,7 @@ where
                 last_used: i,
             }),
             next: if BUFS >= 3 { BUFS } else { 0 },
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             vbs_per_hbs: (hardware_block_size / VBS) as u32,
         })
     }
@@ -253,7 +253,7 @@ where
                 && b1.stored_block == b2.stored_block)));
 
         let real_block = block_in_vbs / BlockIndex::from(self.vbs_per_hbs);
-        #[allow(clippy::cast_possible_truncation)]
+        #[cfg_attr(feature = "lba64", expect(clippy::cast_possible_truncation))]
         let offset = (block_in_vbs % BlockIndex::from(self.vbs_per_hbs)) as usize;
 
         let buffer = match BUFS {
@@ -368,7 +368,6 @@ where
     }
 
     #[inline]
-    #[allow(clippy::cast_possible_truncation)]
     fn block_count(&self) -> usize {
         self.storage.block_count() * (self.vbs_per_hbs as usize)
     }

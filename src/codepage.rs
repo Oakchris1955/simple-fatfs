@@ -69,6 +69,7 @@ pub enum Codepage {
 
 impl Codepage {
     pub(crate) fn decode(&self, v: &[u8]) -> String {
+        // we could use an expect attribute here, but it would be too hard to read
         #[allow(unused_imports)]
         use oem_cp::{decode_string_complete_table, decode_string_incomplete_table_lossy};
 

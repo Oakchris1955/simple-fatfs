@@ -23,7 +23,7 @@ pub type BlockIndex = u32;
 ///
 /// Depending on the feature `lba64` it is either [`u32`] or [`u64`].
 pub type BlockIndex = u64;
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub(crate) type BlockCount = BlockIndex;
 
 pub(crate) type ClusterIndex = u32;

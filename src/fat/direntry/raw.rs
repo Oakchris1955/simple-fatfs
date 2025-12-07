@@ -217,7 +217,7 @@ impl From<MinProperties> for FATDirEntry {
             accessed: value.accessed.into(),
             cluster_high: (value.data_cluster >> (u32::BITS / 2)) as u16,
             modified: value.modified.into(),
-            #[allow(clippy::cast_possible_truncation)] // we are splitting a u32 here
+            #[expect(clippy::cast_possible_truncation)] // we are splitting a u32 here
             cluster_low: value.data_cluster as u16,
             file_size: value.file_size,
         }

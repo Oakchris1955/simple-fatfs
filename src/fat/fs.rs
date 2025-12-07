@@ -136,7 +136,7 @@ pub(crate) type FATOffset = u8;
 /// Properties about the position of a sector within the FAT
 struct FATSectorProps {
     /// the sector belongs to this FAT copy
-    #[allow(unused)]
+    #[expect(unused)]
     fat_offset: FATOffset,
     /// the sector is that many away from the start of the FAT copy
     sector_offset: SectorIndex,
@@ -165,7 +165,7 @@ impl FATSectorProps {
         })
     }
 
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case)]
     pub fn get_corresponding_FAT_sectors<S, C>(&self, fs: &FileSystem<S, C>) -> Box<[SectorIndex]>
     where
         S: BlockRead,
@@ -373,7 +373,7 @@ impl FileFilter {
     }
 }
 
-#[allow(clippy::derivable_impls)]
+#[expect(clippy::derivable_impls)]
 impl Default for FileFilter {
     fn default() -> Self {
         // The FAT spec says to filter everything by default
@@ -810,7 +810,7 @@ where
         })
     }
 
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case)]
     /// Check whether or not the all the FAT tables of the storage medium are identical to each other
     pub(crate) fn FAT_tables_are_identical(&self) -> Result<bool, S::Error> {
         // we could make it work, but we are only testing regular FAT filesystems (for now)
@@ -865,7 +865,7 @@ where
         Ok(true)
     }
 
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case)]
     pub(crate) fn sector_belongs_to_FAT(&self, sector: SectorIndex) -> bool {
         match &*self.boot_record.borrow() {
             BootRecord::Fat(boot_record_fat) => (boot_record_fat.first_fat_sector().into()
@@ -908,7 +908,7 @@ where
         Ok(Ref::map(self.sector_buffer.borrow(), |s| &**s))
     }
 
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case)]
     pub(crate) fn read_nth_FAT_entry(&self, n: FATEntryIndex) -> Result<FATEntry, S::Error> {
         // the size of an entry rounded up to bytes
         let entry_size = self.fat_type.entry_size();
@@ -961,7 +961,7 @@ where
             FATType::FAT12 => match value {
                 0x000 => FATEntry::Free,
                 0xFF7 => FATEntry::Bad,
-                #[allow(clippy::manual_range_patterns)]
+                #[expect(clippy::manual_range_patterns)]
                 0xFF8..=0xFFE | 0xFFF => FATEntry::Eof,
                 _ => {
                     if (0x002..(self.props.total_clusters + 1)).contains(&value) {
@@ -974,7 +974,7 @@ where
             FATType::FAT16 => match value {
                 0x0000 => FATEntry::Free,
                 0xFFF7 => FATEntry::Bad,
-                #[allow(clippy::manual_range_patterns)]
+                #[expect(clippy::manual_range_patterns)]
                 0xFFF8..=0xFFFE | 0xFFFF => FATEntry::Eof,
                 _ => {
                     if (0x0002..(self.props.total_clusters + 1)).contains(&value) {
@@ -987,7 +987,7 @@ where
             FATType::FAT32 => match value {
                 0x00000000 => FATEntry::Free,
                 0x0FFFFFF7 => FATEntry::Bad,
-                #[allow(clippy::manual_range_patterns)]
+                #[expect(clippy::manual_range_patterns)]
                 0x0FFFFFF8..=0xFFFFFFE | 0x0FFFFFFF => FATEntry::Eof,
                 _ => {
                     if (0x00000002..(self.props.total_clusters + 1)).contains(&value) {
@@ -1008,7 +1008,7 @@ where
     S: BlockWrite,
     C: Clock,
 {
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case)]
     pub(crate) fn write_nth_FAT_entry(
         &self,
         n: FATEntryIndex,
@@ -1160,7 +1160,7 @@ where
             }
 
             // what if for whatever reason the data types changes?
-            #[allow(clippy::absurd_extreme_comparisons)]
+            #[expect(clippy::absurd_extreme_comparisons)]
             if entry_count + n.get() >= DIRENTRY_LIMIT {
                 // defragment the cluster chain just in case
                 // this frees up any space for entries
@@ -1414,7 +1414,7 @@ where
                         new_chain_end.set_bytes(self, bytes)?;
 
                         // what if for whatever reason the data types changes?
-                        #[allow(clippy::absurd_extreme_comparisons)]
+                        #[expect(clippy::absurd_extreme_comparisons)]
                         if entry_count >= DIRENTRY_LIMIT {
                             break;
                         }
@@ -1553,7 +1553,7 @@ where
     }
 
     /// Syncs a FAT sector to ALL OTHER FAT COPIES on the device medium
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case)]
     fn _sync_FAT_sector(&self, fat_sector_props: &FATSectorProps) -> Result<(), S::Error> {
         for sector in fat_sector_props.get_corresponding_FAT_sectors(self) {
             self.sector_buffer

@@ -14,8 +14,6 @@ pub(crate) enum EntryLocationUnit {
 }
 
 impl EntryLocationUnit {
-    // I will leave this here in case it is needed in the future
-    #[allow(unused)]
     pub(crate) fn from_partition_sector<S, C>(sector: SectorIndex, fs: &FileSystem<S, C>) -> Self
     where
         S: BlockRead,

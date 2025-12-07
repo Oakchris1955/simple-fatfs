@@ -10,7 +10,7 @@ static FAT16: &[u8] = include_bytes!("../../imgs/fat16.img");
 static FAT32: &[u8] = include_bytes!("../../imgs/fat32.img");
 
 #[test]
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 fn check_FAT_offset() {
     use crate::fat::BootRecord;
 
@@ -516,7 +516,7 @@ akin! {
     let &unused_entries = [5, 2, 1];
 
     #[test]
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case)]
     fn entry_defragment_~*fat_type() {
         const UNUSED_ENTRY_COUNT: EntryCount = *unused_entries;
 
@@ -578,7 +578,7 @@ akin! {
 }
 
 #[test]
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 fn FAT_tables_after_write_are_identical() {
     use std::io::Cursor;
 
@@ -904,7 +904,7 @@ fn seek_n_read_fat32() {
     let mut file = fs.get_ro_file("/hello.txt").unwrap();
     file.seek(SeekFrom::Start(13)).unwrap();
 
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     let mut file_buf =
         vec![0; (file.file_size() - file.stream_position().unwrap() as u32) as usize];
     file.read_exact(&mut file_buf).unwrap();
@@ -935,7 +935,7 @@ fn write_to_fat32_file() {
     .unwrap();
 
     // read back what we wrote
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     let mut file_buf =
         vec![0; (file.file_size() - file.stream_position().unwrap() as u32) as usize];
     file.read_exact(&mut file_buf).unwrap();
@@ -1091,7 +1091,7 @@ fn read_dir_and_go_back() {
 }
 
 #[test]
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 fn FAT_tables_after_fat32_write_are_identical() {
     use crate::fat::{BootRecord, Ebr};
 

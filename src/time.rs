@@ -18,7 +18,7 @@ pub trait Clock: fmt::Debug {
 /// Returns the current local time in a `std` environment.
 /// In a `no-std` environment, it just returns the [`EPOCH`]
 #[derive(Debug, Default)]
-#[allow(missing_copy_implementations)]
+#[expect(missing_copy_implementations)]
 pub struct DefaultClock;
 
 impl Clock for DefaultClock {

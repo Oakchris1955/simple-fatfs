@@ -40,7 +40,7 @@ impl SectorBuffer<false> {
         let mut slf = SectorBuffer {
             slice: self.slice[..usize::from(sector_size)].into(),
             stored_sector: 0,
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             // Safety: S::SIZE is guaranteed to be <= 4096
             blocks_per_sector: sector_size / (self.block_size as u16),
             block_size: self.block_size

@@ -4,7 +4,7 @@ use bincode::{Decode, Encode};
 use bitfield_struct::bitfield;
 
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 pub(crate) enum BootRecord {
     Fat(BootRecordFAT),
     #[expect(dead_code)]
@@ -21,7 +21,7 @@ impl BootRecord {
         }
     }
 
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case)]
     pub(crate) fn nth_FAT_table_sector(&self, n: u8) -> SectorIndex {
         match self {
             BootRecord::Fat(boot_record_fat) => {
@@ -200,7 +200,7 @@ pub(crate) struct BpbFat {
 
 pub(crate) const EBR_SIZE: usize = MIN_SECTOR_SIZE - BPBFAT_SIZE;
 #[derive(Debug, Clone)]
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 pub(crate) enum Ebr {
     FAT12_16(EBRFAT12_16),
     FAT32(EBRFAT32, FSInfoFAT32),
@@ -222,7 +222,7 @@ pub(crate) struct EBRFAT12_16 {
 #[derive(Encode, Decode)]
 pub(crate) struct FAT32ExtendedFlags {
     #[bits(4)]
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case)]
     pub(crate) active_FAT: u8,
     #[bits(3)]
     _reserved: _,

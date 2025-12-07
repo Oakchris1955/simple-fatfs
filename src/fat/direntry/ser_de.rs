@@ -449,7 +449,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             // we want what we are doing here to be clear
-            #[allow(clippy::question_mark)]
+            #[expect(clippy::question_mark)]
             if self.entry_location.is_none() {
                 return None;
             }
