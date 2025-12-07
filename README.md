@@ -57,6 +57,8 @@ It also aims to be able to do the following in the future:
 
 ## Acknowledgments
 
+I'd like to thank [@alexkazik](https://github.com/alexkazik) for his contributions, most importantly his [short filename generation algorithm](https://github.com/Oakchris1955/simple-fatfs/pull/17) and his [Block-based device traits](https://github.com/Oakchris1955/simple-fatfs/pull/22).
+
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) (since commit `21c7d6b`, that is excluding the first two commits which don't actually contain any code). It also uses [git-cliff](https://github.com/orhun/git-cliff) to parse commit messages into a `CHANGELOG`
 
 ## License
