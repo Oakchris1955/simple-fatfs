@@ -1857,10 +1857,8 @@ where
         };
 
         let entries = [raw_properties.clone()];
-        log::error!("bad...");
 
         let chain = self.insert_to_entry_chain(Box::new(entries))?;
-        log::error!("feeling...");
 
         if let Some(filter) = &mut self.dir_info.borrow_mut().filter {
             filter.set(&raw_properties.name);
