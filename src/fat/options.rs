@@ -101,6 +101,8 @@ impl<C: Clock> FSOptions<C> {
     }
 }
 
+/// Contains bloom filter-related functions
+/// (mainly to compute the desired filter size from certain parameters)
 #[cfg(feature = "bloom")]
 pub mod bloom {
     use core::{cmp, num};
