@@ -5,7 +5,7 @@
 
 #![warn(non_camel_case_types, non_upper_case_globals, unused_qualifications)]
 #![forbid(unsafe_code)]
-#![allow(clippy::unreadable_literal, clippy::bool_comparison)]
+#![expect(clippy::bool_comparison)]
 
 mod bitmap;
 use bitmap::*;
@@ -95,6 +95,8 @@ impl<T: ?Sized> Bloom<T> {
     {
         let mut hashes = [0u64, 0u64];
         for k_i in 0..self.k_num {
+            // TODO: need to check whether this could actually truncate and cause problems
+            #[expect(clippy::cast_possible_truncation)]
             let bit_offset = (self.bloom_hash(&mut hashes, item, k_i) % self.bitmap_bits) as usize;
             self.bitmap.set(bit_offset);
         }
@@ -108,6 +110,8 @@ impl<T: ?Sized> Bloom<T> {
     {
         let mut hashes = [0u64, 0u64];
         for k_i in 0..self.k_num {
+            // TODO: need to check whether this could actually truncate and cause problems
+            #[expect(clippy::cast_possible_truncation)]
             let bit_offset = (self.bloom_hash(&mut hashes, item, k_i) % self.bitmap_bits) as usize;
             if self.bitmap.get(bit_offset) == false {
                 return false;
@@ -124,6 +128,8 @@ impl<T: ?Sized> Bloom<T> {
         let mut hashes = [0u64, 0u64];
         let mut found = true;
         for k_i in 0..self.k_num {
+            // TODO: need to check whether this could actually truncate and cause problems
+            #[expect(clippy::cast_possible_truncation)]
             let bit_offset = (self.bloom_hash(&mut hashes, item, k_i) % self.bitmap_bits) as usize;
             if self.bitmap.get(bit_offset) == false {
                 found = false;
@@ -173,7 +179,7 @@ impl<T: ?Sized> Bloom<T> {
         BitMap::set_seed(header, &seed);
     }
 
-    #[allow(
+    #[expect(
         clippy::cast_precision_loss,
         clippy::cast_sign_loss,
         clippy::cast_possible_truncation

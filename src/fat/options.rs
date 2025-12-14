@@ -104,7 +104,7 @@ pub fn compute_bitmap_size(items_count: num::NonZeroUsize, fp_p: f64) -> num::No
     let log2 = core::f64::consts::LN_2;
     let log2_2 = log2 * log2;
 
-    #[allow(
+    #[expect(
         clippy::cast_precision_loss,
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss
@@ -119,7 +119,7 @@ pub fn compute_bitmap_size(items_count: num::NonZeroUsize, fp_p: f64) -> num::No
 
 /// Compute the max expected false positive rate for a bitmap
 /// of size bitmap_size which is expected to hold up to items_count items
-#[allow(clippy::cast_precision_loss)]
+#[expect(clippy::cast_precision_loss)]
 #[inline]
 pub fn compute_false_positive_rate(
     bitmap_size: num::NonZeroUsize,
@@ -133,7 +133,7 @@ pub fn compute_false_positive_rate(
     e.powf(-m * log2_2 / n)
 }
 
-#[allow(
+#[expect(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
