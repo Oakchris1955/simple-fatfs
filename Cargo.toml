@@ -21,6 +21,8 @@ siphasher = { version = "1.0.1", default-features = false }
 [features]
 default = ["std", "codepage"]
 std = ["time/std", "time/local-offset", "embedded-io/std"]
+# bloom filter support (may be redundant on some targets)
+bloom = []
 # 64-bit logical block addressing
 lba64 = []
 codepage = []

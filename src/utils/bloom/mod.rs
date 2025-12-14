@@ -80,7 +80,7 @@ impl<T: ?Sized> Bloom<T> {
     /// fp_p obviously has to be within the ]0.0, 1.0[ range.
     #[inline]
     pub fn compute_bitmap_size(items_count: num::NonZeroUsize, fp_p: f64) -> num::NonZeroUsize {
-        crate::compute_bitmap_size(items_count, fp_p)
+        crate::bloom::compute_bitmap_size(items_count, fp_p)
     }
 
     /// Return the number of bits in the filter.

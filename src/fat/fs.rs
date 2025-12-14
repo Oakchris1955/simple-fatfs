@@ -195,6 +195,7 @@ pub(crate) struct DirInfo {
     pub(crate) chain_end: Option<EntryLocation>,
     // we box that to save space if it is None (as of writing this,
     // the Bloom struct occupies 184 bytes in-memory)
+    #[cfg(feature = "bloom")]
     pub(crate) filter: Option<Box<utils::bloom::Bloom<Box<str>>>>,
 }
 
@@ -214,6 +215,7 @@ impl DirInfo {
                 BootRecord::ExFAT(_boot_record_exfat) => todo!(),
             },
             chain_end: None,
+            #[cfg(feature = "bloom")]
             filter: None,
         }
     }
@@ -748,6 +750,13 @@ where
             self._go_up_till_target(common_path_prefix)?;
 
             self._go_down_till_target(target)?;
+        }
+
+        // this should be covered by all the other functions above, but it probably doesn't hurt
+        // (if this was the same directory (which could be cached), we would have return long ago)
+        #[cfg(feature = "bloom")]
+        {
+            self.dir_info.borrow_mut().filter = None;
         }
 
         Ok(())
@@ -1686,6 +1695,7 @@ where
 
         if let Some(file_name) = path.file_name() {
             // IO operations are expensive, check the bloom filter
+            #[cfg(feature = "bloom")]
             if let Some(filter) = &self.dir_info.borrow().filter {
                 if !filter.check(&Box::from(file_name)) {
                     return Err(FSError::NotFound);
@@ -1752,6 +1762,7 @@ where
     ///
     /// Increases memory usage by `options.query_filter_size()`, where
     /// options is the [`FSOptions`] struct passed to [`new`](Self::new)
+    #[cfg(feature = "bloom")]
     pub fn cache_dir<P>(&mut self, path: P) -> FSResult<(), S::Error>
     where
         P: AsRef<Path>,
@@ -1821,7 +1832,9 @@ where
         // check if there is already a file or directory with the same name
         // this won't actually run unless the file we are creating is in the
         // cached directory
+        #[cfg_attr(not(feature = "bloom"), expect(unused_labels))]
         'check: {
+            #[cfg(feature = "bloom")]
             if let Some(filter) = &self.dir_info.borrow().filter {
                 if !filter.check(&Box::from(file_name)) {
                     break 'check;
@@ -1860,6 +1873,7 @@ where
 
         let chain = self.insert_to_entry_chain(Box::new(entries))?;
 
+        #[cfg(feature = "bloom")]
         if let Some(filter) = &mut self.dir_info.borrow_mut().filter {
             filter.set(&raw_properties.name);
             filter.set(&Box::from(raw_properties.sfn.decode(self.options.codepage)));
