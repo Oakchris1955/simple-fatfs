@@ -77,10 +77,12 @@ impl<C: Clock> FSOptions<C> {
         self
     }
 
+    /// Set the bloom filter size to be that many `bits` long
     pub fn set_filter_size(&mut self, bits: num::NonZeroUsize) {
         self.filter_size = bits
     }
 
+    /// Set the bloom filter size to be that many `bits` long (chainable)
     pub fn with_filter_size(mut self, bits: num::NonZeroUsize) -> Self {
         self.filter_size = bits;
 
