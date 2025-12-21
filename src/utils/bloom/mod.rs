@@ -3,16 +3,9 @@
 // (C)opyleft 2013-2024 Frank Denis
 // Licensed under the ICS license (https://opensource.org/licenses/ISC)
 
-#![warn(non_camel_case_types, non_upper_case_globals, unused_qualifications)]
-#![forbid(unsafe_code)]
-#![expect(clippy::bool_comparison)]
-
 mod bitmap;
 use bitmap::*;
 
-use core::cmp;
-use core::convert::TryFrom;
-use core::f64;
 use core::fmt::{self, Debug};
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
@@ -20,12 +13,13 @@ use core::num;
 
 use siphasher::sip::SipHasher13;
 
+const LARGEST_U64_PRIME: u64 = 0xFFFF_FFFF_FFFF_FFC5u64;
+
 /// Bloom filter structure
 #[derive(Clone)]
 pub struct Bloom<T: ?Sized> {
     bitmap: BitMap,
-    bitmap_bits: u64,
-    k_num: u32,
+    k_num: num::NonZeroU32,
     sips: [SipHasher13; 2],
 
     _phantom: PhantomData<T>,
@@ -36,7 +30,7 @@ impl<T: ?Sized> Debug for Bloom<T> {
         write!(
             f,
             "Bloom filter with {} bits, {} hash functions and seed: {:?} ",
-            self.bitmap_bits,
+            self.bitmap.len_bits(),
             self.k_num,
             self.seed()
         )
@@ -48,25 +42,26 @@ impl<T: ?Sized> Bloom<T> {
     /// bitmap_size is the size in bytes (not bits) that will be allocated in
     /// memory items_count is an estimation of the maximum number of items
     /// to store.
+    ///
+    /// Will panic if `bitmap_size` is bigger than 2^61
     pub fn new(bitmap_size: num::NonZeroUsize, items_count: num::NonZeroUsize) -> Self {
-        let bitmap_bits = u64::try_from(bitmap_size.get())
-            .unwrap()
-            .checked_mul(8u64)
-            .unwrap();
-        let k_num = Self::optimal_k_num(bitmap_bits, items_count.get());
-        let bitmap = BitMap::new(bitmap_size.get());
+        let bitmap_bits = num::NonZeroU64::try_from(bitmap_size)
+            .expect("There's no reason to make a bloom filter more than (2^64)-1 bytes")
+            .checked_mul(num::NonZeroU64::new(8).unwrap())
+            .expect("There's no reason to make a bloom filter more than 2^61 bytes");
+        let k_num = Self::optimal_k_num(bitmap_bits, items_count);
+        let bitmap = BitMap::new(bitmap_size);
         let sips = [Self::sip_new(), Self::sip_new()];
-        let mut res = Self {
+
+        Self {
             bitmap,
-            bitmap_bits,
             k_num,
             sips,
             _phantom: PhantomData,
-        };
-        res.sync();
-        res
+        }
     }
 
+    #[expect(unused)]
     /// Create a new bloom filter structure.
     /// items_count is an estimation of the maximum number of items to store.
     /// fp_p is the wanted rate of false positives, in ]0.0, 1.0[
@@ -83,8 +78,9 @@ impl<T: ?Sized> Bloom<T> {
         crate::bloom::compute_bitmap_size(items_count, fp_p)
     }
 
+    #[expect(unused)]
     /// Return the number of bits in the filter.
-    pub fn len(&self) -> u64 {
+    pub fn len(&self) -> num::NonZeroU64 {
         self.bitmap.len_bits()
     }
 
@@ -94,10 +90,11 @@ impl<T: ?Sized> Bloom<T> {
         T: Hash,
     {
         let mut hashes = [0u64, 0u64];
-        for k_i in 0..self.k_num {
+        for k_i in 0..self.k_num.get() {
             // TODO: need to check whether this could actually truncate and cause problems
             #[expect(clippy::cast_possible_truncation)]
-            let bit_offset = (self.bloom_hash(&mut hashes, item, k_i) % self.bitmap_bits) as usize;
+            let bit_offset =
+                (self.bloom_hash(&mut hashes, item, k_i) % self.bitmap.len_bits()) as usize;
             self.bitmap.set(bit_offset);
         }
     }
@@ -109,17 +106,19 @@ impl<T: ?Sized> Bloom<T> {
         T: Hash,
     {
         let mut hashes = [0u64, 0u64];
-        for k_i in 0..self.k_num {
+        for k_i in 0..self.k_num.get() {
             // TODO: need to check whether this could actually truncate and cause problems
             #[expect(clippy::cast_possible_truncation)]
-            let bit_offset = (self.bloom_hash(&mut hashes, item, k_i) % self.bitmap_bits) as usize;
-            if self.bitmap.get(bit_offset) == false {
+            let bit_offset =
+                (self.bloom_hash(&mut hashes, item, k_i) % self.bitmap.len_bits()) as usize;
+            if !self.bitmap.get(bit_offset) {
                 return false;
             }
         }
         true
     }
 
+    #[expect(unused)]
     /// Record the presence of an item in the set, and return the previous state of this item.
     pub fn check_and_set(&mut self, item: &T) -> bool
     where
@@ -127,11 +126,12 @@ impl<T: ?Sized> Bloom<T> {
     {
         let mut hashes = [0u64, 0u64];
         let mut found = true;
-        for k_i in 0..self.k_num {
+        for k_i in 0..self.k_num.get() {
             // TODO: need to check whether this could actually truncate and cause problems
             #[expect(clippy::cast_possible_truncation)]
-            let bit_offset = (self.bloom_hash(&mut hashes, item, k_i) % self.bitmap_bits) as usize;
-            if self.bitmap.get(bit_offset) == false {
+            let bit_offset =
+                (self.bloom_hash(&mut hashes, item, k_i) % self.bitmap.len_bits()) as usize;
+            if !self.bitmap.get(bit_offset) {
                 found = false;
                 self.bitmap.set(bit_offset);
             }
@@ -139,21 +139,13 @@ impl<T: ?Sized> Bloom<T> {
         found
     }
 
-    /// Return the number of hash functions used for `check` and `set`
-    pub fn number_of_hash_functions(&self) -> u32 {
-        self.k_num
-    }
-
+    #[expect(unused)]
     /// Clear all of the bits in the filter, removing all keys from the set
     pub fn clear(&mut self) {
         self.bitmap.clear()
     }
 
-    /// Set all of the bits in the filter, making it appear like every key is in the set
-    pub fn fill(&mut self) {
-        self.bitmap.set_all()
-    }
-
+    #[expect(unused)]
     /// Test if there are no elements in the set
     pub fn is_empty(&self) -> bool {
         !self.bitmap.any()
@@ -172,23 +164,12 @@ impl<T: ?Sized> Bloom<T> {
         SipHasher13::new()
     }
 
-    fn sync(&mut self) {
-        let seed = self.seed();
-        let header = self.bitmap.header_mut();
-        BitMap::set_k_num(header, self.k_num);
-        BitMap::set_seed(header, &seed);
-    }
-
-    #[expect(
-        clippy::cast_precision_loss,
-        clippy::cast_sign_loss,
-        clippy::cast_possible_truncation
-    )]
-    fn optimal_k_num(bitmap_bits: u64, items_count: usize) -> u32 {
-        let m = bitmap_bits as f64;
-        let n = items_count as f64;
-        let k_num = (m / n * f64::ln(2.0f64)).round() as u32;
-        cmp::max(k_num, 1)
+    #[inline]
+    fn optimal_k_num(
+        bitmap_size: num::NonZeroU64,
+        items_count: num::NonZeroUsize,
+    ) -> num::NonZeroU32 {
+        crate::bloom::compute_hash_count(bitmap_size, items_count)
     }
 
     fn bloom_hash(&self, hashes: &mut [u64; 2], item: &T, k_i: u32) -> u64
@@ -202,8 +183,7 @@ impl<T: ?Sized> Bloom<T> {
             hashes[k_i as usize] = hash;
             hash
         } else {
-            (hashes[0]).wrapping_add(u64::from(k_i).wrapping_mul(hashes[1]))
-                % 0xFFFF_FFFF_FFFF_FFC5u64 //largest u64 prime
+            (hashes[0]).wrapping_add(u64::from(k_i).wrapping_mul(hashes[1])) % LARGEST_U64_PRIME
         }
     }
 }
