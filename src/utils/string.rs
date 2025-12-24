@@ -175,7 +175,7 @@ where
         if let Some(sfn) = as_sfn(string, fs.options.codepage) {
             #[cfg(feature = "bloom")]
             if let Some(filter) = &fs.dir_info.borrow().filter {
-                if !filter.check(&Box::from(sfn.decode(fs.options.codepage))) {
+                if !filter.check(&sfn.decode(fs.options.codepage)) {
                     return Ok(sfn);
                 }
             }
@@ -199,7 +199,7 @@ where
     'outer: for sfn in generator {
         #[cfg(feature = "bloom")]
         if let Some(filter) = &fs.dir_info.borrow().filter {
-            if !filter.check(&Box::from(sfn.decode(fs.options.codepage))) {
+            if !filter.check(&sfn.decode(fs.options.codepage)) {
                 return Ok(sfn);
             }
         }

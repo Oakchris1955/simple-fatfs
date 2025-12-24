@@ -185,7 +185,7 @@ impl FATSectorProps {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct DirInfo {
     pub(crate) path: PathBuf,
     pub(crate) chain_start: EntryLocationUnit,
@@ -196,7 +196,7 @@ pub(crate) struct DirInfo {
     // we box that to save space if it is None (as of writing this,
     // the Bloom struct occupies 184 bytes in-memory)
     #[cfg(feature = "bloom")]
-    pub(crate) filter: Option<Box<utils::bloom::Bloom<Box<str>>>>,
+    pub(crate) filter: Option<Box<utils::bloom::Bloom<str>>>,
 }
 
 impl DirInfo {
@@ -1697,7 +1697,7 @@ where
             // IO operations are expensive, check the bloom filter
             #[cfg(feature = "bloom")]
             if let Some(filter) = &self.dir_info.borrow().filter {
-                if !filter.check(&Box::from(file_name)) {
+                if !filter.check(file_name) {
                     return Err(FSError::NotFound);
                 }
             }
@@ -1785,13 +1785,11 @@ where
         for entry in self.process_current_dir() {
             let entry = entry?;
 
-            // FIXME: convert long name and sfns to boxed strings when processing
-            // to minimize heap allocations
-            let long_name: Box<str> = Box::from(entry.name);
-            let short_name: Box<str> = Box::from(entry.sfn.decode(codepage));
+            let long_name = entry.name;
+            let short_name = entry.sfn.decode(codepage);
 
-            filter.set(&short_name);
-            filter.set(&long_name);
+            filter.set(short_name.as_str());
+            filter.set(long_name.as_str());
         }
 
         self.dir_info.borrow_mut().filter = Some(Box::new(filter));
@@ -1836,7 +1834,7 @@ where
         'check: {
             #[cfg(feature = "bloom")]
             if let Some(filter) = &self.dir_info.borrow().filter {
-                if !filter.check(&Box::from(file_name)) {
+                if !filter.check(file_name) {
                     break 'check;
                 }
             }
