@@ -173,6 +173,13 @@ where
     // we first check if this string is a valid short filename
     'outer: {
         if let Some(sfn) = as_sfn(string, fs.options.codepage) {
+            #[cfg(feature = "bloom")]
+            if let Some(filter) = &fs.dir_info.borrow().filter {
+                if !filter.check(&sfn.decode(fs.options.codepage)) {
+                    return Ok(sfn);
+                }
+            }
+
             // don't forget to check if that SFN already exists
             for entry in fs.process_current_dir() {
                 let entry = entry?;
@@ -190,6 +197,13 @@ where
 
     // FIXME: this is bad, has best-case O(n) time complexity
     'outer: for sfn in generator {
+        #[cfg(feature = "bloom")]
+        if let Some(filter) = &fs.dir_info.borrow().filter {
+            if !filter.check(&sfn.decode(fs.options.codepage)) {
+                return Ok(sfn);
+            }
+        }
+
         for entry in fs.read_dir(&target_dir)? {
             let entry = entry?;
 
