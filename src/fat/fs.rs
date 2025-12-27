@@ -196,7 +196,7 @@ pub(crate) struct DirInfo {
     // we box that to save space if it is None (as of writing this,
     // the Bloom struct occupies 184 bytes in-memory)
     #[cfg(feature = "bloom")]
-    pub(crate) filter: Option<Box<utils::bloom::Bloom<str>>>,
+    pub(crate) filter: Option<utils::bloom::Bloom<str>>,
 }
 
 impl DirInfo {
@@ -1792,7 +1792,7 @@ where
             filter.set(long_name.as_str());
         }
 
-        self.dir_info.borrow_mut().filter = Some(Box::new(filter));
+        self.dir_info.borrow_mut().filter = Some(filter);
 
         Ok(())
     }
