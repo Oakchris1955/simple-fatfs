@@ -2,33 +2,33 @@ use embedded_io::ErrorType;
 use simple_fatfs::block_io::*;
 
 #[derive(Debug)]
-struct Storage<'a, const BS: usize>(&'a mut [u8; 64]);
+struct Storage<'a, const BS: BlockSize>(&'a mut [u8; 64]);
 
-impl<const BS: usize> BlockBase for Storage<'_, BS> {
-    fn block_size(&self) -> usize {
+impl<const BS: BlockSize> BlockBase for Storage<'_, BS> {
+    fn block_size(&self) -> BlockSize {
         BS
     }
 
-    fn block_count(&self) -> usize {
-        64 / BS
+    fn block_count(&self) -> BlockCount {
+        (64 / BS).into()
     }
 }
 
-impl<const BS: usize> BlockRead for Storage<'_, BS> {
+impl<const BS: BlockSize> BlockRead for Storage<'_, BS> {
     fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
-        let offset = block as usize * BS;
+        let offset: usize = (block * BlockIndex::from(BS)).try_into().unwrap();
         buf.copy_from_slice(&self.0[offset..offset + buf.len()]);
         Ok(())
     }
 }
 
-impl<const BS: usize> ErrorType for Storage<'_, BS> {
+impl<const BS: BlockSize> ErrorType for Storage<'_, BS> {
     type Error = embedded_io::SliceWriteError;
 }
 
-impl<const BS: usize> BlockWrite for Storage<'_, BS> {
+impl<const BS: BlockSize> BlockWrite for Storage<'_, BS> {
     fn write(&mut self, block: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
-        let offset = block as usize * BS;
+        let offset: usize = (block * BlockIndex::from(BS)).try_into().unwrap();
         self.0[offset..offset + buf.len()].clone_from_slice(buf);
         Ok(())
     }
@@ -121,8 +121,8 @@ fn run_block_translator<const BUFS: usize>(buffer: Option<[&mut [u8; 4]; BUFS]>)
 
     // ensure that total number of bytes are equal
     assert_eq!(
-        storage_a.block_size() * storage_a.block_count(),
-        storage_b.block_size() * storage_b.block_count()
+        BlockCount::from(storage_a.block_size()) * storage_a.block_count(),
+        BlockCount::from(storage_b.block_size()) * storage_b.block_count()
     );
 
     // C = translated B into 64 * 1

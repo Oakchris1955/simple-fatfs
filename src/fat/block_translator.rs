@@ -1,5 +1,6 @@
 use crate::block_io::{BlockBase, BlockRead, BlockWrite};
 pub use crate::fat::types::BlockIndex;
+use crate::{BlockCount, BlockSize};
 use alloc::boxed::Box;
 use core::array;
 use core::fmt::{Debug, Display, Formatter};
@@ -29,9 +30,9 @@ use embedded_io::{ErrorKind, ErrorType};
 /// # struct Store();
 /// # impl embedded_io::ErrorType for Store { type Error = BlockTranslatorError; }
 /// impl BlockBase for Store {
-///     fn block_size(&self) -> usize { 65536 }
+///     fn block_size(&self) -> BlockSize { 65536 }
 ///     // ...
-///     # fn block_count(&self) -> usize {
+///     # fn block_count(&self) -> BlockCount {
 ///         # 1
 ///     # }
 /// }
@@ -75,7 +76,7 @@ use embedded_io::{ErrorKind, ErrorType};
 /// * hardware block size must greater or equal than virtual block size
 
 #[derive(Debug)]
-pub struct BlockTranslator<'a, const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S>
+pub struct BlockTranslator<'a, const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S>
 where
     S: BlockWrite,
 {
@@ -155,7 +156,7 @@ impl embedded_io::Error for BlockTranslatorError {
     }
 }
 
-impl<const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S>
+impl<const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S>
     BlockTranslator<'static, VBS, BUF_SIZE, BUFS, S>
 where
     S: BlockWrite,
@@ -175,7 +176,7 @@ where
     }
 }
 
-impl<'a, const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S>
+impl<'a, const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S>
     BlockTranslator<'a, VBS, BUF_SIZE, BUFS, S>
 where
     S: BlockWrite,
@@ -205,7 +206,8 @@ where
             if BUFS == 0 {
                 panic!("number of buffers (BUFS) must be greater than zero");
             }
-            if BUF_SIZE < VBS {
+            // since usize is at least 32-bits long, this is ok
+            if BUF_SIZE < VBS as usize {
                 panic!("buffer size must be bigger or equal than virtual block size");
             }
             if !VBS.is_power_of_two() {
@@ -219,7 +221,7 @@ where
             return Err(BlockTranslatorError::HardwareBlockSizeNotPowerOfTwo);
         }
 
-        if hardware_block_size > BUF_SIZE {
+        if usize::try_from(hardware_block_size).unwrap() > BUF_SIZE {
             return Err(BlockTranslatorError::BufferSizeTooSmall);
         }
 
@@ -236,8 +238,7 @@ where
                 last_used: i,
             }),
             next: if BUFS >= 3 { BUFS } else { 0 },
-            #[expect(clippy::cast_possible_truncation)]
-            vbs_per_hbs: (hardware_block_size / VBS) as u32,
+            vbs_per_hbs: hardware_block_size / VBS,
         })
     }
 
@@ -349,7 +350,7 @@ where
     }
 }
 
-impl<const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S> ErrorType
+impl<const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S> ErrorType
     for BlockTranslator<'_, VBS, BUF_SIZE, BUFS, S>
 where
     S: BlockWrite,
@@ -357,23 +358,23 @@ where
     type Error = S::Error;
 }
 
-impl<const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S> BlockBase
+impl<const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S> BlockBase
     for BlockTranslator<'_, VBS, BUF_SIZE, BUFS, S>
 where
     S: BlockWrite,
 {
     #[inline]
-    fn block_size(&self) -> usize {
+    fn block_size(&self) -> BlockSize {
         VBS
     }
 
     #[inline]
-    fn block_count(&self) -> usize {
-        self.storage.block_count() * (self.vbs_per_hbs as usize)
+    fn block_count(&self) -> BlockCount {
+        self.storage.block_count() * BlockCount::from(self.vbs_per_hbs)
     }
 }
 
-impl<const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S> BlockRead
+impl<const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S> BlockRead
     for BlockTranslator<'_, VBS, BUF_SIZE, BUFS, S>
 where
     S: BlockWrite,
@@ -384,9 +385,9 @@ where
         mut buf: &mut [u8],
     ) -> Result<(), Self::Error> {
         while !buf.is_empty() {
-            let (this, next) = buf.split_at_mut(VBS);
+            let (this, next) = buf.split_at_mut(VBS.try_into().unwrap());
             let (buffer, offset) = self.go_to_block(block_in_vbs)?;
-            this.copy_from_slice(&buffer.buffer[offset..offset + VBS]);
+            this.copy_from_slice(&buffer.buffer[offset..offset + usize::try_from(VBS).unwrap()]);
 
             // advance
             buf = next;
@@ -397,16 +398,16 @@ where
     }
 }
 
-impl<const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S> BlockWrite
+impl<const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S> BlockWrite
     for BlockTranslator<'_, VBS, BUF_SIZE, BUFS, S>
 where
     S: BlockWrite,
 {
     fn write(&mut self, mut block_in_vbs: BlockIndex, mut buf: &[u8]) -> Result<(), Self::Error> {
         while !buf.is_empty() {
-            let (this, next) = buf.split_at(VBS);
+            let (this, next) = buf.split_at(VBS.try_into().unwrap());
             let (buffer, offset) = self.go_to_block(block_in_vbs)?;
-            buffer.buffer[offset..offset + VBS].copy_from_slice(this);
+            buffer.buffer[offset..offset + usize::try_from(VBS).unwrap()].copy_from_slice(this);
             buffer.status = BlockTranslatorStatus::Modified;
 
             // advance
@@ -429,7 +430,7 @@ where
     }
 }
 
-impl<const VBS: usize, const BUF_SIZE: usize, const BUFS: usize, S> Drop
+impl<const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S> Drop
     for BlockTranslator<'_, VBS, BUF_SIZE, BUFS, S>
 where
     S: BlockWrite,

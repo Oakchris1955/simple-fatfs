@@ -23,8 +23,19 @@ pub type BlockIndex = u32;
 ///
 /// Depending on the feature `lba64` it is either [`u32`] or [`u64`].
 pub type BlockIndex = u64;
-#[expect(dead_code)]
-pub(crate) type BlockCount = BlockIndex;
+
+/// Can be used instead of [`BlockIndex`] to make code more understandable
+///
+/// Note: since this is a type alias of [`BlockIndex`], the `lba64` feature flag
+/// causes its type to change alongside [`BlockIndex`]
+pub type BlockCount = BlockIndex;
+
+/// The size type of a block
+/// [`u32`] was chosen instead of [`u16`], since some flash memories are known
+/// to have block of 64 KBs (which is 1 more byte than what [`u16`] can handle),
+/// and in some (rare) cases, even more. Furthemore, since [`u32`] can express
+/// block sizes up to 4 GBs, it is more than enough for every flash memory out there.
+pub type BlockSize = u32;
 
 pub(crate) type ClusterIndex = u32;
 pub(crate) type ClusterCount = ClusterIndex;
