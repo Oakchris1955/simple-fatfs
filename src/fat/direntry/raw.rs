@@ -80,18 +80,66 @@ impl RawAttributes {
 // at least the `.` and `..` entries
 // TODO: actually check this on runtime
 pub(crate) const NONROOT_MIN_DIRENTRIES: usize = 2;
+const FATDIRENTRY_RESERVED_BYTES: usize = 1;
 
-#[derive(Debug, Clone, Copy, Encode, Decode)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct FATDirEntry {
     pub(crate) sfn: Sfn,
     pub(crate) attributes: RawAttributes,
-    pub(crate) _reserved: [u8; 1],
     pub(crate) created: EntryCreationTime,
     pub(crate) accessed: EntryLastAccessedTime,
     pub(crate) cluster_high: u16,
     pub(crate) modified: EntryModificationTime,
     pub(crate) cluster_low: u16,
     pub(crate) file_size: FileSize,
+}
+
+impl<__Context> Decode<__Context> for FATDirEntry {
+    fn decode<__D: bincode::de::Decoder<Context = __Context>>(
+        decoder: &mut __D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        use bincode::de::read::Reader;
+
+        Ok(Self {
+            sfn: Decode::decode(decoder)?,
+            attributes: Decode::decode(decoder)?,
+            created: {
+                decoder
+                    .reader()
+                    .read(&mut [0_u8; FATDIRENTRY_RESERVED_BYTES])?;
+                Decode::decode(decoder)?
+            },
+            accessed: Decode::decode(decoder)?,
+            cluster_high: Decode::decode(decoder)?,
+            modified: Decode::decode(decoder)?,
+            cluster_low: Decode::decode(decoder)?,
+            file_size: Decode::decode(decoder)?,
+        })
+    }
+}
+
+impl_borrow_decode!(FATDirEntry);
+
+impl Encode for FATDirEntry {
+    fn encode<__E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut __E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        use bincode::enc::write::Writer;
+
+        Encode::encode(&self.sfn, encoder)?;
+        Encode::encode(&self.attributes, encoder)?;
+        encoder
+            .writer()
+            .write(&[0_u8; FATDIRENTRY_RESERVED_BYTES])?;
+        Encode::encode(&self.created, encoder)?;
+        Encode::encode(&self.accessed, encoder)?;
+        Encode::encode(&self.cluster_high, encoder)?;
+        Encode::encode(&self.modified, encoder)?;
+        Encode::encode(&self.cluster_low, encoder)?;
+        Encode::encode(&self.file_size, encoder)?;
+        Ok(())
+    }
 }
 
 /// A less-detailed version of [`RawProperties`]
@@ -211,8 +259,6 @@ impl From<MinProperties> for FATDirEntry {
         Self {
             sfn: value.sfn,
             attributes: value.attributes,
-            // according to some documents I found, this must be set to zero
-            _reserved: [0x00],
             created: value.created.into(),
             accessed: value.accessed.into(),
             cluster_high: (value.data_cluster >> (u32::BITS / 2)) as u16,

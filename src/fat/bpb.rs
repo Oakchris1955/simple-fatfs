@@ -1,6 +1,6 @@
 use super::*;
 
-use bincode::{Decode, Encode};
+use bincode::{impl_borrow_decode, Decode, Encode};
 use bitfield_struct::bitfield;
 
 #[derive(Debug)]
@@ -200,7 +200,6 @@ pub(crate) struct BpbFat {
 
 pub(crate) const EBR_SIZE: usize = MIN_SECTOR_SIZE - BPBFAT_SIZE;
 #[derive(Debug, Clone)]
-#[expect(clippy::large_enum_variant)]
 pub(crate) enum Ebr {
     FAT12_16(EBRFAT12_16),
     FAT32(EBRFAT32, FSInfoFAT32),
@@ -239,7 +238,8 @@ pub(crate) struct FATVersion {
     major: u8,
 }
 
-#[derive(Debug, Encode, Decode, Clone)]
+const EBRFAT32_RESERVED_BYTES: usize = 12;
+#[derive(Debug, Clone)]
 pub(crate) struct EBRFAT32 {
     pub table_size_32: u32,
     pub extended_flags: FAT32ExtendedFlags,
@@ -247,7 +247,6 @@ pub(crate) struct EBRFAT32 {
     pub root_cluster: u32,
     pub fat_info: u16,
     pub backup_boot_sector: u16,
-    pub _reserved: [u8; 12],
     pub _drive_num: u8,
     pub _windows_nt_flags: u8,
     pub boot_signature: u8,
@@ -258,19 +257,121 @@ pub(crate) struct EBRFAT32 {
     pub signature: u16,
 }
 
+impl<__Context> Decode<__Context> for EBRFAT32 {
+    fn decode<__D: bincode::de::Decoder<Context = __Context>>(
+        decoder: &mut __D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        use bincode::de::read::Reader;
+
+        Result::Ok(Self {
+            table_size_32: Decode::decode(decoder)?,
+            extended_flags: Decode::decode(decoder)?,
+            fat_version: Decode::decode(decoder)?,
+            root_cluster: Decode::decode(decoder)?,
+            fat_info: Decode::decode(decoder)?,
+            backup_boot_sector: Decode::decode(decoder)?,
+            _drive_num: {
+                decoder
+                    .reader()
+                    .read(&mut [0_u8; EBRFAT32_RESERVED_BYTES])?;
+                Decode::decode(decoder)?
+            },
+            _windows_nt_flags: Decode::decode(decoder)?,
+            boot_signature: Decode::decode(decoder)?,
+            volume_serial_num: Decode::decode(decoder)?,
+            volume_label: Decode::decode(decoder)?,
+            _system_ident: Decode::decode(decoder)?,
+            _boot_code: Decode::decode(decoder)?,
+            signature: Decode::decode(decoder)?,
+        })
+    }
+}
+
+impl_borrow_decode!(EBRFAT32);
+
+impl Encode for EBRFAT32 {
+    fn encode<__E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut __E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        use bincode::enc::write::Writer;
+
+        Encode::encode(&self.table_size_32, encoder)?;
+        Encode::encode(&self.extended_flags, encoder)?;
+        Encode::encode(&self.fat_version, encoder)?;
+        Encode::encode(&self.root_cluster, encoder)?;
+        Encode::encode(&self.fat_info, encoder)?;
+        Encode::encode(&self.backup_boot_sector, encoder)?;
+        encoder.writer().write(&[0_u8; EBRFAT32_RESERVED_BYTES])?;
+        Encode::encode(&self._drive_num, encoder)?;
+        Encode::encode(&self._windows_nt_flags, encoder)?;
+        Encode::encode(&self.boot_signature, encoder)?;
+        Encode::encode(&self.volume_serial_num, encoder)?;
+        Encode::encode(&self.volume_label, encoder)?;
+        Encode::encode(&self._system_ident, encoder)?;
+        Encode::encode(&self._boot_code, encoder)?;
+        Encode::encode(&self.signature, encoder)?;
+
+        Ok(())
+    }
+}
+
 pub(crate) const FSINFO_SIZE: usize = 512;
 const FSINFO_LEAD_SIGNATURE: u32 = 0x41615252;
 const FSINFO_MID_SIGNATURE: u32 = 0x61417272;
 const FSINFO_TRAIL_SIGNATURE: u32 = 0xAA550000;
-#[derive(Encode, Decode, Debug, Clone)]
+const FSINFO_RESERVED1_BYTES: usize = 480;
+const FSINFO_RESERVED2_BYTES: usize = 12;
+#[derive(Debug, Clone)]
 pub(crate) struct FSInfoFAT32 {
     pub lead_signature: u32,
-    pub _reserved1: [u8; 480],
     pub mid_signature: u32,
     pub free_cluster_count: u32,
     pub first_free_cluster: u32,
-    pub _reserved2: [u8; 12],
     pub trail_signature: u32,
+}
+
+impl<__Context> Decode<__Context> for FSInfoFAT32 {
+    fn decode<__D: bincode::de::Decoder<Context = __Context>>(
+        decoder: &mut __D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        use bincode::de::read::Reader;
+
+        Ok(Self {
+            lead_signature: Decode::decode(decoder)?,
+            mid_signature: {
+                decoder.reader().read(&mut [0_u8; FSINFO_RESERVED1_BYTES])?;
+                Decode::decode(decoder)?
+            },
+            free_cluster_count: Decode::decode(decoder)?,
+            first_free_cluster: Decode::decode(decoder)?,
+            trail_signature: {
+                decoder.reader().read(&mut [0_u8; FSINFO_RESERVED2_BYTES])?;
+                Decode::decode(decoder)?
+            },
+        })
+    }
+}
+
+impl_borrow_decode!(FSInfoFAT32);
+
+impl Encode for FSInfoFAT32 {
+    fn encode<__E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut __E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        use bincode::enc::write::Writer;
+
+        Encode::encode(&self.lead_signature, encoder)?;
+        encoder.writer().write(&[0_u8; FSINFO_RESERVED1_BYTES])?;
+        Encode::encode(&self.mid_signature, encoder)?;
+        Encode::encode(&self.free_cluster_count, encoder)?;
+        Encode::encode(&self.first_free_cluster, encoder)?;
+        encoder.writer().write(&[0_u8; FSINFO_RESERVED2_BYTES])?;
+        Encode::encode(&self.trail_signature, encoder)?;
+
+        Ok(())
+    }
 }
 
 impl FSInfoFAT32 {
