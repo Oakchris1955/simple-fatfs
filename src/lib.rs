@@ -91,6 +91,15 @@
 #![warn(clippy::cast_sign_loss)]
 #![warn(clippy::redundant_clone)]
 
+#[cfg(target_pointer_width = "16")]
+compile_error!(
+    concat!(
+        "For various reasons, this project has been designed ",
+        "around architectures with at least 32-bit pointer widths\n",
+        "If you believe this isn't right, file an issue at https://github.com/Oakchris1955/simple-fatfs"
+    )
+);
+
 extern crate alloc;
 
 mod codepage;
