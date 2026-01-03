@@ -1685,6 +1685,22 @@ where
         ))
     }
 
+    /// Reads the volume label from the BIOS parameter block
+    ///
+    /// If the volume label is "NO NAME    ", it means that it doesn't exists
+    /// and [`None`]` will be returned instead
+    pub fn volume_label(&self) -> Option<String> {
+        let volume_label = match &*self.boot_record.borrow() {
+            BootRecord::Fat(boot_record_fat) => match &boot_record_fat.ebr {
+                Ebr::FAT12_16(ebr_fat12_16) => ebr_fat12_16.volume_label,
+                Ebr::FAT32(ebr_fat32, _fsinfo) => ebr_fat32.volume_label,
+            },
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
+        };
+
+        (volume_label != EMPTY_VOLUME_LABEL).then(|| self.options.codepage.decode(&volume_label))
+    }
+
     /// Get a corresponding [`ROFile`] object from a [`Path`]
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
