@@ -1,6 +1,6 @@
 use super::*;
 
-use core::ops;
+use core::{cmp, ops};
 
 use crate::*;
 
@@ -141,13 +141,13 @@ pub struct Properties {
 }
 
 impl PartialOrd for Properties {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for Properties {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
         self.path().cmp(other.path())
     }
 }
