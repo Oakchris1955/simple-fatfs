@@ -140,6 +140,26 @@ pub struct Properties {
     pub(crate) chain: DirEntryChain,
 }
 
+impl PartialOrd for Properties {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Properties {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.path().cmp(other.path())
+    }
+}
+
+impl PartialEq for Properties {
+    fn eq(&self, other: &Self) -> bool {
+        self.path() == other.path()
+    }
+}
+
+impl Eq for Properties {}
+
 /// Getter methods
 impl Properties {
     #[inline]

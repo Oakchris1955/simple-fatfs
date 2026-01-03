@@ -19,6 +19,26 @@ pub(crate) struct FileProps {
     pub(crate) current_cluster: ClusterIndex,
 }
 
+impl PartialOrd for FileProps {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FileProps {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.entry.cmp(&other.entry)
+    }
+}
+
+impl PartialEq for FileProps {
+    fn eq(&self, other: &Self) -> bool {
+        self.entry == other.entry
+    }
+}
+
+impl Eq for FileProps {}
+
 /// A read-only file within a FAT filesystem
 ///
 /// Note: whether or not your FileSystem is RO or R/W, this won't update
