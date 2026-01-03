@@ -11,7 +11,7 @@ pub(crate) struct SectorBuffer<const INIT: bool> {
     slice: Box<[u8]>,
     stored_sector: SectorIndex,
     blocks_per_sector: u16,
-    block_size: usize,
+    block_size: BlockSize,
 }
 
 impl SectorBuffer<false> {
@@ -26,7 +26,10 @@ impl SectorBuffer<false> {
             block_size,
         };
 
-        storage.read(0, &mut slf[0..MIN_SECTOR_SIZE.max(block_size)])?;
+        storage.read(
+            0,
+            &mut slf[0..MIN_SECTOR_SIZE.max(block_size.try_into().unwrap())],
+        )?;
 
         Ok(slf)
     }
@@ -46,7 +49,7 @@ impl SectorBuffer<false> {
             block_size: self.block_size
         };
 
-        if usize::from(sector_size) > slf.block_size {
+        if BlockSize::from(sector_size) > slf.block_size {
             storage.read(0, &mut slf)?;
         }
 
@@ -82,7 +85,9 @@ impl SectorBuffer<true> {
         buf: &mut [u8],
     ) -> Result<(), S::Error> {
         assert_eq!(
-            buf.len() & (usize::from(self.blocks_per_sector) * self.block_size - 1),
+            buf.len()
+                & (usize::from(self.blocks_per_sector) * usize::try_from(self.block_size).unwrap()
+                    - 1),
             0
         );
         storage.borrow_mut().read(

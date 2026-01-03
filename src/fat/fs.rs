@@ -477,7 +477,8 @@ where
             // block size is 0 or not a power of 2
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
-        if block_size > MAX_SECTOR_SIZE {
+        #[expect(clippy::cast_possible_truncation)]
+        if block_size > MAX_SECTOR_SIZE as BlockSize {
             // block size is larger than MAX_SECTOR_SIZE
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
@@ -492,7 +493,7 @@ where
             .map(|(v, _)| v)
             .map_err(utils::bincode::map_err_dec)?;
 
-        if block_size > usize::from(bpb.bytes_per_sector) {
+        if block_size > BlockSize::from(bpb.bytes_per_sector) {
             // block size is larger than sector size
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
@@ -556,8 +557,9 @@ where
 
         let props = FSProperties::from(&boot_record);
 
-        if usize::try_from(props.total_sectors).unwrap() * usize::from(props.sector_size)
-            > storage.borrow().block_count() * block_size
+        #[cfg_attr(feature = "lba64", expect(clippy::useless_conversion))]
+        if u64::from(props.total_sectors) * u64::from(props.sector_size)
+            > u64::from(storage.borrow().block_count()) * u64::from(block_size)
         {
             log::error!("the filesystem seems to be larger than the storage medium");
             return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));

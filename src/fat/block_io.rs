@@ -5,7 +5,7 @@
 //! both for read and write operations the block size will be the same.
 
 pub use crate::fat::block_translator::{BlockTranslator, BlockTranslatorError};
-pub use crate::fat::types::BlockIndex;
+pub use crate::fat::types::{BlockCount, BlockIndex, BlockSize};
 
 use embedded_io::ErrorType;
 
@@ -14,10 +14,10 @@ use embedded_io::ErrorType;
 pub trait BlockBase: ErrorType {
     /// Size of a block, must be a power of two. A panic may occur if this isn't
     /// a power of two other than zero.
-    fn block_size(&self) -> usize;
+    fn block_size(&self) -> BlockSize;
 
     /// Retrieve the number of available blocks in the storage medium.
-    fn block_count(&self) -> usize;
+    fn block_count(&self) -> BlockCount;
 }
 
 /// The `BlockRead` traits allows to read data from a source in units of blocks.
@@ -42,11 +42,11 @@ pub trait BlockWrite: BlockRead {
 }
 
 impl<T: BlockBase> BlockBase for &mut T {
-    fn block_size(&self) -> usize {
+    fn block_size(&self) -> BlockSize {
         T::block_size(self)
     }
 
-    fn block_count(&self) -> usize {
+    fn block_count(&self) -> BlockCount {
         T::block_count(self)
     }
 }
@@ -71,7 +71,9 @@ impl<T: BlockWrite> BlockWrite for &mut T {
 
 #[cfg(feature = "std")]
 pub(crate) mod from_std {
-    use crate::{BlockBase, BlockIndex, BlockRead, BlockWrite, MIN_SECTOR_SIZE};
+    use crate::{
+        BlockBase, BlockCount, BlockIndex, BlockRead, BlockSize, BlockWrite, MIN_SECTOR_SIZE,
+    };
     use std::io::{Error, Read, Seek, SeekFrom, Write};
 
     /// Determine the block count of a storage medium
@@ -79,28 +81,29 @@ pub(crate) mod from_std {
     /// This function may fail (return [`None`]) if the underlying [`seek`](std::io::Seek)
     /// operation fails or if the storage medium's size isn't a multiple of `T::SIZE`
     fn determine_block_count<T: ?Sized + Seek>(
-        block_size: usize,
+        block_size: BlockSize,
         storage: &mut T,
-    ) -> Option<usize> {
+    ) -> Option<BlockCount> {
         let offset = storage.seek(SeekFrom::End(0)).ok()?;
 
-        if !offset.is_multiple_of(u64::try_from(block_size).unwrap()) {
+        if !offset.is_multiple_of(u64::from(block_size)) {
             return None;
         }
 
-        let count = offset / u64::try_from(block_size).unwrap();
+        let count = offset / u64::from(block_size);
 
-        usize::try_from(count).ok()
+        BlockCount::try_from(count).ok()
     }
 
     /// The default block size for the [`FromStd`] adapter
-    pub const DEFAULT_BLOCK_SIZE: usize = MIN_SECTOR_SIZE;
+    #[expect(clippy::cast_possible_truncation)]
+    pub const DEFAULT_BLOCK_SIZE: BlockSize = MIN_SECTOR_SIZE as BlockSize;
 
     /// Adapter from [`std::io`] traits.
     #[derive(Clone, Debug)]
     pub struct FromStd<T: ?Sized> {
-        block_count: usize,
-        block_size: usize,
+        block_count: BlockCount,
+        block_size: BlockSize,
         inner: T,
     }
 
@@ -117,7 +120,7 @@ pub(crate) mod from_std {
         }
 
         /// Create a new adapter with a custom block size.
-        pub fn with_block_size(mut inner: T, block_size: usize) -> Option<Self> {
+        pub fn with_block_size(mut inner: T, block_size: BlockSize) -> Option<Self> {
             let block_count = determine_block_count(block_size, &mut inner)?;
 
             Some(Self {
@@ -152,11 +155,11 @@ pub(crate) mod from_std {
     }
 
     impl<T: ?Sized> BlockBase for FromStd<T> {
-        fn block_size(&self) -> usize {
+        fn block_size(&self) -> BlockSize {
             self.block_size
         }
 
-        fn block_count(&self) -> usize {
+        fn block_count(&self) -> BlockCount {
             self.block_count
         }
     }
@@ -164,7 +167,8 @@ pub(crate) mod from_std {
     impl<T: Read + Seek + ?Sized> BlockRead for FromStd<T> {
         fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
             assert!(
-                buf.len().is_multiple_of(self.block_size),
+                buf.len()
+                    .is_multiple_of(self.block_size.try_into().unwrap()),
                 "expected the buffer size ({}) to be a multiple of the medium's block size ({})",
                 buf.len(),
                 self.block_size
@@ -172,8 +176,9 @@ pub(crate) mod from_std {
 
             #[cfg_attr(feature = "lba64", expect(clippy::useless_conversion))]
             // silence warning on u64->u64 conversion with feature `lba64` (it's u32->u64 without the feature)
-            self.inner
-                .seek(SeekFrom::Start(u64::from(block) * (self.block_size as u64)))?;
+            self.inner.seek(SeekFrom::Start(
+                u64::from(block) * u64::from(self.block_size),
+            ))?;
 
             self.inner.read_exact(buf)?;
 
@@ -184,7 +189,8 @@ pub(crate) mod from_std {
     impl<T: Read + Write + Seek + ?Sized> BlockWrite for FromStd<T> {
         fn write(&mut self, block: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
             assert!(
-                buf.len().is_multiple_of(self.block_size),
+                buf.len()
+                    .is_multiple_of(self.block_size.try_into().unwrap()),
                 "expected the buffer size ({}) to be a multiple of the medium's block size ({})",
                 buf.len(),
                 self.block_size
@@ -192,8 +198,9 @@ pub(crate) mod from_std {
 
             #[cfg_attr(feature = "lba64", expect(clippy::useless_conversion))]
             // silence warning on u64->u64 conversion with feature `lba64` (it's u32->u64 without the feature)
-            self.inner
-                .seek(SeekFrom::Start(u64::from(block) * (self.block_size as u64)))?;
+            self.inner.seek(SeekFrom::Start(
+                u64::from(block) * u64::from(self.block_size),
+            ))?;
             self.inner.write_all(buf)?;
 
             Ok(())
