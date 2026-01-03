@@ -8,7 +8,7 @@ use core::{
 };
 
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, vec, vec::Vec};
+use alloc::{boxed::Box, string::String, vec, vec::Vec};
 
 use ::time;
 use embedded_io::*;
