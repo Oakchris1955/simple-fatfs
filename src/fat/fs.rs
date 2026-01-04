@@ -1687,9 +1687,9 @@ where
 
     /// Reads the volume label from the BIOS parameter block
     ///
-    /// If the volume label is "NO NAME    ", it means that it doesn't exists
+    /// If the volume label is `"NO NAME    "`, it means that it doesn't exists
     /// and [`None`]` will be returned instead
-    pub fn volume_label(&self) -> Option<String> {
+    pub fn volume_label_bpb(&self) -> Option<String> {
         let volume_label = match &*self.boot_record.borrow() {
             BootRecord::Fat(boot_record_fat) => match &boot_record_fat.ebr {
                 Ebr::FAT12_16(ebr_fat12_16) => ebr_fat12_16.volume_label,
