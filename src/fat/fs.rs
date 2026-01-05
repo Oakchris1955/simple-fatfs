@@ -8,7 +8,12 @@ use core::{
 };
 
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::String, vec, vec::Vec};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
 
 use ::time;
 use embedded_io::*;
@@ -1703,7 +1708,7 @@ where
                 .codepage
                 .decode(&volume_label)
                 .trim_end()
-                .to_owned()
+                .to_string()
         })
     }
 
@@ -1729,7 +1734,7 @@ where
                 .codepage
                 .decode(&volume_label)
                 .trim_end()
-                .to_owned()
+                .to_string()
         }))
     }
 
