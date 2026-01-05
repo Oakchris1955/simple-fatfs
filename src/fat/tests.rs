@@ -1104,13 +1104,23 @@ fn read_dir_and_go_back() {
 }
 
 #[test]
-fn volume_label_bpb_correct() {
+fn volume_label_bpb_correct1() {
     use std::io::Cursor;
 
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     assert_eq!(fs.volume_label_bpb(), Some(String::from("SIMPLEFATFS")))
+}
+
+#[test]
+fn volume_label_bpb_correct2() {
+    use std::io::Cursor;
+
+    let mut storage = FromStd::new(Cursor::new(MINFS.to_owned())).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+
+    assert_eq!(fs.volume_label_bpb(), Some(String::from("TEST FS")))
 }
 
 #[test]
@@ -1133,6 +1143,19 @@ fn volume_label_root_none() {
     assert!(fs
         .volume_label_root_dir()
         .is_ok_and(|label| label.is_none()))
+}
+
+#[test]
+fn volume_label_root_correct() {
+    use std::io::Cursor;
+
+    let mut storage = FromStd::new(Cursor::new(MINFS.to_owned())).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+
+    assert_eq!(
+        fs.volume_label_root_dir().unwrap(),
+        Some(String::from("TEST FS"))
+    )
 }
 
 #[test]
