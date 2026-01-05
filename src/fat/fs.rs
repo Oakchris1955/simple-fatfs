@@ -1698,7 +1698,13 @@ where
             BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
         };
 
-        (volume_label != EMPTY_VOLUME_LABEL).then(|| self.options.codepage.decode(&volume_label))
+        (volume_label != EMPTY_VOLUME_LABEL).then(|| {
+            self.options
+                .codepage
+                .decode(&volume_label)
+                .trim_end()
+                .to_owned()
+        })
     }
 
     /// Reads the first volume label entry from the root directory that is found
@@ -1718,8 +1724,13 @@ where
             return Ok(None);
         };
 
-        Ok((volume_label != EMPTY_VOLUME_LABEL)
-            .then(|| self.options.codepage.decode(&volume_label)))
+        Ok((volume_label != EMPTY_VOLUME_LABEL).then(|| {
+            self.options
+                .codepage
+                .decode(&volume_label)
+                .trim_end()
+                .to_owned()
+        }))
     }
 
     /// Get a corresponding [`ROFile`] object from a [`Path`]
