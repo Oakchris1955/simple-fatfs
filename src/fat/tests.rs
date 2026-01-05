@@ -1104,6 +1104,38 @@ fn read_dir_and_go_back() {
 }
 
 #[test]
+fn volume_label_bpb_correct() {
+    use std::io::Cursor;
+
+    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+
+    assert_eq!(fs.volume_label_bpb(), Some(String::from("SIMPLEFATFS")))
+}
+
+#[test]
+fn volume_label_bpb_none() {
+    use std::io::Cursor;
+
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+
+    assert_eq!(fs.volume_label_bpb(), None)
+}
+
+#[test]
+fn volume_label_root_none() {
+    use std::io::Cursor;
+
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+
+    assert!(fs
+        .volume_label_root_dir()
+        .is_ok_and(|label| label.is_none()))
+}
+
+#[test]
 #[expect(non_snake_case)]
 fn FAT_tables_after_fat32_write_are_identical() {
     use crate::fat::{BootRecord, Ebr};
