@@ -1701,6 +1701,27 @@ where
         (volume_label != EMPTY_VOLUME_LABEL).then(|| self.options.codepage.decode(&volume_label))
     }
 
+    /// Reads the first volume label entry from the root directory that is found
+    pub fn volume_label_root_dir(&self) -> Result<Option<String>, S::Error> {
+        let volume_label = 'search: {
+            self._go_to_root_directory();
+
+            for entry in self.process_current_dir() {
+                let entry = entry?;
+
+                if entry.attributes == RawAttributes::VOLUME_ID {
+                    break 'search entry.sfn.get_byte_slice();
+                }
+            }
+
+            // Nothing was found, return [`None`]
+            return Ok(None);
+        };
+
+        Ok((volume_label != EMPTY_VOLUME_LABEL)
+            .then(|| self.options.codepage.decode(&volume_label)))
+    }
+
     /// Get a corresponding [`ROFile`] object from a [`Path`]
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
