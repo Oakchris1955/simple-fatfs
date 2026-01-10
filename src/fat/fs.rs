@@ -2371,6 +2371,10 @@ where
 
         utils::string::copy_cp_chars(&mut label_bytes, label.as_ref(), self.options.codepage)?;
 
+        if label_bytes == EMPTY_VOLUME_LABEL {
+            return None;
+        }
+
         let mut bpb_volume_label =
             RefMut::map(
                 self.boot_record.borrow_mut(),
