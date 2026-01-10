@@ -3,7 +3,7 @@ use super::*;
 use crate::{error::*, path::*, utils, Clock};
 
 use core::{
-    cell::{Ref, RefCell},
+    cell::{Ref, RefCell, RefMut},
     cmp, iter, num, ops,
 };
 
@@ -2357,6 +2357,38 @@ where
         }
 
         Ok(rw_file)
+    }
+
+    /// Sets the volume label of the BIOS parameter block
+    ///
+    /// If [`None`] is returned, the label was too big to fit to the volume label field
+    /// or the decoded text is `"NO NAME    "`
+    pub fn set_volume_label_bpb<L>(&self, label: L) -> Option<()>
+    where
+        L: AsRef<str>,
+    {
+        let mut label_bytes = [b' '; VOLUME_LABEL_BYTES];
+
+        utils::string::copy_cp_chars(&mut label_bytes, label.as_ref(), self.options.codepage)?;
+
+        let mut bpb_volume_label =
+            RefMut::map(
+                self.boot_record.borrow_mut(),
+                |boot_record| match boot_record {
+                    BootRecord::Fat(boot_record_fat) => match &mut boot_record_fat.ebr {
+                        Ebr::FAT12_16(ref mut ebr_fat12_16) => &mut ebr_fat12_16.volume_label,
+                        Ebr::FAT32(ref mut ebr_fat32, _fsinfo) => &mut ebr_fat32.volume_label,
+                    },
+                    BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
+                },
+            );
+
+        bpb_volume_label.copy_from_slice(&label_bytes);
+
+        self.boot_sector_modified.replace(true);
+        self.set_modified();
+
+        Some(())
     }
 
     /// Sync any pending changes back to the storage medium and drop

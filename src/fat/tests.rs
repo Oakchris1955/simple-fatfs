@@ -1159,6 +1159,22 @@ fn volume_label_root_correct() {
 }
 
 #[test]
+fn set_volume_label_bpb() {
+    use std::io::Cursor;
+
+    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+
+    fs.set_volume_label_bpb("DEADBEEF");
+
+    drop(fs);
+
+    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+
+    assert_eq!(fs.volume_label_bpb(), Some(String::from("DEADBEEF")));
+}
+
+#[test]
 #[expect(non_snake_case)]
 fn FAT_tables_after_fat32_write_are_identical() {
     use crate::fat::{BootRecord, Ebr};
