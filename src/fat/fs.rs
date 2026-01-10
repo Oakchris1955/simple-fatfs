@@ -2331,7 +2331,7 @@ where
     C: Clock,
 {
     fn drop(&mut self) {
-        if let Some(unmount) = *self.unmount_f.borrow() {
+        if let Some(unmount) = self.unmount_f.replace(None) {
             // nothing to do if this errors out while dropping
             let _ = unmount(self);
         }
