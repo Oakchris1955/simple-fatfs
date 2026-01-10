@@ -1,3 +1,5 @@
+use super::*;
+
 /// The minimum size (in bytes) a sector is allowed to have
 pub const MIN_SECTOR_SIZE: usize = 512;
 /// The maximum size (in bytes) a sector is allowed to have
@@ -8,4 +10,4 @@ pub const MAX_SECTOR_SIZE: usize = 4096;
 #[expect(dead_code)]
 pub(crate) const INFINITE_LOOP: [u8; 3] = [0xEB, 0xFE, 0x90];
 
-pub(crate) const EMPTY_VOLUME_LABEL: [u8; 11] = *b"NO NAME    ";
+pub(crate) const EMPTY_VOLUME_LABEL: [u8; VOLUME_LABEL_BYTES] = *b"NO NAME    ";

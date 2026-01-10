@@ -411,6 +411,7 @@ where
     /// The length of this will be the sector size of the FS for all FAT types except FAT12, in that case, it will be double that value
     pub(crate) sector_buffer: RefCell<SectorBuffer<true>>,
     fsinfo_modified: RefCell<bool>,
+    boot_sector_modified: RefCell<bool>,
 
     pub(crate) dir_info: RefCell<DirInfo>,
 
@@ -574,6 +575,7 @@ where
             storage,
             sector_buffer: buffer.into(),
             fsinfo_modified: false.into(),
+            boot_sector_modified: false.into(),
             options,
             dir_info: DirInfo::at_root_dir(&boot_record).into(),
             sync_f: None.into(),
@@ -1649,6 +1651,54 @@ where
         Ok(())
     }
 
+    pub(crate) fn sync_boot_sector(&self) -> FSResult<(), S::Error> {
+        if *self.boot_sector_modified.borrow() {
+            self.load_nth_sector(0)?;
+
+            let mut bytes = self.sector_buffer.borrow_mut();
+
+            let boot_record = self.boot_record.borrow();
+
+            use utils::bincode::BINCODE_CONFIG;
+
+            match &*boot_record {
+                BootRecord::Fat(boot_record_fat) => {
+                    bincode::encode_into_slice(
+                        &boot_record_fat.bpb,
+                        &mut bytes[..BPBFAT_SIZE],
+                        BINCODE_CONFIG,
+                    )
+                    .map_err(utils::bincode::map_err_enc)?;
+
+                    match &boot_record_fat.ebr {
+                        Ebr::FAT12_16(ebr_fat12_16) => {
+                            bincode::encode_into_slice(
+                                ebr_fat12_16,
+                                &mut bytes[BPBFAT_SIZE..BOOT_RECORD_SIZE],
+                                BINCODE_CONFIG,
+                            )
+                            .map_err(utils::bincode::map_err_enc)?;
+                        }
+                        Ebr::FAT32(ebr_fat32, _) => {
+                            bincode::encode_into_slice(
+                                ebr_fat32,
+                                &mut bytes[BPBFAT_SIZE..BOOT_RECORD_SIZE],
+                                BINCODE_CONFIG,
+                            )
+                            .map_err(utils::bincode::map_err_enc)?;
+                        }
+                    }
+                }
+                BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
+            };
+
+            self.boot_sector_modified.replace(false);
+            self.set_modified();
+        }
+
+        Ok(())
+    }
+
     /// Like [`Self::get_rw_file`], but will ignore the read-only flag (if it is present)
     ///
     /// This is a private function for obvious reasons
@@ -2314,6 +2364,7 @@ where
     /// Use this to catch any IO errors that might be rejected silently
     /// while [`Drop`]ping
     pub fn unmount(&self) -> FSResult<(), S::Error> {
+        self.sync_boot_sector()?;
         self.sync_fsinfo()?;
         let should_sync_buffer = self.sync_f.borrow().is_some();
         if should_sync_buffer {

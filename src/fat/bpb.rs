@@ -42,6 +42,8 @@ impl BootRecord {
 pub(crate) const BOOT_SIGNATURE: u8 = 0x29;
 pub(crate) const FAT_SIGNATURE: u16 = 0x55AA;
 
+pub(crate) const BOOT_RECORD_SIZE: usize = 512;
+
 #[derive(Debug, Clone)]
 pub(crate) struct BootRecordFAT {
     pub bpb: BpbFat,
@@ -198,7 +200,8 @@ pub(crate) struct BpbFat {
     pub total_sectors_32: u32,
 }
 
-pub(crate) const EBR_SIZE: usize = MIN_SECTOR_SIZE - BPBFAT_SIZE;
+pub(crate) const EBR_SIZE: usize = BOOT_RECORD_SIZE - BPBFAT_SIZE;
+pub(crate) const VOLUME_LABEL_BYTES: usize = 11;
 #[derive(Debug, Clone)]
 pub(crate) enum Ebr {
     FAT12_16(EBRFAT12_16),
@@ -211,7 +214,7 @@ pub(crate) struct EBRFAT12_16 {
     pub _windows_nt_flags: u8,
     pub boot_signature: u8,
     pub volume_serial_num: u32,
-    pub volume_label: [u8; 11],
+    pub volume_label: [u8; VOLUME_LABEL_BYTES],
     pub _system_identifier: [u8; 8],
     pub _boot_code: [u8; 448],
     pub signature: u16,
@@ -251,7 +254,7 @@ pub(crate) struct EBRFAT32 {
     pub _windows_nt_flags: u8,
     pub boot_signature: u8,
     pub volume_serial_num: u32,
-    pub volume_label: [u8; 11],
+    pub volume_label: [u8; VOLUME_LABEL_BYTES],
     pub _system_ident: [u8; 8],
     pub _boot_code: [u8; 420],
     pub signature: u16,
