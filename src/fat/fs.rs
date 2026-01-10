@@ -2391,6 +2391,60 @@ where
         Some(())
     }
 
+    /// Sets the volume label of the root directory, removing an already-existing label if one is found
+    ///
+    /// If [`None`] is returned, the label was too big to fit to the volume label field
+    pub fn set_volume_label_root_dir<L>(&self, label: L) -> FSResult<Option<()>, S::Error>
+    where
+        L: AsRef<str>,
+    {
+        let mut label_bytes = [b' '; VOLUME_LABEL_BYTES];
+
+        Ok::<_, S::Error>(utils::string::copy_cp_chars(
+            &mut label_bytes,
+            label.as_ref(),
+            self.options.codepage,
+        ))?;
+
+        // remove already-existing label if such one is found
+        self._go_to_root_directory();
+
+        for entry in self.process_current_dir() {
+            let entry = entry?;
+
+            if entry.attributes == RawAttributes::VOLUME_ID {
+                self.remove_entry_chain(&entry.chain)?;
+
+                // assume that there aren't any other volume label entries
+                break;
+            }
+        }
+
+        let now = self.options.clock.now();
+
+        // TODO: Raw Entries iterator and insertion function
+        let raw_properties = MinProperties {
+            name: label.as_ref().into(),
+            // TODO: better Sfn API
+            sfn: Sfn {
+                name: label_bytes[..SFN_NAME_LEN].try_into().unwrap(),
+                ext: label_bytes[SFN_NAME_LEN..].try_into().unwrap(),
+            },
+            attributes: RawAttributes::empty() | RawAttributes::VOLUME_ID,
+            created: Some(now),
+            modified: now,
+            accessed: Some(now.date()),
+            file_size: 0,
+            data_cluster: 0,
+        };
+
+        let entries = [raw_properties];
+
+        self.insert_to_entry_chain(Box::new(entries))?;
+
+        Ok(Some(()))
+    }
+
     /// Sync any pending changes back to the storage medium and drop
     ///
     /// Use this to catch any IO errors that might be rejected silently
