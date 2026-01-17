@@ -2,7 +2,7 @@
 //!
 //! An easy-to-use FAT filesystem library designed for usage in embedded systems
 //!
-//! ## Features
+//! It has:
 //!
 //! - `no_std` support
 //! - FAT12/16/32 support
@@ -57,6 +57,93 @@
 //!     println!("root.txt contents:\n{}", string);
 //! }
 //! ```
+//!
+//! ## Features:
+//! - `std` (enabled by default)
+//!
+//!   Enable some trait conversions from and to the standard library's
+//!
+//! - `bloom`
+//!
+//!   Bloom filter support to cache directories: can be used to reduce
+//!   lookups when lots of files are created (there can't be two files
+//!   with the same name in a directory)
+//!
+//! - `lba64`
+//!
+//!   Switch from 32-bit to 64-bit logical block addressing for the [`block_io`] traits
+//!
+//! - `codepage`
+//!
+//!   Enables all codepages listed below (codepage 437 - OEM United States is always enabled)
+//!
+//! - `cp720`
+//!
+//!   Arabic (Transparent ASMO); Arabic (DOS)
+//!
+//! - `cp737`
+//!
+//!   OEM Greek (formerly 437G); Greek (DOS)
+//!
+//! - `cp775`
+//!
+//!   OEM Baltic; Baltic (DOS)
+//!
+//! - `cp850`
+//!
+//!   OEM Multilingual Latin 1; Western European (DOS)
+//!
+//! - `cp852`
+//!
+//!   OEM Latin 2; Central European (DOS)
+//!
+//! - `cp855`
+//!
+//!   OEM Cyrillic (primarily Russian)
+//!
+//! - `cp857`
+//!
+//!   OEM Turkish; Turkish (DOS)
+//!
+//! - `cp858`
+//!
+//!   OEM Multilingual Latin 1 + Euro symbol
+//!
+//! - `cp860`
+//!
+//!   OEM Portuguese; Portuguese (DOS)
+//!
+//! - `cp861`
+//!
+//!   OEM Icelandic; Icelandic (DOS)
+//!
+//! - `cp862`
+//!
+//!   OEM Hebrew; Hebrew (DOS)
+//!
+//! - `cp863`
+//!
+//!   OEM French Canadian; French Canadian (DOS)
+//!
+//! - `cp864`
+//!
+//!   OEM Arabic; Arabic (864)
+//!
+//! - `cp865`
+//!
+//!   OEM Nordic; Nordic (DOS)
+//!
+//! - `cp866`
+//!
+//!   OEM Russian; Cyrillic (DOS)
+//!
+//! - `cp869`
+//!
+//!   OEM Modern Greek; Greek, Modern (DOS)
+//!
+//! - `cp874`
+//!
+//!   ANSI/OEM Thai (ISO 8859-11); Thai (Windows)
 //!
 //! [`Read`]: io::Read
 //! [`Seek`]: io::Seek
