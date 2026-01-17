@@ -25,9 +25,11 @@ jobs:
       - uses: actions/checkout@v4
       - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
       - name: Run tests - All features enabled
-        run: cargo build --verbose --all-features
-        run: timeout 1m cargo test --verbose --all-features -- --nocapture
+        run: |
+          cargo build --verbose --all-features
+          timeout 1m cargo test --verbose --all-features -- --nocapture
       - name: Run tests - No features enabled
-        run: cargo build --verbose --no-default-features --all-targets
-        run: timeout 1m cargo test --verbose --no-default-features --all-targets -- --nocapture
+        run: |
+          cargo build --verbose --no-default-features --all-targets
+          timeout 1m cargo test --verbose --no-default-features --all-targets -- --nocapture
 
