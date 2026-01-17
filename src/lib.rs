@@ -9,6 +9,14 @@
 //! - VFAT/LFN (long filenames) support
 //! - Easy-to-implement [`io`] traits
 //!
+//! ## Usage
+//!
+//! The library uses [`embedded-io`](embedded_io) for IO operations.
+//! Most notably, the storage medium is expected to implement at least the
+//! [`Read`] and [`Seek`] traits (RO storage), while [`Write`] is optional
+//! (R/W storage). Furthermore, [`ROFile`] & [`RWFile`] both implement [`Read`]
+//! & [`Seek`], while [`RWFile`] also implements [`Write`]
+//!
 //! ## Examples
 //! ```
 //! # // this test fails on a no_std environment, don't run it in such a case
