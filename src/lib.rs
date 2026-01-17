@@ -7,19 +7,7 @@
 //! - `no_std` support
 //! - FAT12/16/32 support
 //! - VFAT/LFN (long filenames) support
-//! - Auto-`impl`s for [`std::io`] traits and structs
 //! - Easy-to-implement [`io`] traits
-//!
-//! ## Usage
-//!
-//! The library uses [`embedded-io`](embedded_io) for IO operations.
-//! Most notably, the storage medium is expected to implement at least the
-//! [`Read`] and [`Seek`] traits (RO storage), while [`Write`] is optional
-//! (R/W storage). Furthermore, [`ROFile`] & [`RWFile`] both implement [`Read`]
-//! & [`Seek`], while [`RWFile`] also implements [`Write`]
-//!
-//! To use [`std::io`]'s respective traits, use the
-//! [`embedded-io-adapters`](https://crates.io/crates/embedded-io-adapters) crate.
 //!
 //! ## Examples
 //! ```
