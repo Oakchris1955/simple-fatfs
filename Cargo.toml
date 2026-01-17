@@ -19,7 +19,7 @@ typed-path = { version = "0.12.0", default-features = false }
 siphasher = { version = "1.0.1", default-features = false }
 
 [features]
-default = ["std", "codepage"]
+default = ["std", "cp437"]
 std = ["time/std", "time/local-offset", "embedded-io/std"]
 # bloom filter support (may be redundant on some targets)
 bloom = []
