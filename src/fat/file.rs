@@ -224,7 +224,7 @@ where
                 if bytes_read >= read_cap {
                     // ...but we must process get the next cluster for future uses,
                     // we do that before breaking
-                    if self.props.offset % self.fs.cluster_size() == 0
+                    if self.props.offset.is_multiple_of(self.fs.cluster_size())
                         && self.props.offset < self.file_size
                     {
                         self.next_cluster()?;
@@ -657,7 +657,7 @@ where
                 if bytes_written >= buf.len() {
                     // ...but we must process get the next cluster for future uses,
                     // we do that before breaking
-                    if self.props.offset % self.fs.cluster_size() == 0 {
+                    if self.props.offset.is_multiple_of(self.fs.cluster_size()) {
                         self.next_cluster()?;
                     }
 
