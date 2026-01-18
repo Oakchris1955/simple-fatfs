@@ -34,7 +34,14 @@ pub(crate) fn as_sfn(string: &str, codepage: Codepage) -> Option<Sfn> {
     Some(result)
 }
 
-fn copy_cp_chars(mut destination: &mut [u8], string: &str, codepage: Codepage) -> Option<()> {
+/// Decodes as many characters as possible using `codepage` from `string` and puts them to `destination`
+///
+/// Returns [`None`] if not all characters could be decoded
+pub(crate) fn copy_cp_chars(
+    mut destination: &mut [u8],
+    string: &str,
+    codepage: Codepage,
+) -> Option<()> {
     for c in string.chars() {
         let c = encode_valid_char_checked(c, codepage)?;
         if destination.is_empty() {

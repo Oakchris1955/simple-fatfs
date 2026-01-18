@@ -87,7 +87,7 @@ pub(crate) const PARENT_DIR_SFN: Sfn = Sfn {
 };
 
 impl Sfn {
-    fn get_byte_slice(&self) -> [u8; SFN_NAME_LEN + SFN_EXT_LEN] {
+    pub(crate) fn get_byte_slice(&self) -> [u8; SFN_NAME_LEN + SFN_EXT_LEN] {
         let mut slice = [0; SFN_NAME_LEN + SFN_EXT_LEN];
 
         slice[..SFN_NAME_LEN].copy_from_slice(&self.name);

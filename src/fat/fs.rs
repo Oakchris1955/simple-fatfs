@@ -3,12 +3,17 @@ use super::*;
 use crate::{error::*, path::*, utils, Clock};
 
 use core::{
-    cell::{Ref, RefCell},
+    cell::{Ref, RefCell, RefMut},
     cmp, iter, num, ops,
 };
 
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, vec, vec::Vec};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
 
 use ::time;
 use embedded_io::*;
@@ -406,6 +411,7 @@ where
     /// The length of this will be the sector size of the FS for all FAT types except FAT12, in that case, it will be double that value
     pub(crate) sector_buffer: RefCell<SectorBuffer<true>>,
     fsinfo_modified: RefCell<bool>,
+    boot_sector_modified: RefCell<bool>,
 
     pub(crate) dir_info: RefCell<DirInfo>,
 
@@ -569,6 +575,7 @@ where
             storage,
             sector_buffer: buffer.into(),
             fsinfo_modified: false.into(),
+            boot_sector_modified: false.into(),
             options,
             dir_info: DirInfo::at_root_dir(&boot_record).into(),
             sync_f: None.into(),
@@ -1644,6 +1651,54 @@ where
         Ok(())
     }
 
+    pub(crate) fn sync_boot_sector(&self) -> FSResult<(), S::Error> {
+        if *self.boot_sector_modified.borrow() {
+            self.load_nth_sector(0)?;
+
+            let mut bytes = self.sector_buffer.borrow_mut();
+
+            let boot_record = self.boot_record.borrow();
+
+            use utils::bincode::BINCODE_CONFIG;
+
+            match &*boot_record {
+                BootRecord::Fat(boot_record_fat) => {
+                    bincode::encode_into_slice(
+                        &boot_record_fat.bpb,
+                        &mut bytes[..BPBFAT_SIZE],
+                        BINCODE_CONFIG,
+                    )
+                    .map_err(utils::bincode::map_err_enc)?;
+
+                    match &boot_record_fat.ebr {
+                        Ebr::FAT12_16(ebr_fat12_16) => {
+                            bincode::encode_into_slice(
+                                ebr_fat12_16,
+                                &mut bytes[BPBFAT_SIZE..BOOT_RECORD_SIZE],
+                                BINCODE_CONFIG,
+                            )
+                            .map_err(utils::bincode::map_err_enc)?;
+                        }
+                        Ebr::FAT32(ebr_fat32, _) => {
+                            bincode::encode_into_slice(
+                                ebr_fat32,
+                                &mut bytes[BPBFAT_SIZE..BOOT_RECORD_SIZE],
+                                BINCODE_CONFIG,
+                            )
+                            .map_err(utils::bincode::map_err_enc)?;
+                        }
+                    }
+                }
+                BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
+            };
+
+            self.boot_sector_modified.replace(false);
+            self.set_modified();
+        }
+
+        Ok(())
+    }
+
     /// Like [`Self::get_rw_file`], but will ignore the read-only flag (if it is present)
     ///
     /// This is a private function for obvious reasons
@@ -1683,6 +1738,54 @@ where
             &self.dir_info.borrow().chain_start,
             &self.dir_info.borrow().path,
         ))
+    }
+
+    /// Reads the volume label from the BIOS parameter block
+    ///
+    /// If the volume label is `"NO NAME    "`, it means that it doesn't exists
+    /// and [`None`]` will be returned instead
+    pub fn volume_label_bpb(&self) -> Option<String> {
+        let volume_label = match &*self.boot_record.borrow() {
+            BootRecord::Fat(boot_record_fat) => match &boot_record_fat.ebr {
+                Ebr::FAT12_16(ebr_fat12_16) => ebr_fat12_16.volume_label,
+                Ebr::FAT32(ebr_fat32, _fsinfo) => ebr_fat32.volume_label,
+            },
+            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
+        };
+
+        (volume_label != EMPTY_VOLUME_LABEL).then(|| {
+            self.options
+                .codepage
+                .decode(&volume_label)
+                .trim_end()
+                .to_string()
+        })
+    }
+
+    /// Reads the first volume label entry from the root directory that is found
+    pub fn volume_label_root_dir(&self) -> Result<Option<String>, S::Error> {
+        let volume_label = 'search: {
+            self._go_to_root_directory();
+
+            for entry in self.process_current_dir() {
+                let entry = entry?;
+
+                if entry.attributes == RawAttributes::VOLUME_ID {
+                    break 'search entry.sfn.get_byte_slice();
+                }
+            }
+
+            // Nothing was found, return [`None`]
+            return Ok(None);
+        };
+
+        Ok((volume_label != EMPTY_VOLUME_LABEL).then(|| {
+            self.options
+                .codepage
+                .decode(&volume_label)
+                .trim_end()
+                .to_string()
+        }))
     }
 
     /// Get a corresponding [`ROFile`] object from a [`Path`]
@@ -2256,11 +2359,102 @@ where
         Ok(rw_file)
     }
 
+    /// Sets the volume label of the BIOS parameter block
+    ///
+    /// If [`None`] is returned, the label was too big to fit to the volume label field
+    /// or the decoded text is `"NO NAME    "`
+    pub fn set_volume_label_bpb<L>(&self, label: L) -> Option<()>
+    where
+        L: AsRef<str>,
+    {
+        let mut label_bytes = [b' '; VOLUME_LABEL_BYTES];
+
+        utils::string::copy_cp_chars(&mut label_bytes, label.as_ref(), self.options.codepage)?;
+
+        if label_bytes == EMPTY_VOLUME_LABEL {
+            return None;
+        }
+
+        let mut bpb_volume_label =
+            RefMut::map(
+                self.boot_record.borrow_mut(),
+                |boot_record| match boot_record {
+                    BootRecord::Fat(boot_record_fat) => match &mut boot_record_fat.ebr {
+                        Ebr::FAT12_16(ref mut ebr_fat12_16) => &mut ebr_fat12_16.volume_label,
+                        Ebr::FAT32(ref mut ebr_fat32, _fsinfo) => &mut ebr_fat32.volume_label,
+                    },
+                    BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
+                },
+            );
+
+        bpb_volume_label.copy_from_slice(&label_bytes);
+
+        self.boot_sector_modified.replace(true);
+        self.set_modified();
+
+        Some(())
+    }
+
+    /// Sets the volume label of the root directory, removing an already-existing label if one is found
+    ///
+    /// If [`None`] is returned, the label was too big to fit to the volume label field
+    pub fn set_volume_label_root_dir<L>(&self, label: L) -> FSResult<Option<()>, S::Error>
+    where
+        L: AsRef<str>,
+    {
+        let mut label_bytes = [b' '; VOLUME_LABEL_BYTES];
+
+        Ok::<_, S::Error>(utils::string::copy_cp_chars(
+            &mut label_bytes,
+            label.as_ref(),
+            self.options.codepage,
+        ))?;
+
+        // remove already-existing label if such one is found
+        self._go_to_root_directory();
+
+        for entry in self.process_current_dir() {
+            let entry = entry?;
+
+            if entry.attributes == RawAttributes::VOLUME_ID {
+                self.remove_entry_chain(&entry.chain)?;
+
+                // assume that there aren't any other volume label entries
+                break;
+            }
+        }
+
+        let now = self.options.clock.now();
+
+        // TODO: Raw Entries iterator and insertion function
+        let raw_properties = MinProperties {
+            name: label.as_ref().into(),
+            // TODO: better Sfn API
+            sfn: Sfn {
+                name: label_bytes[..SFN_NAME_LEN].try_into().unwrap(),
+                ext: label_bytes[SFN_NAME_LEN..].try_into().unwrap(),
+            },
+            attributes: RawAttributes::empty() | RawAttributes::VOLUME_ID,
+            created: Some(now),
+            modified: now,
+            accessed: Some(now.date()),
+            file_size: 0,
+            data_cluster: 0,
+        };
+
+        let entries = [raw_properties];
+
+        self.insert_to_entry_chain(Box::new(entries))?;
+
+        Ok(Some(()))
+    }
+
     /// Sync any pending changes back to the storage medium and drop
     ///
     /// Use this to catch any IO errors that might be rejected silently
     /// while [`Drop`]ping
     pub fn unmount(&self) -> FSResult<(), S::Error> {
+        self.sync_boot_sector()?;
         self.sync_fsinfo()?;
         let should_sync_buffer = self.sync_f.borrow().is_some();
         if should_sync_buffer {
@@ -2278,7 +2472,7 @@ where
     C: Clock,
 {
     fn drop(&mut self) {
-        if let Some(unmount) = *self.unmount_f.borrow() {
+        if let Some(unmount) = self.unmount_f.replace(None) {
             // nothing to do if this errors out while dropping
             let _ = unmount(self);
         }
