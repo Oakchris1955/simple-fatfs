@@ -16,17 +16,16 @@ log = "0.4.22"
 oem_cp = "2.1.0"
 time = { version = "0.3.36", default-features = false, features = [ "parsing", "macros" ]}
 typed-path = { version = "0.12.0", default-features = false }
-siphasher = { version = "1.0.1", default-features = false }
+siphasher = { version = "1.0.1", default-features = false , optional = true }
 
 [features]
-default = ["std", "codepage"]
+default = ["std"]
 std = ["time/std", "time/local-offset", "embedded-io/std"]
 # bloom filter support (may be redundant on some targets)
-bloom = []
+bloom = ["dep:siphasher"]
 # 64-bit logical block addressing
 lba64 = []
 codepage = []
-cp437 = []
 cp720 = []
 cp737 = []
 cp775 = []

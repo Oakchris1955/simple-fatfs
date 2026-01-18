@@ -21,7 +21,6 @@ A fully-working FAT driver that covers the following criteria:
 - An easy-to-use public API for developers
 - Avoids unnecessary/overbloated dependencies (I am talking about [leftpad](https://www.npmjs.com/package/left-pad)-like dependencies)
 - `#[no_std]` support
-- Uses [`embedded-io`](https://crates.io/crates/embedded-io) for IO operations, making it suitable for embedded devices
 - FAT12/16/32/ExFAT support
 - VFAT/LFN (long filename) support
 
@@ -39,10 +38,9 @@ It also aims to be able to do the following in the future:
     PS: it does in fact matter. [bincode](https://crates.io/crates/bincode), which we use for (de)serialization allows us to configure the default endianess
 - [ ] Handle non-printable characters in names of files and directories
 - [ ] ExFAT support
-- [x] replace custom `io` implementation with the [embedded-io] crate
 - [ ] use `from_utf16be` for decoding LFNs (`str_from_utf16_endian` [#116258](https://github.com/rust-lang/rust/issues/116258))
 - [ ] handle duplicate file open, either by blocking or more preferably, by not allowing such behavior.
-- [ ] the majority of codepages will end up being dead code for most users, use features for enabling/disabling them.
+- [x] the majority of codepages will end up being dead code for most users, use features for enabling/disabling them.
 
 ## Known issues
 
@@ -67,4 +65,3 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 [crates.io]: https://crates.io
 [rafalh's rust-fatfs]: https://github.com/rafalh/rust-fatfs
-[embedded-io]: https://crates.io/crates/embedded-io

@@ -2,12 +2,11 @@
 //!
 //! An easy-to-use FAT filesystem library designed for usage in embedded systems
 //!
-//! ## Features
+//! It has:
 //!
 //! - `no_std` support
 //! - FAT12/16/32 support
 //! - VFAT/LFN (long filenames) support
-//! - Auto-`impl`s for [`std::io`] traits and structs
 //! - Easy-to-implement [`io`] traits
 //!
 //! ## Usage
@@ -17,9 +16,6 @@
 //! [`Read`] and [`Seek`] traits (RO storage), while [`Write`] is optional
 //! (R/W storage). Furthermore, [`ROFile`] & [`RWFile`] both implement [`Read`]
 //! & [`Seek`], while [`RWFile`] also implements [`Write`]
-//!
-//! To use [`std::io`]'s respective traits, use the
-//! [`embedded-io-adapters`](https://crates.io/crates/embedded-io-adapters) crate.
 //!
 //! ## Examples
 //! ```
@@ -62,6 +58,93 @@
 //! }
 //! ```
 //!
+//! ## Features:
+//! - `std` (enabled by default)
+//!
+//!   Enable some trait conversions from and to the standard library's
+//!
+//! - `bloom`
+//!
+//!   Bloom filter support to cache directories: can be used to reduce
+//!   lookups when lots of files are created (there can't be two files
+//!   with the same name in a directory)
+//!
+//! - `lba64`
+//!
+//!   Switch from 32-bit to 64-bit logical block addressing for the [`block_io`] traits
+//!
+//! - `codepage`
+//!
+//!   Enables all codepages listed below (codepage 437 - OEM United States is always enabled)
+//!
+//! - `cp720`
+//!
+//!   Arabic (Transparent ASMO); Arabic (DOS)
+//!
+//! - `cp737`
+//!
+//!   OEM Greek (formerly 437G); Greek (DOS)
+//!
+//! - `cp775`
+//!
+//!   OEM Baltic; Baltic (DOS)
+//!
+//! - `cp850`
+//!
+//!   OEM Multilingual Latin 1; Western European (DOS)
+//!
+//! - `cp852`
+//!
+//!   OEM Latin 2; Central European (DOS)
+//!
+//! - `cp855`
+//!
+//!   OEM Cyrillic (primarily Russian)
+//!
+//! - `cp857`
+//!
+//!   OEM Turkish; Turkish (DOS)
+//!
+//! - `cp858`
+//!
+//!   OEM Multilingual Latin 1 + Euro symbol
+//!
+//! - `cp860`
+//!
+//!   OEM Portuguese; Portuguese (DOS)
+//!
+//! - `cp861`
+//!
+//!   OEM Icelandic; Icelandic (DOS)
+//!
+//! - `cp862`
+//!
+//!   OEM Hebrew; Hebrew (DOS)
+//!
+//! - `cp863`
+//!
+//!   OEM French Canadian; French Canadian (DOS)
+//!
+//! - `cp864`
+//!
+//!   OEM Arabic; Arabic (864)
+//!
+//! - `cp865`
+//!
+//!   OEM Nordic; Nordic (DOS)
+//!
+//! - `cp866`
+//!
+//!   OEM Russian; Cyrillic (DOS)
+//!
+//! - `cp869`
+//!
+//!   OEM Modern Greek; Greek, Modern (DOS)
+//!
+//! - `cp874`
+//!
+//!   ANSI/OEM Thai (ISO 8859-11); Thai (Windows)
+//!
 //! ## Notes
 //!
 //! - **Regarding volume labels**
@@ -73,7 +156,7 @@
 //!   various volume label functions
 //!
 //!   For more info, please check <https://man7.org/linux/man-pages/man8/fatlabel.8.html>
-//!
+//! 
 //! [`Read`]: io::Read
 //! [`Seek`]: io::Seek
 //! [`Write`]: io::Write
