@@ -363,7 +363,7 @@ where
                         if self.inner.fs.filter.borrow().filter(&value)
                             // we shouldn't expose the special entries to the user
                             && ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
-                                .contains(&value.name.as_str())
+                                .contains(&value.name(self.inner.fs.options.codepage).as_str())
                         {
                             return Some(Ok(value.into_dir_entry(&self.parent, self.inner.fs)));
                         } else {

@@ -471,18 +471,17 @@ where
                 .file_name()
                 .expect("This file name should be valid");
             // the first entry of the dirchain could belong to a LFNEntry, so we must handle that
-            let direntry_location = match num::NonZero::new(
-                EntryCount::from(calc_entries_needed(file_name, self.fs.options.codepage)) - 1,
-            ) {
-                Some(nonzero) => {
-                    chain_start
-                        .nth_entry(self.fs, nonzero)?
-                        .ok_or(FSError::InternalFSError(
-                            InternalFSError::MalformedEntryChain,
-                        ))?
-                }
-                None => chain_start,
-            };
+            let direntry_location =
+                match num::NonZero::new(EntryCount::from(calc_lfn_entries_needed(file_name))) {
+                    Some(nonzero) => {
+                        chain_start
+                            .nth_entry(self.fs, nonzero)?
+                            .ok_or(FSError::InternalFSError(
+                                InternalFSError::MalformedEntryChain,
+                            ))?
+                    }
+                    None => chain_start,
+                };
 
             direntry_location.set_bytes(self.fs, bytes)?;
 

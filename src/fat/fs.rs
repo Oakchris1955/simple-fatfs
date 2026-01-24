@@ -621,7 +621,7 @@ where
             let parent_entry = entries
                 .nth(NONROOT_MIN_DIRENTRIES - 1)
                 .transpose()?
-                .filter(|entry| entry.is_dir && entry.name == path_consts::PARENT_DIR_STR)
+                .filter(|entry| entry.is_dir && entry.sfn == PARENT_DIR_SFN)
                 .ok_or(FSError::InternalFSError(
                     InternalFSError::MalformedEntryChain,
                 ))?;
@@ -646,7 +646,7 @@ where
         let child_entry = loop {
             let entry = entries.next().ok_or(FSError::NotFound)??;
 
-            if entry.name == name {
+            if entry.name(self.options.codepage) == name {
                 break entry;
             }
         };
@@ -655,7 +655,10 @@ where
             return Err(FSError::NotADirectory);
         }
 
-        self.dir_info.borrow_mut().path.push(&child_entry.name);
+        self.dir_info
+            .borrow_mut()
+            .path
+            .push(child_entry.name(self.options.codepage));
         self.dir_info.borrow_mut().chain_start =
             EntryLocationUnit::DataCluster(child_entry.data_cluster);
         self.dir_info.borrow_mut().chain_end = None;
@@ -1303,7 +1306,7 @@ where
 
         let entries = [
             MinProperties {
-                name: Box::from(typed_path::constants::windows::CURRENT_DIR_STR),
+                name: None,
                 sfn: CURRENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
@@ -1314,7 +1317,7 @@ where
                 data_cluster: dir_cluster,
             },
             MinProperties {
-                name: Box::from(typed_path::constants::windows::PARENT_DIR_STR),
+                name: None,
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
@@ -1330,7 +1333,7 @@ where
         ];
 
         // this composer will ALWAYS generate 2 entries
-        let entries_iter = EntryComposer::new(&entries, self.options.codepage);
+        let entries_iter = EntryComposer::new(&entries);
 
         self.load_nth_sector(self.data_cluster_to_partition_sector(dir_cluster))?;
 
@@ -1381,14 +1384,19 @@ where
         self._go_to_cached_dir()?;
 
         for entry in entries {
-            entries_needed += calc_entries_needed(&*entry.name, self.options.codepage).get();
+            // we need at least one entry for the short filename
+            entries_needed += 1;
+
+            if let Some(long_filename) = &entry.name {
+                entries_needed += calc_lfn_entries_needed(long_filename).get()
+            }
         }
 
         let first_entry = self.allocate_nth_entries(
             num::NonZero::new(entries_needed).expect("The entries array shouldn't be empty"),
         )?;
 
-        let mut entries_iter = EntryComposer::new(entries, self.options.codepage);
+        let mut entries_iter = EntryComposer::new(entries);
 
         let mut current_entry = first_entry;
         let mut entry_bytes = entries_iter
@@ -1894,7 +1902,9 @@ where
             let short_name = entry.sfn.decode(codepage);
 
             filter.set(short_name.as_str());
-            filter.set(long_name.as_str());
+            if let Some(long_filename) = long_name {
+                filter.set(long_filename.as_str());
+            }
         }
 
         self.dir_info.borrow_mut().filter = Some(filter);
@@ -1947,7 +1957,7 @@ where
             for entry in self.process_current_dir() {
                 let entry = entry?;
 
-                if entry.name == file_name {
+                if entry.name(self.options.codepage) == file_name {
                     return Err(FSError::AlreadyExists);
                 }
             }
@@ -1961,7 +1971,7 @@ where
 
         // we got everything to create our first (and only) RawProperties struct
         let raw_properties = MinProperties {
-            name: file_name.into(),
+            name: Some(file_name.into()),
             sfn,
             // this needs to be set when creating a file
             attributes: RawAttributes::empty() | RawAttributes::ARCHIVE,
@@ -1978,7 +1988,9 @@ where
 
         #[cfg(feature = "bloom")]
         if let Some(filter) = &mut self.dir_info.borrow_mut().filter {
-            filter.set(&raw_properties.name);
+            if let Some(long_filename) = &raw_properties.name {
+                filter.set(long_filename);
+            }
             filter.set(&Box::from(raw_properties.sfn.decode(self.options.codepage)));
         }
 
@@ -2021,7 +2033,7 @@ where
         for entry in self.process_current_dir() {
             let entry = entry?;
 
-            if entry.name == file_name {
+            if entry.name(self.options.codepage) == file_name {
                 return Err(FSError::AlreadyExists);
             }
         }
@@ -2037,7 +2049,7 @@ where
 
         // we got everything to create our first (and only) RawProperties struct
         let raw_properties = MinProperties {
-            name: file_name.into(),
+            name: Some(file_name.into()),
             sfn,
             attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
             created: Some(now),
@@ -2124,7 +2136,7 @@ where
             // so that it points to the new parent directory
             // the ".." entry is always the second entry, so we will do something a bit hacky here
             let parent_entry = MinProperties {
-                name: Box::from(typed_path::constants::windows::PARENT_DIR_STR),
+                name: None,
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
                 attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
@@ -2161,7 +2173,7 @@ where
         let sfn = utils::string::gen_sfn(to_filename, self, parent_to)?;
 
         let props = MinProperties {
-            name: Box::from(to_filename),
+            name: Some(Box::from(to_filename)),
             sfn,
             attributes: old_props.attributes,
             created: Some(now),
@@ -2426,9 +2438,8 @@ where
 
         let now = self.options.clock.now();
 
-        // TODO: Raw Entries iterator and insertion function
         let raw_properties = MinProperties {
-            name: label.as_ref().into(),
+            name: None,
             // TODO: better Sfn API
             sfn: Sfn {
                 name: label_bytes[..SFN_NAME_LEN].try_into().unwrap(),

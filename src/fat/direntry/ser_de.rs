@@ -69,24 +69,16 @@ impl LFNEntry {
 ///
 /// This only takes into account the [`DirEntries`](DirEntry) needed,
 /// not the contents of the file
-pub(crate) fn calc_entries_needed<S>(file_name: S, codepage: Codepage) -> num::NonZero<EntryCount>
+pub(crate) fn calc_lfn_entries_needed<S>(file_name: S) -> num::NonZero<EntryCount>
 where
     S: AsRef<str>,
 {
-    use crate::utils::string::as_sfn;
-
     let file_name = file_name.as_ref();
     let char_count = file_name.chars().count();
-    let lfn_entries_needed = if as_sfn(file_name, codepage).is_some() {
-        0
-    } else {
-        char_count.div_ceil(CHARS_PER_LFN_ENTRY)
-    };
-    // let's not forget the first entry
-    let calc_entries_needed = 1 + lfn_entries_needed;
+    let lfn_entries_needed = char_count.div_ceil(CHARS_PER_LFN_ENTRY);
 
     num::NonZero::new(
-        EntryCount::try_from(calc_entries_needed)
+        EntryCount::try_from(lfn_entries_needed)
             .expect("an LFN can be up to 255 chars, this won't panic"),
     )
     .expect("as seen above, this is >= 1")
@@ -186,19 +178,15 @@ pub(crate) struct EntryComposer<'a> {
     entry_index: usize,
 
     lfn_iter: Option<LFNEntryGenerator>,
-
-    codepage: Codepage,
 }
 
 impl<'a> EntryComposer<'a> {
-    pub(crate) fn new(entries: &'a [MinProperties], codepage: Codepage) -> Self {
+    pub(crate) fn new(entries: &'a [MinProperties]) -> Self {
         Self {
             entries,
             entry_index: 0,
 
             lfn_iter: None,
-
-            codepage,
         }
     }
 }
@@ -238,24 +226,25 @@ impl Iterator for EntryComposer<'_> {
             },
             None => {
                 // no reason to generate a SFN if the filename is already a valid one
-                if utils::string::as_sfn(&current_entry.name, self.codepage)
-                    .is_some_and(|sfn| sfn == current_entry.sfn)
-                {
-                    self.entry_index += 1;
+                match &current_entry.name {
+                    Some(long_filename) => {
+                        self.lfn_iter = Some(LFNEntryGenerator::new(
+                            long_filename,
+                            current_entry.sfn.gen_checksum(),
+                        ));
 
-                    bincode::encode_into_slice(
-                        FATDirEntry::from(current_entry.clone()),
-                        &mut item,
-                        BINCODE_CONFIG,
-                    )
-                    .expect("these are completely valid data, this shouldn't panic");
-                } else {
-                    self.lfn_iter = Some(LFNEntryGenerator::new(
-                        &current_entry.name,
-                        current_entry.sfn.gen_checksum(),
-                    ));
+                        return self.next();
+                    }
+                    None => {
+                        self.entry_index += 1;
 
-                    return self.next();
+                        bincode::encode_into_slice(
+                            FATDirEntry::from(current_entry.clone()),
+                            &mut item,
+                            BINCODE_CONFIG,
+                        )
+                        .expect("these are completely valid data, this shouldn't panic");
+                    }
                 }
             }
         }
@@ -405,9 +394,9 @@ where
                         utils::string::string_from_lfn(&self.lfn_buf[self.lfn_buf_pos..]);
                     self.lfn_buf_pos = CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES;
                     self.lfn_checksum = None;
-                    parsed_str.unwrap_or(entry.sfn.decode(self.fs.options.codepage))
+                    Some(parsed_str.unwrap_or(entry.sfn.decode(self.fs.options.codepage)))
                 } else {
-                    entry.sfn.decode(self.fs.options.codepage)
+                    None
                 };
 
                 if let (Ok(created), Ok(modified), Ok(accessed)) = (

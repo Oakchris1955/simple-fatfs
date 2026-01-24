@@ -145,7 +145,8 @@ impl Encode for FATDirEntry {
 /// A less-detailed version of [`RawProperties`]
 #[derive(Debug, Clone)]
 pub(crate) struct MinProperties {
-    pub(crate) name: Box<str>,
+    /// Set to [`None`] to not generate a long filename when encoding
+    pub(crate) name: Option<Box<str>>,
     pub(crate) sfn: Sfn,
     pub(crate) attributes: RawAttributes,
     pub(crate) created: Option<PrimitiveDateTime>,
@@ -158,7 +159,7 @@ pub(crate) struct MinProperties {
 impl From<RawProperties> for MinProperties {
     fn from(value: RawProperties) -> Self {
         Self {
-            name: Box::from(value.name),
+            name: value.name.map(|name| name.into_boxed_str()),
             sfn: value.sfn,
             attributes: value.attributes,
             created: value.created,
@@ -189,7 +190,8 @@ where
 /// A resolved file/directory entry (for internal usage only)
 #[derive(Debug, Clone)]
 pub(crate) struct RawProperties {
-    pub(crate) name: String,
+    /// Set to [`None`] to not generate a long filename when encoding
+    pub(crate) name: Option<String>,
     pub(crate) sfn: Sfn,
     pub(crate) is_dir: bool,
     pub(crate) attributes: RawAttributes,
@@ -203,6 +205,12 @@ pub(crate) struct RawProperties {
 }
 
 impl RawProperties {
+    pub(crate) fn name(&self, codepage: Codepage) -> String {
+        self.name
+            .clone()
+            .unwrap_or_else(|| self.sfn.decode(codepage))
+    }
+
     pub(crate) fn into_dir_entry<'a, P, S, C>(
         self,
         path: P,
@@ -213,7 +221,7 @@ impl RawProperties {
         S: BlockRead,
         C: Clock,
     {
-        let entry_path = path.as_ref().join(&self.name);
+        let entry_path = path.as_ref().join(self.name(fs.options.codepage));
 
         DirEntry {
             entry: Properties::from_raw(self, entry_path.into(), fs.options.codepage),
@@ -223,7 +231,7 @@ impl RawProperties {
 
     pub(crate) fn from_chain(props: MinProperties, chain: DirEntryChain) -> Self {
         Self {
-            name: String::from(props.name),
+            name: props.name.map(|s| s.into_string()),
             sfn: props.sfn,
             is_dir: props.attributes.contains(RawAttributes::DIRECTORY),
             attributes: props.attributes,
@@ -240,7 +248,9 @@ impl RawProperties {
 impl From<Properties> for RawProperties {
     fn from(value: Properties) -> Self {
         Self {
-            name: String::from(value.path.file_name().expect("the path is normalized")),
+            name: Some(String::from(
+                value.path.file_name().expect("the path is normalized"),
+            )),
             sfn: value.sfn.0,
             is_dir: value.is_dir,
             attributes: RawAttributes::from_attributes(value.attributes, value.is_dir),
