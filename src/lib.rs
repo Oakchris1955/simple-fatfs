@@ -8,6 +8,7 @@
 //! - FAT12/16/32 support
 //! - VFAT/LFN (long filenames) support
 //! - Easy-to-implement [`io`] traits
+//! - (Optional) translators for `embedded-storage` (`embedded-storage-translator` feature)
 //!
 //! ## Usage
 //!
