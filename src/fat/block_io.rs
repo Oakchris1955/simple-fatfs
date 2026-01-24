@@ -215,3 +215,205 @@ pub(crate) mod from_std {
 
 #[cfg(feature = "std")]
 pub use from_std::*;
+
+#[cfg(feature = "embedded_storage_translator")]
+pub(crate) mod embedded_storage_translators {
+    use super::*;
+    use core::ops::{Deref, DerefMut};
+
+    use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
+
+    #[inline]
+    fn calc_offset<S>(block: BlockIndex) -> u32
+    where
+        S: ReadNorFlash,
+    {
+        u32::try_from(block).unwrap() * u32::try_from(S::READ_SIZE).unwrap()
+    }
+
+    /// Adapter from [`ReadNorFlash`]
+    #[derive(Debug)]
+    pub struct ReadNorFlashTranslator<S>
+    where
+        S: ReadNorFlash,
+        S::Error: embedded_io::Error,
+    {
+        storage: S,
+    }
+
+    impl<S> ReadNorFlashTranslator<S>
+    where
+        S: ReadNorFlash,
+        S::Error: embedded_io::Error,
+    {
+        /// Create a new [`ReadNorFlashTranslator`] from a flash storage that
+        /// implements [`ReadNorFlash`] and [`embedded_io::Error`]
+        pub fn new(storage: S) -> Self {
+            Self { storage }
+        }
+    }
+
+    impl<S> Deref for ReadNorFlashTranslator<S>
+    where
+        S: ReadNorFlash,
+        S::Error: embedded_io::Error,
+    {
+        type Target = S;
+
+        #[inline]
+        fn deref(&self) -> &Self::Target {
+            &self.storage
+        }
+    }
+
+    impl<S> DerefMut for ReadNorFlashTranslator<S>
+    where
+        S: ReadNorFlash,
+        S::Error: embedded_io::Error,
+    {
+        #[inline]
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.storage
+        }
+    }
+
+    impl<S> ErrorType for ReadNorFlashTranslator<S>
+    where
+        S: ReadNorFlash,
+        S::Error: embedded_io::Error,
+    {
+        type Error = S::Error;
+    }
+
+    impl<S> BlockBase for ReadNorFlashTranslator<S>
+    where
+        S: ReadNorFlash,
+        S::Error: embedded_io::Error,
+    {
+        #[inline]
+        fn block_size(&self) -> BlockSize {
+            S::READ_SIZE.try_into().unwrap()
+        }
+
+        fn block_count(&self) -> BlockCount {
+            (self.storage.capacity() / S::READ_SIZE).try_into().unwrap()
+        }
+    }
+
+    impl<S> BlockRead for ReadNorFlashTranslator<S>
+    where
+        S: ReadNorFlash,
+        S::Error: embedded_io::Error,
+    {
+        fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
+            self.storage.read(calc_offset::<S>(block), buf)
+        }
+    }
+
+    /// Adapter from [`NorFlash`]
+    #[derive(Debug)]
+    pub struct MultiWriteNorFlashTranslator<S>
+    where
+        S: NorFlash,
+        S::Error: embedded_io::Error,
+    {
+        read_translator: ReadNorFlashTranslator<S>,
+    }
+
+    impl<S> MultiWriteNorFlashTranslator<S>
+    where
+        S: NorFlash,
+        S::Error: embedded_io::Error,
+    {
+        /// Create a new [`MultiWriteNorFlashTranslator`] from a flash storage that
+        /// implements [`NorFlash`] and [`embedded_io::Error`]
+        pub fn new(storage: S) -> Self {
+            Self {
+                read_translator: ReadNorFlashTranslator::new(storage),
+            }
+        }
+    }
+
+    impl<S> Deref for MultiWriteNorFlashTranslator<S>
+    where
+        S: NorFlash,
+        S::Error: embedded_io::Error,
+    {
+        type Target = ReadNorFlashTranslator<S>;
+
+        #[inline]
+        fn deref(&self) -> &Self::Target {
+            &self.read_translator
+        }
+    }
+
+    impl<S> DerefMut for MultiWriteNorFlashTranslator<S>
+    where
+        S: NorFlash,
+        S::Error: embedded_io::Error,
+    {
+        #[inline]
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.read_translator
+        }
+    }
+
+    impl<S> ErrorType for MultiWriteNorFlashTranslator<S>
+    where
+        S: NorFlash,
+        S::Error: embedded_io::Error,
+    {
+        type Error = S::Error;
+    }
+
+    impl<S> BlockBase for MultiWriteNorFlashTranslator<S>
+    where
+        S: NorFlash,
+        S::Error: embedded_io::Error,
+    {
+        #[inline]
+        fn block_size(&self) -> BlockSize {
+            self.read_translator.block_size()
+        }
+
+        #[inline]
+        fn block_count(&self) -> BlockCount {
+            self.read_translator.block_count()
+        }
+    }
+
+    impl<S> BlockRead for MultiWriteNorFlashTranslator<S>
+    where
+        S: NorFlash,
+        S::Error: embedded_io::Error,
+    {
+        #[inline]
+        fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
+            self.read_translator.read(block, buf)
+        }
+    }
+
+    impl<S> BlockWrite for MultiWriteNorFlashTranslator<S>
+    where
+        S: NorFlash,
+        S::Error: embedded_io::Error,
+    {
+        fn write(&mut self, block: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
+            let from = calc_offset::<S>(block);
+
+            self.storage
+                .erase(from, from + u32::try_from(buf.len()).unwrap())?;
+            self.storage.write(from, buf)?;
+
+            Ok(())
+        }
+
+        fn flush(&mut self) -> Result<(), Self::Error> {
+            // everything is immediately flushed
+            Ok(())
+        }
+    }
+}
+
+#[cfg(feature = "embedded_storage_translator")]
+pub use embedded_storage_translators::*;

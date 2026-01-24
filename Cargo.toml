@@ -12,6 +12,7 @@ bincode = { version = "2.0.1", default-features = false, features = [ "alloc", "
 bitfield-struct = "0.8.0"
 bitflags = { version = "2.6.0" }
 embedded-io = { version = "0.6.1" }
+embedded-storage = { version = "0.3.1", optional = true }
 log = "0.4.22"
 oem_cp = "2.1.0"
 time = { version = "0.3.36", default-features = false, features = [ "parsing", "macros" ]}
@@ -25,6 +26,8 @@ std = ["time/std", "time/local-offset", "embedded-io/std"]
 bloom = ["dep:siphasher"]
 # 64-bit logical block addressing
 lba64 = []
+# embedded-storage block IO translators
+embedded_storage_translator = ["dep:embedded-storage"]
 codepage = []
 cp720 = []
 cp737 = []

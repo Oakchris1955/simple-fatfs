@@ -73,6 +73,11 @@
 //!
 //!   Switch from 32-bit to 64-bit logical block addressing for the [`block_io`] traits
 //!
+//! - `embedded_storage_translator`
+//!
+//!   Translator for implementing block-based IO for `embedded-storage`'s
+//!   `ReadNorFlash` and `NorFlash` traits
+//!
 //! - `codepage`
 //!
 //!   Enables all codepages listed below (codepage 437 - OEM United States is always enabled)
