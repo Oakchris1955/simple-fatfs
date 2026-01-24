@@ -181,8 +181,8 @@ pub(crate) const LAST_AND_UNUSED_ENTRY: u8 = 0x00;
 
 /// Serialize `MinProperties` into bytes
 #[derive(Debug)]
-pub(crate) struct EntryComposer {
-    entries: Box<[MinProperties]>,
+pub(crate) struct EntryComposer<'a> {
+    entries: &'a [MinProperties],
     entry_index: usize,
 
     lfn_iter: Option<LFNEntryGenerator>,
@@ -190,8 +190,8 @@ pub(crate) struct EntryComposer {
     codepage: Codepage,
 }
 
-impl EntryComposer {
-    pub(crate) fn new(entries: Box<[MinProperties]>, codepage: Codepage) -> Self {
+impl<'a> EntryComposer<'a> {
+    pub(crate) fn new(entries: &'a [MinProperties], codepage: Codepage) -> Self {
         Self {
             entries,
             entry_index: 0,
@@ -203,7 +203,7 @@ impl EntryComposer {
     }
 }
 
-impl Iterator for EntryComposer {
+impl Iterator for EntryComposer<'_> {
     type Item = [u8; DIRENTRY_SIZE];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -264,7 +264,7 @@ impl Iterator for EntryComposer {
     }
 }
 
-impl iter::FusedIterator for EntryComposer {}
+impl iter::FusedIterator for EntryComposer<'_> {}
 
 #[derive(Debug)]
 pub(crate) struct ReadDirInt<'a, S, C>

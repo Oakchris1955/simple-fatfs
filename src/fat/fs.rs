@@ -1301,7 +1301,7 @@ where
         // we need to allocate a cluster
         let dir_cluster = self.allocate_clusters(num::NonZero::new(1).unwrap(), None)?;
 
-        let entries = Box::from([
+        let entries = [
             MinProperties {
                 name: Box::from(typed_path::constants::windows::CURRENT_DIR_STR),
                 sfn: CURRENT_DIR_SFN,
@@ -1327,10 +1327,10 @@ where
                     EntryLocationUnit::RootDirSector(_) => 0,
                 },
             },
-        ]);
+        ];
 
         // this composer will ALWAYS generate 2 entries
-        let entries_iter = EntryComposer::new(entries, self.options.codepage);
+        let entries_iter = EntryComposer::new(&entries, self.options.codepage);
 
         self.load_nth_sector(self.data_cluster_to_partition_sector(dir_cluster))?;
 
@@ -1374,13 +1374,13 @@ where
     /// Panics if the `entries` array is empty
     pub(crate) fn insert_to_entry_chain(
         &self,
-        entries: Box<[MinProperties]>,
+        entries: &[MinProperties],
     ) -> FSResult<DirEntryChain, S::Error> {
         let mut entries_needed = 0;
 
         self._go_to_cached_dir()?;
 
-        for entry in &entries {
+        for entry in entries {
             entries_needed += calc_entries_needed(&*entry.name, self.options.codepage).get();
         }
 
@@ -1974,7 +1974,7 @@ where
 
         let entries = [raw_properties.clone()];
 
-        let chain = self.insert_to_entry_chain(Box::new(entries))?;
+        let chain = self.insert_to_entry_chain(&entries)?;
 
         #[cfg(feature = "bloom")]
         if let Some(filter) = &mut self.dir_info.borrow_mut().filter {
@@ -2051,7 +2051,7 @@ where
 
         self.go_to_dir(parent_dir)?;
 
-        self.insert_to_entry_chain(Box::new(entries))?;
+        self.insert_to_entry_chain(&entries)?;
 
         Ok(())
     }
@@ -2170,7 +2170,7 @@ where
             file_size: old_props.file_size,
             data_cluster: old_props.data_cluster,
         };
-        self.insert_to_entry_chain(Box::from([props]))?;
+        self.insert_to_entry_chain(&[props])?;
 
         self.remove_entry_chain(&old_chain)?;
 
@@ -2444,7 +2444,7 @@ where
 
         let entries = [raw_properties];
 
-        self.insert_to_entry_chain(Box::new(entries))?;
+        self.insert_to_entry_chain(&entries)?;
 
         Ok(Some(()))
     }
