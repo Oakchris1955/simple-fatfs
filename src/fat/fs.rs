@@ -1779,7 +1779,7 @@ where
                 let entry = entry?;
 
                 if entry.attributes == RawAttributes::VOLUME_ID {
-                    break 'search entry.sfn.get_byte_slice();
+                    break 'search *entry.sfn;
                 }
             }
 
@@ -2440,11 +2440,7 @@ where
 
         let raw_properties = MinProperties {
             name: None,
-            // TODO: better Sfn API
-            sfn: Sfn {
-                name: label_bytes[..SFN_NAME_LEN].try_into().unwrap(),
-                ext: label_bytes[SFN_NAME_LEN..].try_into().unwrap(),
-            },
+            sfn: Sfn::new_from_slice(label_bytes),
             attributes: RawAttributes::empty() | RawAttributes::VOLUME_ID,
             created: Some(now),
             modified: now,

@@ -22,14 +22,11 @@ pub(crate) fn as_sfn(string: &str, codepage: Codepage) -> Option<Sfn> {
     let (name, ext) = string.split_once('.').unwrap_or((string, ""));
 
     // create a sfn with padding
-    let mut result = Sfn {
-        name: *b"        ",
-        ext: *b"   ",
-    };
+    let mut result = Sfn::default();
 
-    copy_cp_chars(&mut result.name, name, codepage)?;
+    copy_cp_chars(result.name_mut(), name, codepage)?;
 
-    copy_cp_chars(&mut result.ext, ext, codepage)?;
+    copy_cp_chars(result.ext_mut(), ext, codepage)?;
 
     Some(result)
 }
@@ -160,10 +157,7 @@ impl Iterator for SfnGenerator {
             }
         }
 
-        Some(Sfn {
-            name: self.name,
-            ext: self.ext,
-        })
+        Some(Sfn::new(self.name, self.ext))
     }
 }
 
@@ -232,82 +226,34 @@ where
 fn test_sfn_generator_long() {
     let mut generator = SfnGenerator::new("HELLO-WORLD.TXT", Codepage::default());
 
-    assert_eq!(
-        generator.next(),
-        Some(Sfn {
-            name: *b"HELLO-~1",
-            ext: *b"TXT"
-        })
-    );
-    assert_eq!(
-        generator.next(),
-        Some(Sfn {
-            name: *b"HELLO-~2",
-            ext: *b"TXT"
-        })
-    );
+    assert_eq!(generator.next(), Some(Sfn::new(*b"HELLO-~1", *b"TXT")));
+    assert_eq!(generator.next(), Some(Sfn::new(*b"HELLO-~2", *b"TXT")));
     let mut generator = generator.skip(7);
-    assert_eq!(
-        generator.next(),
-        Some(Sfn {
-            name: *b"HELLO~10",
-            ext: *b"TXT"
-        })
-    );
+    assert_eq!(generator.next(), Some(Sfn::new(*b"HELLO~10", *b"TXT")));
 }
 
 #[test]
 fn test_sfn_generator_short() {
     let mut generator = SfnGenerator::new("run.jpeg", Codepage::default());
 
-    assert_eq!(
-        generator.next(),
-        Some(Sfn {
-            name: *b"RUN~1   ",
-            ext: *b"JPE"
-        })
-    );
-    assert_eq!(
-        generator.next(),
-        Some(Sfn {
-            name: *b"RUN~2   ",
-            ext: *b"JPE"
-        })
-    );
+    assert_eq!(generator.next(), Some(Sfn::new(*b"RUN~1   ", *b"JPE")));
+    assert_eq!(generator.next(), Some(Sfn::new(*b"RUN~2   ", *b"JPE")));
     let mut generator = generator.skip(7);
-    assert_eq!(
-        generator.next(),
-        Some(Sfn {
-            name: *b"RUN~10  ",
-            ext: *b"JPE"
-        })
-    );
+    assert_eq!(generator.next(), Some(Sfn::new(*b"RUN~10  ", *b"JPE")));
 }
 
 #[test]
 fn test_sfn_generator_cp_chars_cp437() {
     let mut generator = SfnGenerator::new("tëst.txt", Codepage::CP437);
 
-    assert_eq!(
-        generator.next(),
-        Some(Sfn {
-            name: *b"T\x89ST~1  ",
-            ext: *b"TXT"
-        })
-    );
+    assert_eq!(generator.next(), Some(Sfn::new(*b"T\x89ST~1  ", *b"TXT")));
 }
 
 #[test]
 fn test_sfn_generator_unknown_chars() {
     let mut generator = SfnGenerator::new("😇.😈", Codepage::default());
 
-    assert_eq!(
-        generator.next(),
-        Some(Sfn {
-            name: *b"~1      ",
-            ext: *b"   "
-        })
-    );
+    assert_eq!(generator.next(), Some(Sfn::new(*b"~1      ", *b"   ")));
 }
 
 #[cfg(all(test, feature = "std"))]
@@ -327,10 +273,7 @@ fn run_gen_sfn(string: &str) -> Option<Sfn> {
 fn test_gen_sfn_match() {
     assert_eq!(
         run_gen_sfn("TEST.TXT"),
-        Some(Sfn {
-            name: *b"TEST    ",
-            ext: *b"TXT"
-        })
+        Some(Sfn::new(*b"TEST    ", *b"TXT"))
     )
 }
 
@@ -339,9 +282,6 @@ fn test_gen_sfn_match() {
 fn test_gen_sfn_mismatch() {
     assert_eq!(
         run_gen_sfn("test.txt"),
-        Some(Sfn {
-            name: *b"TEST~1  ",
-            ext: *b"TXT"
-        })
+        Some(Sfn::new(*b"TEST~1  ", *b"TXT"))
     )
 }
