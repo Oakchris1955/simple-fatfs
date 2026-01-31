@@ -224,11 +224,8 @@ pub(crate) mod embedded_storage_translators {
     use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
 
     #[inline]
-    fn calc_offset<S>(block: BlockIndex) -> u32
-    where
-        S: ReadNorFlash,
-    {
-        u32::try_from(block).unwrap() * u32::try_from(S::READ_SIZE).unwrap()
+    fn calc_offset(block: BlockIndex, block_size: u32) -> u32 {
+        u32::try_from(block).unwrap() * block_size
     }
 
     /// Adapter from [`ReadNorFlash`]
@@ -306,11 +303,22 @@ pub(crate) mod embedded_storage_translators {
         S::Error: embedded_io::Error,
     {
         fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
-            self.storage.read(calc_offset::<S>(block), buf)
+            self.storage
+                .read(calc_offset(block, S::READ_SIZE.try_into().unwrap()), buf)
         }
     }
 
     /// Adapter from [`NorFlash`]
+    ///
+    /// It is assumed that [`S::ERASE_SIZE`] is a multiple
+    /// of both [`S::READ_SIZE`] and [`S::WRITE_SIZE`] and that
+    /// it is bigger than both of them.
+    ///
+    /// Each block with be [`S::ERASE_SIZE`] bytes
+    ///
+    /// [`S::READ_SIZE`]: ReadNorFlash::READ_SIZE
+    /// [`S::WRITE_SIZE`]: NorFlash::WRITE_SIZE
+    /// [`S::ERASE_SIZE`]: NorFlash::ERASE_SIZE
     #[derive(Debug)]
     pub struct MultiWriteNorFlashTranslator<S>
     where
@@ -373,12 +381,13 @@ pub(crate) mod embedded_storage_translators {
     {
         #[inline]
         fn block_size(&self) -> BlockSize {
-            self.read_translator.block_size()
+            S::ERASE_SIZE.try_into().unwrap()
         }
 
-        #[inline]
         fn block_count(&self) -> BlockCount {
-            self.read_translator.block_count()
+            (self.storage.capacity() / S::ERASE_SIZE)
+                .try_into()
+                .unwrap()
         }
     }
 
@@ -399,7 +408,7 @@ pub(crate) mod embedded_storage_translators {
         S::Error: embedded_io::Error,
     {
         fn write(&mut self, block: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
-            let from = calc_offset::<S>(block);
+            let from = calc_offset(block, S::ERASE_SIZE.try_into().unwrap());
 
             self.storage
                 .erase(from, from + u32::try_from(buf.len()).unwrap())?;
