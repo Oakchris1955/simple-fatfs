@@ -8,6 +8,7 @@
 //! - FAT12/16/32 support
 //! - VFAT/LFN (long filenames) support
 //! - Easy-to-implement [`io`] traits
+//! - (Optional) translators for `embedded-storage` (`embedded-storage-translator` feature)
 //!
 //! ## Usage
 //!
@@ -72,6 +73,11 @@
 //! - `lba64`
 //!
 //!   Switch from 32-bit to 64-bit logical block addressing for the [`block_io`] traits
+//!
+//! - `embedded_storage_translator`
+//!
+//!   Translator for implementing block-based IO for `embedded-storage`'s
+//!   `ReadNorFlash` and `NorFlash` traits
 //!
 //! - `codepage`
 //!
