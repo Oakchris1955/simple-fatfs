@@ -162,7 +162,7 @@
 //!   various volume label functions
 //!
 //!   For more info, please check <https://man7.org/linux/man-pages/man8/fatlabel.8.html>
-//! 
+//!
 //! [`Read`]: io::Read
 //! [`Seek`]: io::Seek
 //! [`Write`]: io::Write
