@@ -398,6 +398,38 @@ impl Default for FileFilter {
 type SyncSectorBufferFn<S, C> = fn(&FileSystem<S, C>) -> Result<(), <S as ErrorType>::Error>;
 type UnmountFn<S, C> = fn(&FileSystem<S, C>) -> FSResult<(), <S as ErrorType>::Error>;
 
+/// Determine the sector size of a FAT filesystem without fully constructing it.
+// This is essentially a copy of the beginning of `FileSystem::new`
+pub fn determine_fs_sector_size<S>(mut storage: S) -> FSResult<u16, S::Error>
+where
+    S: BlockRead,
+{
+    let block_size = storage.block_size();
+
+    if !block_size.is_power_of_two() {
+        // block size is 0 or not a power of 2
+        return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
+    }
+    #[expect(clippy::cast_possible_truncation)]
+    if block_size > MAX_SECTOR_SIZE as BlockSize {
+        // block size is larger than MAX_SECTOR_SIZE
+        return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
+    }
+
+    use utils::bincode::BINCODE_CONFIG;
+
+    // Begin by reading the boot record
+    let mut buffer = vec![0_u8; block_size.try_into().unwrap()].into_boxed_slice();
+
+    storage.read(0, &mut buffer)?;
+
+    let bpb: BpbFat = bincode::decode_from_slice(&buffer[..BPBFAT_SIZE], BINCODE_CONFIG)
+        .map(|(v, _)| v)
+        .map_err(utils::bincode::map_err_dec)?;
+
+    Ok(bpb.bytes_per_sector)
+}
+
 /// An API to process a FAT filesystem
 #[derive(Debug)]
 pub struct FileSystem<S, C>

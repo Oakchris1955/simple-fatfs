@@ -1235,6 +1235,20 @@ fn FAT_tables_after_fat32_write_are_identical() {
 }
 
 #[test]
+fn assert_fat_sector_size() {
+    static TEST_CASES: &[(&[u8], u16)] = &[(MINFS, 512), (FAT12, 512), (FAT16, 512), (FAT32, 512)];
+
+    for case in TEST_CASES {
+        use std::io::Cursor;
+
+        let mut storage = FromStd::new(Cursor::new(case.0)).unwrap();
+        let sector_size = determine_fs_sector_size(&mut storage).unwrap();
+
+        assert_eq!(sector_size, case.1)
+    }
+}
+
+#[test]
 fn assert_img_fat_type() {
     static TEST_CASES: &[(&[u8], FATType)] = &[
         (MINFS, FATType::FAT12),
