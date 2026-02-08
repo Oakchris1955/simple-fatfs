@@ -667,7 +667,8 @@ where
     }
 
     fn _go_to_root_directory(&self) {
-        *self.dir_info.borrow_mut() = DirInfo::at_root_dir(&self.boot_record.borrow());
+        self.dir_info
+            .replace(DirInfo::at_root_dir(&self.boot_record.borrow()));
     }
 
     // This is a helper function for `go_to_dir`
@@ -802,13 +803,13 @@ where
 
         while current_cluster < self.props.total_clusters {
             if self.read_nth_FAT_entry(current_cluster)? == FATEntry::Free {
-                *self.first_free_cluster.borrow_mut() = current_cluster;
+                self.first_free_cluster.replace(current_cluster);
 
                 match *self.boot_record.borrow_mut() {
                     BootRecord::Fat(ref mut boot_record_fat) => {
                         if let Ebr::FAT32(_, fsinfo) = &mut boot_record_fat.ebr {
                             fsinfo.first_free_cluster = current_cluster;
-                            *self.fsinfo_modified.borrow_mut() = true;
+                            self.fsinfo_modified.replace(true);
                         }
                     }
                     BootRecord::ExFAT(_) => todo!("ExFAT not yet implemented"),
@@ -819,7 +820,8 @@ where
             current_cluster += 1;
         }
 
-        *self.first_free_cluster.borrow_mut() = self.props.total_clusters - 1;
+        self.first_free_cluster
+            .replace(self.props.total_clusters - 1);
         Ok(None)
     }
 
@@ -924,7 +926,7 @@ where
 
                 // Now that we have synced the sector buffer, there's no reason
                 // to sync it again if there have been no changes
-                *self.sync_f.borrow_mut() = None;
+                self.sync_f.replace(None);
             }
 
             self.sector_buffer.borrow_mut().read(&self.storage, n)?;
@@ -1122,7 +1124,7 @@ where
         };
 
         if entry == FATEntry::Free && n < *self.first_free_cluster.borrow() {
-            *self.first_free_cluster.borrow_mut() = n;
+            self.first_free_cluster.replace(n);
         }
 
         // lastly, update the FSInfoFAT32 structure is it is available
@@ -1137,7 +1139,7 @@ where
                     }
                     _ => fsinfo.free_cluster_count -= 1,
                 };
-                *self.fsinfo_modified.borrow_mut() = true;
+                self.fsinfo_modified.replace(true);
             }
         }
 
@@ -1603,8 +1605,8 @@ where
 
     /// Marks that a modification has been made to the storage medium, setting the `sync_f` and `unmount_f` fields
     pub(crate) fn set_modified(&self) {
-        *self.sync_f.borrow_mut() = Some(Self::sync_sector_buffer);
-        *self.unmount_f.borrow_mut() = Some(Self::unmount);
+        self.sync_f.replace(Some(Self::sync_sector_buffer));
+        self.unmount_f.replace(Some(Self::unmount));
     }
 
     pub(crate) fn sync_sector_buffer(&self) -> Result<(), S::Error> {
@@ -1636,7 +1638,7 @@ where
         }
 
         // we don't want to call this again for no reason
-        *self.sync_f.borrow_mut() = None;
+        self.sync_f.replace(None);
 
         Ok(())
     }
@@ -1660,7 +1662,7 @@ where
                 }
             }
 
-            *self.fsinfo_modified.borrow_mut() = false;
+            self.fsinfo_modified.replace(false);
         }
 
         Ok(())
