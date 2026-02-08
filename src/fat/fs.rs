@@ -1009,7 +1009,7 @@ where
                     }
                 }
             },
-            FATType::FAT32 => match value {
+            FATType::FAT32 => match value & 0x0FFFFFFF {
                 0x00000000 => FATEntry::Free,
                 0x0FFFFFF7 => FATEntry::Bad,
                 #[expect(clippy::manual_range_patterns)]
@@ -1104,7 +1104,14 @@ where
             FATType::FAT16 | FATType::FAT32 => {
                 self.load_nth_sector(entry_props.fat_sector)?;
 
-                let value_bytes = value.to_le_bytes();
+                let mut value_bytes = value.to_le_bytes();
+
+                if self.fat_type == FATType::FAT32 {
+                    // the high four bits must be preserved
+                    let original_high_byte = self.sector_buffer.borrow()
+                        [entry_props.sector_offset + usize::from(entry_size) - 1];
+                    value_bytes[3] |= original_high_byte & 0xF0;
+                }
 
                 self.sector_buffer.borrow_mut()[entry_props.sector_offset
                     ..entry_props.sector_offset + usize::from(entry_size)]
