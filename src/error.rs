@@ -1,4 +1,3 @@
-use bincode::error::{DecodeError, EncodeError};
 use embedded_io::*;
 
 use crate::*;
@@ -50,13 +49,6 @@ where
      File a bug report here: <https://github.com/Oakchris1955/simple-fatfs/issues>
     */
     MalformedPath,
-    /**
-     [`bincode`] errored out while (de)serializing
-
-     This error variant should NEVER be raised.
-     If you get this error, open an issue: <https://github.com/Oakchris1955/simple-fatfs/issues>
-    */
-    BincodeError(BincodeError),
     /// Expected a directory
     NotADirectory,
     /// Found a directory when we expected a file
@@ -93,18 +85,6 @@ where
     UnexpectedEof,
     /// An IO error occured
     IOError(I),
-}
-
-/// An encode/decode-related error
-///
-/// This error enum should NEVER be raised.
-/// If you get it, file an issue: <https://github.com/Oakchris1955/simple-fatfs/issues>
-#[derive(Debug)]
-pub enum BincodeError {
-    /// A decode-related error
-    DecodeError(DecodeError),
-    /// An encode-related error
-    EncodeError(EncodeError),
 }
 
 impl<I> From<I> for FSError<I>

@@ -1206,7 +1206,7 @@ fn FAT_tables_after_fat32_write_are_identical() {
     match &*fs.boot_record.borrow() {
         BootRecord::Fat(boot_record_fat) => match &boot_record_fat.ebr {
             Ebr::FAT32(ebr_fat32, _) => assert!(
-                !ebr_fat32.extended_flags.mirroring_disabled(),
+                !ebr_fat32.extended_flags.get().mirroring_disabled(),
                 "mirroring should be enabled for this .img file"
             ),
             _ => unreachable!(),

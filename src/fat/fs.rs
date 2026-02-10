@@ -18,6 +18,7 @@ use alloc::{
 use ::time;
 use embedded_io::*;
 use time::PrimitiveDateTime;
+use zerocopy::{FromBytes, IntoBytes};
 
 /// An enum representing different variants of the FAT filesystem
 ///
@@ -214,7 +215,7 @@ impl DirInfo {
                     // it doesn't really matter what value we put in here, since we won't be using it
                     Ebr::FAT12_16(_ebr_fat12_16) => EntryLocationUnit::RootDirSector(0),
                     Ebr::FAT32(ebr_fat32, _) => {
-                        EntryLocationUnit::DataCluster(ebr_fat32.root_cluster)
+                        EntryLocationUnit::DataCluster(ebr_fat32.root_cluster.get())
                     }
                 },
                 BootRecord::ExFAT(_boot_record_exfat) => todo!(),
@@ -307,7 +308,7 @@ pub(crate) struct FSProperties {
 impl From<&BootRecord> for FSProperties {
     fn from(value: &BootRecord) -> Self {
         let sector_size = match value {
-            BootRecord::Fat(boot_record_fat) => boot_record_fat.bpb.bytes_per_sector,
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.bpb.bytes_per_sector.get(),
             BootRecord::ExFAT(boot_record_exfat) => 1 << boot_record_exfat.sector_shift,
         };
         let cluster_size = match value {
@@ -416,18 +417,14 @@ where
         return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
     }
 
-    use utils::bincode::BINCODE_CONFIG;
-
     // Begin by reading the boot record
     let mut buffer = vec![0_u8; block_size.try_into().unwrap()].into_boxed_slice();
 
     storage.read(0, &mut buffer)?;
 
-    let bpb: BpbFat = bincode::decode_from_slice(&buffer[..BPBFAT_SIZE], BINCODE_CONFIG)
-        .map(|(v, _)| v)
-        .map_err(utils::bincode::map_err_dec)?;
+    let (bpb, _) = BpbFat::ref_from_prefix(&buffer).unwrap();
 
-    Ok(bpb.bytes_per_sector)
+    Ok(bpb.bytes_per_sector.into())
 }
 
 /// An API to process a FAT filesystem
@@ -521,37 +518,26 @@ where
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
 
-        use utils::bincode::BINCODE_CONFIG;
-
         // Begin by reading the boot record
         // We don't know the sector size yet, so we just go with the biggest possible one for now
         let buffer = SectorBuffer::new(&mut storage)?;
 
-        let bpb: BpbFat = bincode::decode_from_slice(&buffer[..BPBFAT_SIZE], BINCODE_CONFIG)
-            .map(|(v, _)| v)
-            .map_err(utils::bincode::map_err_dec)?;
+        let (bpb, _) = BpbFat::read_from_prefix(&buffer).unwrap();
 
         if block_size > BlockSize::from(bpb.bytes_per_sector) {
             // block size is larger than sector size
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
 
-        let mut buffer = buffer.init(&mut storage, bpb.bytes_per_sector)?;
+        let mut buffer = buffer.init(&mut storage, bpb.bytes_per_sector.get())?;
         let storage = RefCell::from(storage);
 
         let ebr = if bpb.table_size_16 == 0 {
-            let ebr_fat32: EBRFAT32 = bincode::decode_from_slice(
-                &buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE],
-                BINCODE_CONFIG,
-            )
-            .map(|(v, _)| v)
-            .map_err(utils::bincode::map_err_dec)?;
+            let (ebr_fat32, _) = EBRFAT32::read_from_prefix(&buffer[BPBFAT_SIZE..]).unwrap();
 
             buffer.read(&storage, ebr_fat32.fat_info.into())?;
 
-            let fsinfo: FSInfoFAT32 = bincode::decode_from_slice(&buffer, BINCODE_CONFIG)
-                .map(|(v, _)| v)
-                .map_err(utils::bincode::map_err_dec)?;
+            let fsinfo = FSInfoFAT32::read_from_bytes(&buffer).unwrap();
 
             if !fsinfo.verify_signature() {
                 log::error!("FAT32 FSInfo has invalid signature(s)");
@@ -561,12 +547,9 @@ where
             Ebr::FAT32(ebr_fat32, fsinfo)
         } else {
             Ebr::FAT12_16(
-                bincode::decode_from_slice(
-                    &buffer[BPBFAT_SIZE..BPBFAT_SIZE + EBR_SIZE],
-                    BINCODE_CONFIG,
-                )
-                .map(|(v, _)| v)
-                .map_err(utils::bincode::map_err_dec)?,
+                FromBytes::read_from_prefix(&buffer[BPBFAT_SIZE..])
+                    .unwrap()
+                    .0,
             )
         };
 
@@ -822,7 +805,7 @@ where
                         && fsinfo.first_free_cluster <= self.props.total_sectors
                     {
                         first_free_cluster =
-                            cmp::min(first_free_cluster, fsinfo.first_free_cluster);
+                            cmp::min(first_free_cluster, fsinfo.first_free_cluster.get());
                     }
                 }
 
@@ -840,7 +823,7 @@ where
                 match *self.boot_record.borrow_mut() {
                     BootRecord::Fat(ref mut boot_record_fat) => {
                         if let Ebr::FAT32(_, fsinfo) = &mut boot_record_fat.ebr {
-                            fsinfo.first_free_cluster = current_cluster;
+                            fsinfo.first_free_cluster = current_cluster.into();
                             self.fsinfo_modified.replace(true);
                         }
                     }
@@ -1165,8 +1148,8 @@ where
                 match entry {
                     FATEntry::Free => {
                         fsinfo.free_cluster_count += 1;
-                        if n < fsinfo.first_free_cluster {
-                            fsinfo.first_free_cluster = n;
+                        if n < fsinfo.first_free_cluster.get() {
+                            fsinfo.first_free_cluster = n.into();
                         }
                     }
                     _ => fsinfo.free_cluster_count -= 1,
@@ -1350,7 +1333,7 @@ where
                 name: None,
                 sfn: CURRENT_DIR_SFN,
                 // this needs to be set when creating a file
-                attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
+                attributes: RawAttributes::DIRECTORY,
                 created: Some(datetime),
                 modified: datetime,
                 accessed: Some(datetime.date()),
@@ -1361,7 +1344,7 @@ where
                 name: None,
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
-                attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
+                attributes: RawAttributes::DIRECTORY,
                 created: Some(datetime),
                 modified: datetime,
                 accessed: Some(datetime.date()),
@@ -1652,7 +1635,7 @@ where
                         self._sync_FAT_sector(&fat_sector_props)?;
                     }
                     Ebr::FAT32(ebr_fat32, _) => {
-                        if ebr_fat32.extended_flags.mirroring_disabled() {
+                        if ebr_fat32.extended_flags.get().mirroring_disabled() {
                             self._sync_current_sector()?;
                         } else {
                             self._sync_FAT_sector(&fat_sector_props)?;
@@ -1678,19 +1661,14 @@ where
     /// Sync the [`FSInfoFAT32`] back to the storage medium
     /// if this is FAT32
     pub(crate) fn sync_fsinfo(&self) -> FSResult<(), S::Error> {
-        use utils::bincode::BINCODE_CONFIG;
-
         if *self.fsinfo_modified.borrow() {
             if let BootRecord::Fat(boot_record_fat) = &*self.boot_record.borrow() {
                 if let Ebr::FAT32(ebr_fat32, fsinfo) = &boot_record_fat.ebr {
                     self.load_nth_sector(ebr_fat32.fat_info.into())?;
 
-                    bincode::encode_into_slice(
-                        fsinfo,
-                        &mut self.sector_buffer.borrow_mut()[..FSINFO_SIZE],
-                        BINCODE_CONFIG,
-                    )
-                    .map_err(utils::bincode::map_err_enc)?;
+                    fsinfo
+                        .write_to_prefix(&mut self.sector_buffer.borrow_mut())
+                        .unwrap();
                 }
             }
 
@@ -1708,33 +1686,20 @@ where
 
             let boot_record = self.boot_record.borrow();
 
-            use utils::bincode::BINCODE_CONFIG;
-
             match &*boot_record {
                 BootRecord::Fat(boot_record_fat) => {
-                    bincode::encode_into_slice(
-                        &boot_record_fat.bpb,
-                        &mut bytes[..BPBFAT_SIZE],
-                        BINCODE_CONFIG,
-                    )
-                    .map_err(utils::bincode::map_err_enc)?;
+                    boot_record_fat.bpb.write_to_prefix(&mut bytes).unwrap();
 
                     match &boot_record_fat.ebr {
                         Ebr::FAT12_16(ebr_fat12_16) => {
-                            bincode::encode_into_slice(
-                                ebr_fat12_16,
-                                &mut bytes[BPBFAT_SIZE..BOOT_RECORD_SIZE],
-                                BINCODE_CONFIG,
-                            )
-                            .map_err(utils::bincode::map_err_enc)?;
+                            ebr_fat12_16
+                                .write_to_prefix(&mut bytes[BPBFAT_SIZE..])
+                                .unwrap();
                         }
                         Ebr::FAT32(ebr_fat32, _) => {
-                            bincode::encode_into_slice(
-                                ebr_fat32,
-                                &mut bytes[BPBFAT_SIZE..BOOT_RECORD_SIZE],
-                                BINCODE_CONFIG,
-                            )
-                            .map_err(utils::bincode::map_err_enc)?;
+                            ebr_fat32
+                                .write_to_prefix(&mut bytes[BPBFAT_SIZE..])
+                                .unwrap();
                         }
                     }
                 }
@@ -2015,7 +1980,7 @@ where
             name: Some(file_name.into()),
             sfn,
             // this needs to be set when creating a file
-            attributes: RawAttributes::empty() | RawAttributes::ARCHIVE,
+            attributes: RawAttributes::ARCHIVE,
             created: Some(now),
             modified: now,
             accessed: Some(now.date()),
@@ -2092,7 +2057,7 @@ where
         let raw_properties = MinProperties {
             name: Some(file_name.into()),
             sfn,
-            attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
+            attributes: RawAttributes::DIRECTORY,
             created: Some(now),
             modified: now,
             accessed: Some(now.date()),
@@ -2180,7 +2145,7 @@ where
                 name: None,
                 sfn: PARENT_DIR_SFN,
                 // this needs to be set when creating a file
-                attributes: RawAttributes::empty() | RawAttributes::DIRECTORY,
+                attributes: RawAttributes::DIRECTORY,
                 created: Some(now),
                 modified: now,
                 accessed: Some(now.date()),
@@ -2197,13 +2162,8 @@ where
                 index: 1,
             };
 
-            use utils::bincode::BINCODE_CONFIG;
-
             self._go_to_cached_dir()?;
-            let mut bytes: [u8; DIRENTRY_SIZE] = [0; DIRENTRY_SIZE];
-
-            bincode::encode_into_slice(FATDirEntry::from(parent_entry), &mut bytes, BINCODE_CONFIG)
-                .map_err(utils::bincode::map_err_enc)?;
+            let bytes: [u8; DIRENTRY_SIZE] = zerocopy::transmute!(FATDirEntry::from(parent_entry));
 
             entry_location.set_bytes(self, bytes)?;
         }
@@ -2482,7 +2442,7 @@ where
         let raw_properties = MinProperties {
             name: None,
             sfn: Sfn::new_from_slice(label_bytes),
-            attributes: RawAttributes::empty() | RawAttributes::VOLUME_ID,
+            attributes: RawAttributes::VOLUME_ID,
             created: Some(now),
             modified: now,
             accessed: Some(now.date()),

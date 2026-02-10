@@ -2,67 +2,61 @@ use super::*;
 
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::String};
+use zerocopy::{little_endian::U16, FromBytes, Immutable, IntoBytes};
 
 use crate::*;
 
 use ::time;
-use bincode::{impl_borrow_decode, Decode, Encode};
-use bitflags::bitflags;
+
 use time::{Date, PrimitiveDateTime};
 
-bitflags! {
-    /// A list of the various (raw) attributes specified for a file/directory
-    ///
-    /// To check whether a given [`Attributes`] struct contains a flag, use the [`contains()`](Attributes::contains()) method
-    ///
-    /// Generated using [bitflags](https://docs.rs/bitflags/2.6.0/bitflags/)
-    #[derive(Debug, Clone, Copy, PartialEq)]
-    pub(crate) struct RawAttributes: u8 {
-        /// This entry is read-only
-        const READ_ONLY = 0x01;
-        /// This entry is normally hidden
-        const HIDDEN = 0x02;
-        /// This entry is a system file
-        const SYSTEM = 0x04;
-        /// This entry represents the volume's ID.
-        /// This is used internally and the library will never return such an entry
-        const VOLUME_ID = 0x08;
-        /// This entry is a directory. You should normally use a [`PathBuf`]s [`is_dir()`](PathBuf::is_dir) method instead
-        const DIRECTORY = 0x10;
-        /// This entry is marked to be archived. Used by archiving software for backing up files and directories
-        const ARCHIVE = 0x20;
-
-        /// This entry is part of a LFN (long filename). Used internally
-        const LFN = Self::READ_ONLY.bits() |
-                    Self::HIDDEN.bits() |
-                    Self::SYSTEM.bits() |
-                    Self::VOLUME_ID.bits();
-    }
-}
-
-impl<Context> bincode::Decode<Context> for RawAttributes {
-    fn decode<D: bincode::de::Decoder<Context = Context>>(
-        decoder: &mut D,
-    ) -> Result<Self, bincode::error::DecodeError> {
-        Ok(RawAttributes::from_bits_truncate(
-            <u8 as bincode::Decode<Context>>::decode(decoder)?,
-        ))
-    }
-}
-
-impl_borrow_decode!(RawAttributes);
-
-impl bincode::Encode for RawAttributes {
-    fn encode<E: bincode::enc::Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), bincode::error::EncodeError> {
-        bincode::Encode::encode(&self.bits(), encoder)?;
-        Ok(())
-    }
-}
+/// A list of the various (raw) attributes specified for a file/directory
+///
+/// To check whether a given [`Attributes`] struct contains a flag, use the [`contains()`](Attributes::contains()) method
+#[derive(Immutable, FromBytes, IntoBytes, Debug, Clone, Copy, PartialEq)]
+#[repr(transparent)]
+pub(crate) struct RawAttributes(u8);
 
 impl RawAttributes {
+    /// This entry is read-only
+    pub(crate) const READ_ONLY: Self = Self(0x01);
+    /// This entry is normally hidden
+    pub(crate) const HIDDEN: Self = Self(0x02);
+    /// This entry is a system file
+    pub(crate) const SYSTEM: Self = Self(0x04);
+    /// This entry represents the volume's ID.
+    /// This is used internally and the library will never return such an entry
+    pub(crate) const VOLUME_ID: Self = Self(0x08);
+    /// This entry is a directory. You should normally use a [`PathBuf`]s [`is_dir()`](PathBuf::is_dir) method instead
+    pub(crate) const DIRECTORY: Self = Self(0x10);
+    /// This entry is marked to be archived. Used by archiving software for backing up files and directories
+    pub(crate) const ARCHIVE: Self = Self(0x20);
+
+    /// This entry is part of a LFN (long filename). Used internally
+    pub(crate) const LFN: Self = Self(
+        Self::READ_ONLY.bits() | Self::HIDDEN.bits() | Self::SYSTEM.bits() | Self::VOLUME_ID.bits(),
+    );
+
+    fn set(&mut self, flags: Self, state: bool) {
+        if state {
+            self.0 |= flags.0;
+        } else {
+            self.0 &= !flags.0;
+        }
+    }
+
+    pub(crate) const fn bits(&self) -> u8 {
+        self.0
+    }
+
+    pub(crate) const fn empty() -> Self {
+        Self(0)
+    }
+
+    pub(crate) fn contains(&self, flags: Self) -> bool {
+        self.0 & flags.0 == flags.0
+    }
+
     pub(crate) fn from_attributes(attributes: Attributes, is_dir: bool) -> Self {
         let mut raw_attributes = RawAttributes::empty();
 
@@ -82,64 +76,18 @@ impl RawAttributes {
 pub(crate) const NONROOT_MIN_DIRENTRIES: usize = 2;
 const FATDIRENTRY_RESERVED_BYTES: usize = 1;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Immutable, FromBytes, IntoBytes, Debug, Clone, Copy)]
+#[repr(C)]
 pub(crate) struct FATDirEntry {
     pub(crate) sfn: Sfn,
     pub(crate) attributes: RawAttributes,
+    _reserved1: [u8; FATDIRENTRY_RESERVED_BYTES],
     pub(crate) created: EntryCreationTime,
     pub(crate) accessed: EntryLastAccessedTime,
-    pub(crate) cluster_high: u16,
+    pub(crate) cluster_high: U16,
     pub(crate) modified: EntryModificationTime,
-    pub(crate) cluster_low: u16,
+    pub(crate) cluster_low: U16,
     pub(crate) file_size: FileSize,
-}
-
-impl<__Context> Decode<__Context> for FATDirEntry {
-    fn decode<__D: bincode::de::Decoder<Context = __Context>>(
-        decoder: &mut __D,
-    ) -> Result<Self, bincode::error::DecodeError> {
-        use bincode::de::read::Reader;
-
-        Ok(Self {
-            sfn: Decode::decode(decoder)?,
-            attributes: Decode::decode(decoder)?,
-            created: {
-                decoder
-                    .reader()
-                    .read(&mut [0_u8; FATDIRENTRY_RESERVED_BYTES])?;
-                Decode::decode(decoder)?
-            },
-            accessed: Decode::decode(decoder)?,
-            cluster_high: Decode::decode(decoder)?,
-            modified: Decode::decode(decoder)?,
-            cluster_low: Decode::decode(decoder)?,
-            file_size: Decode::decode(decoder)?,
-        })
-    }
-}
-
-impl_borrow_decode!(FATDirEntry);
-
-impl Encode for FATDirEntry {
-    fn encode<__E: bincode::enc::Encoder>(
-        &self,
-        encoder: &mut __E,
-    ) -> Result<(), bincode::error::EncodeError> {
-        use bincode::enc::write::Writer;
-
-        Encode::encode(&self.sfn, encoder)?;
-        Encode::encode(&self.attributes, encoder)?;
-        encoder
-            .writer()
-            .write(&[0_u8; FATDIRENTRY_RESERVED_BYTES])?;
-        Encode::encode(&self.created, encoder)?;
-        Encode::encode(&self.accessed, encoder)?;
-        Encode::encode(&self.cluster_high, encoder)?;
-        Encode::encode(&self.modified, encoder)?;
-        Encode::encode(&self.cluster_low, encoder)?;
-        Encode::encode(&self.file_size, encoder)?;
-        Ok(())
-    }
 }
 
 /// A less-detailed version of [`RawProperties`]
@@ -266,15 +214,19 @@ impl From<Properties> for RawProperties {
 
 impl From<MinProperties> for FATDirEntry {
     fn from(value: MinProperties) -> Self {
+        let [data_cluster_low, data_cluster_high] = {
+            let [lo0, lo1, hi0, hi1] = value.data_cluster.to_le_bytes();
+            [[lo0, lo1], [hi0, hi1]].map(u16::from_le_bytes)
+        };
         Self {
             sfn: value.sfn,
             attributes: value.attributes,
+            _reserved1: Default::default(),
             created: value.created.into(),
             accessed: value.accessed.into(),
-            cluster_high: (value.data_cluster >> (u32::BITS / 2)) as u16,
+            cluster_high: data_cluster_high.into(),
             modified: value.modified.into(),
-            #[expect(clippy::cast_possible_truncation)] // we are splitting a u32 here
-            cluster_low: value.data_cluster as u16,
+            cluster_low: data_cluster_low.into(),
             file_size: value.file_size,
         }
     }
