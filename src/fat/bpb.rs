@@ -3,7 +3,7 @@ use super::*;
 use bitfield_struct::bitfield;
 use zerocopy::{
     little_endian::{U16, U32},
-    FromBytes, KnownLayout, Immutable, IntoBytes,
+    FromBytes, Immutable, IntoBytes, KnownLayout,
 };
 
 #[derive(Debug)]
