@@ -224,6 +224,7 @@ pub(crate) struct EBRFAT12_16 {
 }
 
 #[bitfield(u16, order = Lsb)]
+#[derive(Immutable, FromBytes, IntoBytes)]
 pub(crate) struct FAT32ExtendedFlags {
     #[bits(4)]
     #[expect(non_snake_case)]
@@ -249,7 +250,7 @@ const EBRFAT32_RESERVED_BYTES: usize = 12;
 #[repr(C)]
 pub(crate) struct EBRFAT32 {
     pub table_size_32: U32,
-    pub extended_flags: Bitfield<U16, u16, FAT32ExtendedFlags>,
+    pub extended_flags: FAT32ExtendedFlags,
     pub fat_version: FATVersion,
     pub root_cluster: U32,
     pub fat_info: U16,

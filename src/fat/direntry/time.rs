@@ -1,13 +1,14 @@
 use core::num;
 
-use crate::{time::EPOCH, Bitfield};
+use crate::time::EPOCH;
 
 use ::time;
 use bitfield_struct::bitfield;
 use time::{Date, PrimitiveDateTime, Time};
-use zerocopy::{little_endian::U16, FromBytes, Immutable, IntoBytes};
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 #[bitfield(u16)]
+#[derive(Immutable, FromBytes, IntoBytes)]
 pub(crate) struct TimeAttribute {
     /// Multiply by 2
     #[bits(5)]
@@ -28,6 +29,7 @@ impl From<Time> for TimeAttribute {
 }
 
 #[bitfield(u16)]
+#[derive(Immutable, FromBytes, IntoBytes)]
 pub(crate) struct DateAttribute {
     #[bits(5)]
     day: u8,
@@ -76,20 +78,20 @@ impl TryFrom<DateAttribute> for Date {
 }
 
 #[derive(Immutable, FromBytes, IntoBytes, Debug, Clone, Copy)]
-#[repr(C)]
+#[repr(transparent)]
 pub(crate) struct EntryCreationTime(CreationTime);
 
 #[derive(Immutable, FromBytes, IntoBytes, Default, Debug, Clone, Copy)]
-#[repr(C)]
+#[repr(C, packed)]
 pub(crate) struct CreationTime {
     pub(crate) hundredths_of_second: u8,
-    pub(crate) time: Bitfield<U16, u16, TimeAttribute>,
-    pub(crate) date: Bitfield<U16, u16, DateAttribute>,
+    pub(crate) time: TimeAttribute,
+    pub(crate) date: DateAttribute,
 }
 
 impl EntryCreationTime {
     pub(crate) fn get(&self) -> Option<CreationTime> {
-        (self.0.date.get().0 != 0 && self.0.time.get().0 != 0).then_some(self.0)
+        (self.0.date.0 != 0 && self.0.time.0 != 0).then_some(self.0)
     }
 }
 
@@ -99,7 +101,7 @@ impl TryFrom<EntryCreationTime> for Option<PrimitiveDateTime> {
     fn try_from(value: EntryCreationTime) -> Result<Self, Self::Error> {
         match value.get() {
             Some(creation_time) => {
-                let mut time: Time = creation_time.time.get().try_into()?;
+                let mut time: Time = creation_time.time.try_into()?;
 
                 let new_seconds = time.second() + creation_time.hundredths_of_second / 100;
                 let milliseconds = u16::from(creation_time.hundredths_of_second) % 100 * 10;
@@ -109,7 +111,7 @@ impl TryFrom<EntryCreationTime> for Option<PrimitiveDateTime> {
                     .replace_millisecond(milliseconds)
                     .map_err(|_| ())?;
 
-                let date: Date = creation_time.date.get().try_into()?;
+                let date: Date = creation_time.date.try_into()?;
 
                 Ok(Some(PrimitiveDateTime::new(date, time)))
             }
@@ -123,8 +125,8 @@ impl From<PrimitiveDateTime> for EntryCreationTime {
         Self(CreationTime {
             hundredths_of_second: (value.second() % 2) * 100
                 + u8::try_from(value.millisecond() / 10).expect("this will be in the range 0..100"),
-            time: TimeAttribute::from(value.time()).into(),
-            date: DateAttribute::from(value.date()).into(),
+            time: TimeAttribute::from(value.time()),
+            date: DateAttribute::from(value.date()),
         })
     }
 }
@@ -141,8 +143,8 @@ impl From<Option<PrimitiveDateTime>> for EntryCreationTime {
 #[derive(Immutable, FromBytes, IntoBytes, Debug, Clone, Copy)]
 #[repr(C)]
 pub(crate) struct EntryModificationTime {
-    pub(crate) time: Bitfield<U16, u16, TimeAttribute>,
-    pub(crate) date: Bitfield<U16, u16, DateAttribute>,
+    pub(crate) time: TimeAttribute,
+    pub(crate) date: DateAttribute,
 }
 
 impl TryFrom<EntryModificationTime> for PrimitiveDateTime {
@@ -150,8 +152,8 @@ impl TryFrom<EntryModificationTime> for PrimitiveDateTime {
 
     fn try_from(value: EntryModificationTime) -> Result<Self, Self::Error> {
         Ok(PrimitiveDateTime::new(
-            value.date.get().try_into()?,
-            value.time.get().try_into()?,
+            value.date.try_into()?,
+            value.time.try_into()?,
         ))
     }
 }
@@ -159,18 +161,18 @@ impl TryFrom<EntryModificationTime> for PrimitiveDateTime {
 impl From<PrimitiveDateTime> for EntryModificationTime {
     fn from(value: PrimitiveDateTime) -> Self {
         Self {
-            time: TimeAttribute::from(value.time()).into(),
-            date: DateAttribute::from(value.date()).into(),
+            time: TimeAttribute::from(value.time()),
+            date: DateAttribute::from(value.date()),
         }
     }
 }
 
 #[derive(Immutable, FromBytes, IntoBytes, Debug, Clone, Copy)]
-pub(crate) struct EntryLastAccessedTime(Bitfield<U16, u16, DateAttribute>);
+pub(crate) struct EntryLastAccessedTime(DateAttribute);
 
 impl EntryLastAccessedTime {
     pub(crate) fn get(&self) -> Option<DateAttribute> {
-        let i = self.0.get();
+        let i = self.0;
         (i.0 != 0).then_some(i)
     }
 }
@@ -185,7 +187,7 @@ impl TryFrom<EntryLastAccessedTime> for Option<Date> {
 
 impl From<Date> for EntryLastAccessedTime {
     fn from(value: Date) -> Self {
-        Self(DateAttribute::from(value).into())
+        Self(DateAttribute::from(value))
     }
 }
 

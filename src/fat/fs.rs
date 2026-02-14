@@ -1635,7 +1635,7 @@ where
                         self._sync_FAT_sector(&fat_sector_props)?;
                     }
                     Ebr::FAT32(ebr_fat32, _) => {
-                        if ebr_fat32.extended_flags.get().mirroring_disabled() {
+                        if ebr_fat32.extended_flags.mirroring_disabled() {
                             self._sync_current_sector()?;
                         } else {
                             self._sync_FAT_sector(&fat_sector_props)?;
