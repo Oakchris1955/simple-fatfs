@@ -2,7 +2,7 @@ use super::*;
 
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::String};
-use zerocopy::{little_endian::U16, FromBytes, Immutable, IntoBytes};
+use zerocopy::{little_endian::{U16, U32}, FromBytes, Immutable, IntoBytes};
 
 use crate::*;
 
@@ -75,7 +75,7 @@ pub(crate) struct FATDirEntry {
     pub(crate) cluster_high: U16,
     pub(crate) modified: EntryModificationTime,
     pub(crate) cluster_low: U16,
-    pub(crate) file_size: FileSize,
+    pub(crate) file_size: U32,
 }
 
 /// A less-detailed version of [`RawProperties`]
@@ -101,7 +101,7 @@ impl From<RawProperties> for MinProperties {
             created: value.created,
             modified: value.modified,
             accessed: value.accessed,
-            file_size: value.file_size,
+            file_size: value.file_size.into(),
             data_cluster: value.data_cluster,
         }
     }
@@ -193,7 +193,7 @@ impl From<Properties> for RawProperties {
             created: value.created,
             modified: value.modified,
             accessed: value.accessed,
-            file_size: value.file_size,
+            file_size: value.file_size.into(),
             data_cluster: value.data_cluster,
             chain: value.chain,
         }
@@ -215,7 +215,7 @@ impl From<MinProperties> for FATDirEntry {
             cluster_high: data_cluster_high.into(),
             modified: value.modified.into(),
             cluster_low: data_cluster_low.into(),
-            file_size: value.file_size,
+            file_size: value.file_size.into(),
         }
     }
 }

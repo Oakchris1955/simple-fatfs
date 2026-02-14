@@ -386,7 +386,7 @@ where
                         created,
                         modified,
                         accessed,
-                        file_size: entry.file_size,
+                        file_size: entry.file_size.into(),
                         data_cluster: (ClusterIndex::from(entry.cluster_high)
                             << (ClusterIndex::BITS / 2))
                             + ClusterIndex::from(entry.cluster_low),
