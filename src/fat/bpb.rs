@@ -203,6 +203,7 @@ pub(crate) struct BpbFat {
 }
 
 pub(crate) const VOLUME_LABEL_BYTES: usize = 11;
+#[expect(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub(crate) enum Ebr {
     FAT12_16(EBRFAT12_16),
