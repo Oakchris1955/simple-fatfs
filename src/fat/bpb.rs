@@ -223,18 +223,18 @@ pub(crate) struct EBRFAT12_16 {
     pub signature: U16,
 }
 
-#[bitfield(u16, order = Lsb)]
+#[bitfield(u16, order = Lsb, repr = U16, from = U16::new, into = U16::get)]
 #[derive(Immutable, FromBytes, IntoBytes)]
 pub(crate) struct FAT32ExtendedFlags {
     #[bits(4)]
     #[expect(non_snake_case)]
     pub(crate) active_FAT: u8,
     #[bits(3)]
-    _reserved: _,
+    reserved1: u8,
     #[bits(1)]
     pub(crate) mirroring_disabled: bool,
     #[bits(8)]
-    _reserved: _,
+    reserved2: u8,
 }
 
 // FIXME: these might be the other way around

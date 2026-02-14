@@ -5,9 +5,9 @@ use crate::time::EPOCH;
 use ::time;
 use bitfield_struct::bitfield;
 use time::{Date, PrimitiveDateTime, Time};
-use zerocopy::{FromBytes, Immutable, IntoBytes};
+use zerocopy::{byteorder::little_endian::U16, FromBytes, Immutable, IntoBytes};
 
-#[bitfield(u16)]
+#[bitfield(u16, repr = U16, from = U16::new, into = U16::get)]
 #[derive(Immutable, FromBytes, IntoBytes)]
 pub(crate) struct TimeAttribute {
     /// Multiply by 2
@@ -28,7 +28,7 @@ impl From<Time> for TimeAttribute {
     }
 }
 
-#[bitfield(u16)]
+#[bitfield(u16, repr = U16, from = U16::new, into = U16::get)]
 #[derive(Immutable, FromBytes, IntoBytes)]
 pub(crate) struct DateAttribute {
     #[bits(5)]
