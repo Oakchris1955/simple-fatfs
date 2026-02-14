@@ -8,55 +8,43 @@ use crate::*;
 
 use ::time;
 
+use bitflags::bitflags;
 use time::{Date, PrimitiveDateTime};
 
 /// A list of the various (raw) attributes specified for a file/directory
 ///
 /// To check whether a given [`Attributes`] struct contains a flag, use the [`contains()`](Attributes::contains()) method
+///
+/// Generated using [bitflags](https://docs.rs/bitflags/2.6.0/bitflags/)
 #[derive(Immutable, FromBytes, IntoBytes, Debug, Clone, Copy, PartialEq)]
 #[repr(transparent)]
 pub(crate) struct RawAttributes(u8);
 
+bitflags! {
+    impl RawAttributes: u8 {
+        /// This entry is read-only
+        const READ_ONLY = 0x01;
+        /// This entry is normally hidden
+        const HIDDEN = 0x02;
+        /// This entry is a system file
+        const SYSTEM = 0x04;
+        /// This entry represents the volume's ID.
+        /// This is used internally and the library will never return such an entry
+        const VOLUME_ID = 0x08;
+        /// This entry is a directory. You should normally use a [`PathBuf`]s [`is_dir()`](PathBuf::is_dir) method instead
+        const DIRECTORY = 0x10;
+        /// This entry is marked to be archived. Used by archiving software for backing up files and directories
+        const ARCHIVE = 0x20;
+
+        /// This entry is part of a LFN (long filename). Used internally
+        const LFN = Self::READ_ONLY.bits() |
+                    Self::HIDDEN.bits() |
+                    Self::SYSTEM.bits() |
+                    Self::VOLUME_ID.bits();
+    }
+}
+
 impl RawAttributes {
-    /// This entry is read-only
-    pub(crate) const READ_ONLY: Self = Self(0x01);
-    /// This entry is normally hidden
-    pub(crate) const HIDDEN: Self = Self(0x02);
-    /// This entry is a system file
-    pub(crate) const SYSTEM: Self = Self(0x04);
-    /// This entry represents the volume's ID.
-    /// This is used internally and the library will never return such an entry
-    pub(crate) const VOLUME_ID: Self = Self(0x08);
-    /// This entry is a directory. You should normally use a [`PathBuf`]s [`is_dir()`](PathBuf::is_dir) method instead
-    pub(crate) const DIRECTORY: Self = Self(0x10);
-    /// This entry is marked to be archived. Used by archiving software for backing up files and directories
-    pub(crate) const ARCHIVE: Self = Self(0x20);
-
-    /// This entry is part of a LFN (long filename). Used internally
-    pub(crate) const LFN: Self = Self(
-        Self::READ_ONLY.bits() | Self::HIDDEN.bits() | Self::SYSTEM.bits() | Self::VOLUME_ID.bits(),
-    );
-
-    fn set(&mut self, flags: Self, state: bool) {
-        if state {
-            self.0 |= flags.0;
-        } else {
-            self.0 &= !flags.0;
-        }
-    }
-
-    pub(crate) const fn bits(&self) -> u8 {
-        self.0
-    }
-
-    pub(crate) const fn empty() -> Self {
-        Self(0)
-    }
-
-    pub(crate) fn contains(&self, flags: Self) -> bool {
-        self.0 & flags.0 == flags.0
-    }
-
     pub(crate) fn from_attributes(attributes: Attributes, is_dir: bool) -> Self {
         let mut raw_attributes = RawAttributes::empty();
 
