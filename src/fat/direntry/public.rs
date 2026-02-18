@@ -8,8 +8,8 @@ use crate::*;
 use alloc::{borrow::ToOwned, boxed::Box, string::String};
 
 use ::time;
-use bincode::{Decode, Encode};
 use time::{Date, PrimitiveDateTime};
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 /// A list of the various attributes specified for a file/directory
 #[derive(Debug, Clone, Copy)]
@@ -47,7 +47,8 @@ pub(crate) const SFN_NAME_LEN: usize = 8;
 pub(crate) const SFN_EXT_LEN: usize = 3;
 pub(crate) const SFN_LEN: usize = SFN_NAME_LEN + SFN_EXT_LEN;
 
-#[derive(Encode, Decode, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Immutable, FromBytes, IntoBytes, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
 /// The short filename of an entry
 ///
 /// In FAT, each file has 2 filenames: one long and one short filename.

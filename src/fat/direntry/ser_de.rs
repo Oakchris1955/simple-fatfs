@@ -6,10 +6,9 @@ use core::{iter, num};
 
 #[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use crate::*;
-
-use bincode::{Decode, Encode};
 
 pub(crate) const DIRENTRY_LIMIT: EntryCount = EntryCount::MAX;
 
@@ -22,13 +21,14 @@ pub(crate) const CHARS_PER_LFN_ENTRY: usize = LFN_FIRST_CHARS + LFN_MID_CHARS + 
 const LONG_ENTRY_TYPE: u8 = 0;
 const LFN_MAX_ENTRIES: usize = LFN_CHAR_LIMIT.div_ceil(CHARS_PER_LFN_ENTRY);
 
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, Immutable, FromBytes, IntoBytes)]
+#[repr(C)]
 pub(crate) struct LFNEntry {
     /// masked with 0x40 if this is the last entry
     pub(crate) order: u8,
     pub(crate) first_chars: [u8; LFN_FIRST_CHARS * 2],
-    /// Always equals 0x0F
-    pub(crate) _lfn_attribute: u8,
+    /// Always equals RawAttributes::LFN
+    pub(crate) _lfn_attribute: RawAttributes,
     /// Both OSDev and the FAT specification say this is always 0
     pub(crate) _long_entry_type: u8,
     /// If this doesn't match with the computed checksum, then the set of LFNs is considered corrupt
@@ -152,7 +152,7 @@ impl Iterator for LFNEntryGenerator {
         Some(LFNEntry {
             order: lfn_mask | (self.current_entry + 1),
             first_chars: chars[..10].try_into().unwrap(),
-            _lfn_attribute: RawAttributes::LFN.bits(),
+            _lfn_attribute: RawAttributes::LFN,
             _long_entry_type: LONG_ENTRY_TYPE,
             checksum: self.checksum,
             mid_chars: chars[10..22].try_into().unwrap(),
@@ -195,9 +195,7 @@ impl Iterator for EntryComposer<'_> {
     type Item = [u8; DIRENTRY_SIZE];
 
     fn next(&mut self) -> Option<Self::Item> {
-        use utils::bincode::BINCODE_CONFIG;
-
-        let mut item: Self::Item = [0; DIRENTRY_SIZE];
+        let item: Self::Item;
 
         if self.entry_index >= self.entries.len() {
             return None;
@@ -208,20 +206,14 @@ impl Iterator for EntryComposer<'_> {
         match &mut self.lfn_iter {
             Some(lfn_iter) => match lfn_iter.next() {
                 Some(lfn_entry) => {
-                    bincode::encode_into_slice(lfn_entry, &mut item, BINCODE_CONFIG)
-                        .expect("these are completely valid data, this shouldn't panic");
+                    item = zerocopy::transmute!(lfn_entry);
                 }
                 None => {
                     // this LFN generator has been exhausted, return the SFN entry
                     self.lfn_iter = None;
                     self.entry_index += 1;
 
-                    bincode::encode_into_slice(
-                        FATDirEntry::from(current_entry.clone()),
-                        &mut item,
-                        BINCODE_CONFIG,
-                    )
-                    .expect("these are completely valid data, this shouldn't panic");
+                    item = zerocopy::transmute!(FATDirEntry::from(current_entry.clone()));
                 }
             },
             None => {
@@ -238,12 +230,7 @@ impl Iterator for EntryComposer<'_> {
                     None => {
                         self.entry_index += 1;
 
-                        bincode::encode_into_slice(
-                            FATDirEntry::from(current_entry.clone()),
-                            &mut item,
-                            BINCODE_CONFIG,
-                        )
-                        .expect("these are completely valid data, this shouldn't panic");
+                        item = zerocopy::transmute!(FATDirEntry::from(current_entry.clone()));
                     }
                 }
             }
@@ -294,8 +281,6 @@ where
     }
 
     fn _next(&mut self) -> Result<Option<RawProperties>, S::Error> {
-        use utils::bincode::BINCODE_CONFIG;
-
         // if this is `None`, the iterator has been exhausted
         let entry_location = match &mut self.entry_location {
             Some(entry_location) => entry_location,
@@ -319,12 +304,7 @@ where
             _ => (),
         };
 
-        let Ok(entry) =
-            bincode::decode_from_slice::<FATDirEntry, _>(&chunk, BINCODE_CONFIG).map(|(v, _)| v)
-        else {
-            // FIXME: handle such error cases or panic
-            return Ok(None);
-        };
+        let entry: FATDirEntry = zerocopy::transmute!(chunk);
 
         // update current entry chain data
         match &mut self.current_chain {
@@ -340,15 +320,7 @@ where
         'outer: {
             if entry.attributes.contains(RawAttributes::LFN) {
                 // TODO: perhaps there is a way to utilize the `order` field?
-                let Ok((lfn_entry, _)) =
-                    bincode::decode_from_slice::<LFNEntry, _>(&chunk, BINCODE_CONFIG)
-                else {
-                    if let Some(current_chain) = &mut self.current_chain {
-                        current_chain.len -= 1
-                    }
-                    // FIXME: handle such error cases or panic
-                    break 'outer;
-                };
+                let lfn_entry: LFNEntry = zerocopy::transmute!(chunk);
 
                 // If the signature verification fails, consider this entry corrupted
                 if !lfn_entry.verify_signature() {
@@ -414,7 +386,7 @@ where
                         created,
                         modified,
                         accessed,
-                        file_size: entry.file_size,
+                        file_size: entry.file_size.into(),
                         data_cluster: (ClusterIndex::from(entry.cluster_high)
                             << (ClusterIndex::BITS / 2))
                             + ClusterIndex::from(entry.cluster_low),

@@ -3,12 +3,12 @@ use core::num;
 use crate::time::EPOCH;
 
 use ::time;
-use bincode::{impl_borrow_decode, Decode, Encode};
 use bitfield_struct::bitfield;
 use time::{Date, PrimitiveDateTime, Time};
+use zerocopy::{byteorder::little_endian::U16, FromBytes, Immutable, IntoBytes};
 
-#[bitfield(u16)]
-#[derive(Encode, Decode)]
+#[bitfield(u16, repr = U16, from = U16::new, into = U16::get)]
+#[derive(Immutable, FromBytes, IntoBytes)]
 pub(crate) struct TimeAttribute {
     /// Multiply by 2
     #[bits(5)]
@@ -28,8 +28,8 @@ impl From<Time> for TimeAttribute {
     }
 }
 
-#[bitfield(u16)]
-#[derive(Encode, Decode)]
+#[bitfield(u16, repr = U16, from = U16::new, into = U16::get)]
+#[derive(Immutable, FromBytes, IntoBytes)]
 pub(crate) struct DateAttribute {
     #[bits(5)]
     day: u8,
@@ -77,55 +77,21 @@ impl TryFrom<DateAttribute> for Date {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct EntryCreationTime(Option<CreationTime>);
+#[derive(Immutable, FromBytes, IntoBytes, Debug, Clone, Copy)]
+#[repr(transparent)]
+pub(crate) struct EntryCreationTime(CreationTime);
 
-#[derive(Encode, Decode, Debug, Clone, Copy)]
+#[derive(Immutable, FromBytes, IntoBytes, Default, Debug, Clone, Copy)]
+#[repr(C, packed)]
 pub(crate) struct CreationTime {
     pub(crate) hundredths_of_second: u8,
     pub(crate) time: TimeAttribute,
     pub(crate) date: DateAttribute,
 }
 
-impl<Context> bincode::Decode<Context> for EntryCreationTime {
-    fn decode<D: bincode::de::Decoder<Context = Context>>(
-        decoder: &mut D,
-    ) -> Result<Self, bincode::error::DecodeError> {
-        let hundredths_of_second = <u8 as bincode::Decode<Context>>::decode(decoder)?;
-        let time = <u16 as bincode::Decode<Context>>::decode(decoder)?;
-        let date = <u16 as bincode::Decode<Context>>::decode(decoder)?;
-
-        Ok(Self(if time == 0 || date == 0 {
-            None
-        } else {
-            Some(CreationTime {
-                hundredths_of_second,
-                time: TimeAttribute::from_bits(time),
-                date: DateAttribute::from_bits(date),
-            })
-        }))
-    }
-}
-
-impl_borrow_decode!(EntryCreationTime);
-
-impl bincode::Encode for EntryCreationTime {
-    fn encode<E: bincode::enc::Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), bincode::error::EncodeError> {
-        match self.0 {
-            Some(creation_time) => {
-                bincode::Encode::encode(&creation_time, encoder)?;
-            }
-            None => {
-                bincode::Encode::encode(&0_u8, encoder)?;
-                bincode::Encode::encode(&0_u16, encoder)?;
-                bincode::Encode::encode(&0_u16, encoder)?;
-            }
-        }
-
-        Ok(())
+impl EntryCreationTime {
+    pub(crate) fn get(&self) -> Option<CreationTime> {
+        (self.0.date.0 != 0 && self.0.time.0 != 0).then_some(self.0)
     }
 }
 
@@ -133,7 +99,7 @@ impl TryFrom<EntryCreationTime> for Option<PrimitiveDateTime> {
     type Error = ();
 
     fn try_from(value: EntryCreationTime) -> Result<Self, Self::Error> {
-        match value.0 {
+        match value.get() {
             Some(creation_time) => {
                 let mut time: Time = creation_time.time.try_into()?;
 
@@ -156,12 +122,12 @@ impl TryFrom<EntryCreationTime> for Option<PrimitiveDateTime> {
 
 impl From<PrimitiveDateTime> for EntryCreationTime {
     fn from(value: PrimitiveDateTime) -> Self {
-        Self(Some(CreationTime {
+        Self(CreationTime {
             hundredths_of_second: (value.second() % 2) * 100
                 + u8::try_from(value.millisecond() / 10).expect("this will be in the range 0..100"),
-            time: value.time().into(),
-            date: value.date().into(),
-        }))
+            time: TimeAttribute::from(value.time()),
+            date: DateAttribute::from(value.date()),
+        })
     }
 }
 
@@ -169,12 +135,13 @@ impl From<Option<PrimitiveDateTime>> for EntryCreationTime {
     fn from(value: Option<PrimitiveDateTime>) -> Self {
         match value {
             Some(value) => value.into(),
-            None => Self(None),
+            None => Self(Default::default()),
         }
     }
 }
 
-#[derive(Encode, Decode, Debug, Clone, Copy)]
+#[derive(Immutable, FromBytes, IntoBytes, Debug, Clone, Copy)]
+#[repr(C)]
 pub(crate) struct EntryModificationTime {
     pub(crate) time: TimeAttribute,
     pub(crate) date: DateAttribute,
@@ -194,44 +161,19 @@ impl TryFrom<EntryModificationTime> for PrimitiveDateTime {
 impl From<PrimitiveDateTime> for EntryModificationTime {
     fn from(value: PrimitiveDateTime) -> Self {
         Self {
-            time: value.time().into(),
-            date: value.date().into(),
+            time: TimeAttribute::from(value.time()),
+            date: DateAttribute::from(value.date()),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct EntryLastAccessedTime(Option<DateAttribute>);
+#[derive(Immutable, FromBytes, IntoBytes, Debug, Clone, Copy)]
+pub(crate) struct EntryLastAccessedTime(DateAttribute);
 
-impl<Context> bincode::Decode<Context> for EntryLastAccessedTime {
-    fn decode<D: bincode::de::Decoder<Context = Context>>(
-        decoder: &mut D,
-    ) -> Result<Self, bincode::error::DecodeError> {
-        let bits = <u16 as bincode::Decode<Context>>::decode(decoder)?;
-
-        Ok(Self(if bits == 0 {
-            None
-        } else {
-            Some(DateAttribute::from_bits(bits))
-        }))
-    }
-}
-
-impl_borrow_decode!(EntryLastAccessedTime);
-
-impl bincode::Encode for EntryLastAccessedTime {
-    fn encode<E: bincode::enc::Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), bincode::error::EncodeError> {
-        let bits = match self.0 {
-            Some(date) => date.into_bits(),
-            None => 0,
-        };
-
-        bincode::Encode::encode(&bits, encoder)?;
-
-        Ok(())
+impl EntryLastAccessedTime {
+    pub(crate) fn get(&self) -> Option<DateAttribute> {
+        let i = self.0;
+        (i.0 != 0).then_some(i)
     }
 }
 
@@ -239,13 +181,13 @@ impl TryFrom<EntryLastAccessedTime> for Option<Date> {
     type Error = ();
 
     fn try_from(value: EntryLastAccessedTime) -> Result<Self, Self::Error> {
-        value.0.map(|date| date.try_into()).transpose()
+        value.get().map(|date| date.try_into()).transpose()
     }
 }
 
 impl From<Date> for EntryLastAccessedTime {
     fn from(value: Date) -> Self {
-        Self(Some(value.into()))
+        Self(DateAttribute::from(value))
     }
 }
 
@@ -253,7 +195,7 @@ impl From<Option<Date>> for EntryLastAccessedTime {
     fn from(value: Option<Date>) -> Self {
         match value {
             Some(value) => value.into(),
-            None => Self(None),
+            None => Self(Default::default()),
         }
     }
 }

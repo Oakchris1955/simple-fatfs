@@ -4,7 +4,6 @@ use core::{cmp, num, ops};
 
 use time::{Date, PrimitiveDateTime};
 
-use crate::utils::{self, bincode::BINCODE_CONFIG};
 use crate::{Clock, FSError, FSResult, InternalFSError};
 
 use embedded_io::*;
@@ -461,9 +460,7 @@ where
     fn sync_entry(&mut self) -> FSResult<(), S::Error> {
         if self.entry_modified {
             let direntry = FATDirEntry::from(MinProperties::from(self.props.entry.clone()));
-            let mut bytes = [0; DIRENTRY_SIZE];
-            bincode::encode_into_slice(direntry, &mut bytes, BINCODE_CONFIG)
-                .map_err(utils::bincode::map_err_enc)?;
+            let bytes = zerocopy::transmute!(direntry);
 
             let chain_start = self.props.entry.chain.location;
             let file_name = self

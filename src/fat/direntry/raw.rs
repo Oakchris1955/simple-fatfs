@@ -2,22 +2,26 @@ use super::*;
 
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::String};
+use zerocopy::{little_endian::{U16, U32}, FromBytes, Immutable, IntoBytes};
 
 use crate::*;
 
 use ::time;
-use bincode::{impl_borrow_decode, Decode, Encode};
+
 use bitflags::bitflags;
 use time::{Date, PrimitiveDateTime};
 
+/// A list of the various (raw) attributes specified for a file/directory
+///
+/// To check whether a given [`Attributes`] struct contains a flag, use the [`contains()`](Attributes::contains()) method
+///
+/// Generated using [bitflags](https://docs.rs/bitflags/2.6.0/bitflags/)
+#[derive(Immutable, FromBytes, IntoBytes, Debug, Clone, Copy, PartialEq)]
+#[repr(transparent)]
+pub(crate) struct RawAttributes(u8);
+
 bitflags! {
-    /// A list of the various (raw) attributes specified for a file/directory
-    ///
-    /// To check whether a given [`Attributes`] struct contains a flag, use the [`contains()`](Attributes::contains()) method
-    ///
-    /// Generated using [bitflags](https://docs.rs/bitflags/2.6.0/bitflags/)
-    #[derive(Debug, Clone, Copy, PartialEq)]
-    pub(crate) struct RawAttributes: u8 {
+    impl RawAttributes: u8 {
         /// This entry is read-only
         const READ_ONLY = 0x01;
         /// This entry is normally hidden
@@ -37,28 +41,6 @@ bitflags! {
                     Self::HIDDEN.bits() |
                     Self::SYSTEM.bits() |
                     Self::VOLUME_ID.bits();
-    }
-}
-
-impl<Context> bincode::Decode<Context> for RawAttributes {
-    fn decode<D: bincode::de::Decoder<Context = Context>>(
-        decoder: &mut D,
-    ) -> Result<Self, bincode::error::DecodeError> {
-        Ok(RawAttributes::from_bits_truncate(
-            <u8 as bincode::Decode<Context>>::decode(decoder)?,
-        ))
-    }
-}
-
-impl_borrow_decode!(RawAttributes);
-
-impl bincode::Encode for RawAttributes {
-    fn encode<E: bincode::enc::Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), bincode::error::EncodeError> {
-        bincode::Encode::encode(&self.bits(), encoder)?;
-        Ok(())
     }
 }
 
@@ -82,64 +64,18 @@ impl RawAttributes {
 pub(crate) const NONROOT_MIN_DIRENTRIES: usize = 2;
 const FATDIRENTRY_RESERVED_BYTES: usize = 1;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Immutable, FromBytes, IntoBytes, Debug, Clone, Copy)]
+#[repr(C)]
 pub(crate) struct FATDirEntry {
     pub(crate) sfn: Sfn,
     pub(crate) attributes: RawAttributes,
+    _reserved1: [u8; FATDIRENTRY_RESERVED_BYTES],
     pub(crate) created: EntryCreationTime,
     pub(crate) accessed: EntryLastAccessedTime,
-    pub(crate) cluster_high: u16,
+    pub(crate) cluster_high: U16,
     pub(crate) modified: EntryModificationTime,
-    pub(crate) cluster_low: u16,
-    pub(crate) file_size: FileSize,
-}
-
-impl<__Context> Decode<__Context> for FATDirEntry {
-    fn decode<__D: bincode::de::Decoder<Context = __Context>>(
-        decoder: &mut __D,
-    ) -> Result<Self, bincode::error::DecodeError> {
-        use bincode::de::read::Reader;
-
-        Ok(Self {
-            sfn: Decode::decode(decoder)?,
-            attributes: Decode::decode(decoder)?,
-            created: {
-                decoder
-                    .reader()
-                    .read(&mut [0_u8; FATDIRENTRY_RESERVED_BYTES])?;
-                Decode::decode(decoder)?
-            },
-            accessed: Decode::decode(decoder)?,
-            cluster_high: Decode::decode(decoder)?,
-            modified: Decode::decode(decoder)?,
-            cluster_low: Decode::decode(decoder)?,
-            file_size: Decode::decode(decoder)?,
-        })
-    }
-}
-
-impl_borrow_decode!(FATDirEntry);
-
-impl Encode for FATDirEntry {
-    fn encode<__E: bincode::enc::Encoder>(
-        &self,
-        encoder: &mut __E,
-    ) -> Result<(), bincode::error::EncodeError> {
-        use bincode::enc::write::Writer;
-
-        Encode::encode(&self.sfn, encoder)?;
-        Encode::encode(&self.attributes, encoder)?;
-        encoder
-            .writer()
-            .write(&[0_u8; FATDIRENTRY_RESERVED_BYTES])?;
-        Encode::encode(&self.created, encoder)?;
-        Encode::encode(&self.accessed, encoder)?;
-        Encode::encode(&self.cluster_high, encoder)?;
-        Encode::encode(&self.modified, encoder)?;
-        Encode::encode(&self.cluster_low, encoder)?;
-        Encode::encode(&self.file_size, encoder)?;
-        Ok(())
-    }
+    pub(crate) cluster_low: U16,
+    pub(crate) file_size: U32,
 }
 
 /// A less-detailed version of [`RawProperties`]
@@ -165,7 +101,7 @@ impl From<RawProperties> for MinProperties {
             created: value.created,
             modified: value.modified,
             accessed: value.accessed,
-            file_size: value.file_size,
+            file_size: value.file_size.into(),
             data_cluster: value.data_cluster,
         }
     }
@@ -257,7 +193,7 @@ impl From<Properties> for RawProperties {
             created: value.created,
             modified: value.modified,
             accessed: value.accessed,
-            file_size: value.file_size,
+            file_size: value.file_size.into(),
             data_cluster: value.data_cluster,
             chain: value.chain,
         }
@@ -266,16 +202,20 @@ impl From<Properties> for RawProperties {
 
 impl From<MinProperties> for FATDirEntry {
     fn from(value: MinProperties) -> Self {
+        let [data_cluster_low, data_cluster_high] = {
+            let [lo0, lo1, hi0, hi1] = value.data_cluster.to_le_bytes();
+            [[lo0, lo1], [hi0, hi1]].map(u16::from_le_bytes)
+        };
         Self {
             sfn: value.sfn,
             attributes: value.attributes,
+            _reserved1: Default::default(),
             created: value.created.into(),
             accessed: value.accessed.into(),
-            cluster_high: (value.data_cluster >> (u32::BITS / 2)) as u16,
+            cluster_high: data_cluster_high.into(),
             modified: value.modified.into(),
-            #[expect(clippy::cast_possible_truncation)] // we are splitting a u32 here
-            cluster_low: value.data_cluster as u16,
-            file_size: value.file_size,
+            cluster_low: data_cluster_low.into(),
+            file_size: value.file_size.into(),
         }
     }
 }
