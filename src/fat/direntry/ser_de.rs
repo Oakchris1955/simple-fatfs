@@ -6,7 +6,7 @@ use core::{iter, num};
 
 #[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
-use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
+use zerocopy::{little_endian::U16, FromBytes, FromZeros, Immutable, IntoBytes};
 
 use crate::*;
 
@@ -26,7 +26,7 @@ const LFN_MAX_ENTRIES: usize = LFN_CHAR_LIMIT.div_ceil(CHARS_PER_LFN_ENTRY);
 pub(crate) struct LFNEntry {
     /// masked with 0x40 if this is the last entry
     pub(crate) order: u8,
-    pub(crate) first_chars: [u8; LFN_FIRST_CHARS * 2],
+    pub(crate) first_chars: [U16; LFN_FIRST_CHARS],
     /// Always equals RawAttributes::LFN
     pub(crate) _lfn_attribute: RawAttributes,
     /// Both OSDev and the FAT specification say this is always 0
@@ -36,17 +36,17 @@ pub(crate) struct LFNEntry {
     /// A [`LFNEntry`] will be marked as corrupt even if it isn't, if the Sfn is modified by a legacy system,
     /// since the new Sfn's signature and the one on this field won't (probably) match
     pub(crate) checksum: u8,
-    pub(crate) mid_chars: [u8; LFN_MID_CHARS * 2],
+    pub(crate) mid_chars: [U16; LFN_MID_CHARS],
     pub(crate) _zeroed: [u8; 2],
-    pub(crate) last_chars: [u8; LFN_LAST_CHARS * 2],
+    pub(crate) last_chars: [U16; LFN_LAST_CHARS],
 }
 
 #[derive(Debug, Immutable, FromBytes, IntoBytes)]
 #[repr(C)]
 pub(crate) struct LFNChars {
-    first: [u8; LFN_FIRST_CHARS * 2],
-    mid: [u8; LFN_MID_CHARS * 2],
-    last: [u8; LFN_LAST_CHARS * 2],
+    first: [U16; LFN_FIRST_CHARS],
+    mid: [U16; LFN_MID_CHARS],
+    last: [U16; LFN_LAST_CHARS],
 }
 
 impl LFNEntry {
