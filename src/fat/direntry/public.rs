@@ -95,15 +95,8 @@ impl Sfn {
     }
 
     pub(crate) fn gen_checksum(&self) -> u8 {
-        let mut sum = 0;
-
-        for c in self.iter() {
-            sum = (if (sum & 1) != 0 { 0x80_u8 } else { 0_u8 })
-                .wrapping_add(sum >> 1)
-                .wrapping_add(*c)
-        }
-
-        sum
+        self.iter()
+            .fold(0, |sum, &c| sum.rotate_right(1).wrapping_add(c))
     }
 
     pub(crate) fn name(&self) -> &[u8; SFN_NAME_LEN] {
