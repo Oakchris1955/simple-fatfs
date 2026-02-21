@@ -6,7 +6,7 @@ use core::{iter, num};
 
 #[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
-use zerocopy::{FromBytes, Immutable, IntoBytes};
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 
 use crate::*;
 
@@ -133,8 +133,8 @@ impl Iterator for LFNEntryGenerator {
         }
 
         let current_chars = &self.chars[usize::from(self.current_entry - 1)];
-        let mut chars = [0_u8; CHARS_PER_LFN_ENTRY * 2];
-        chars[..current_chars.len()].copy_from_slice(current_chars);
+        let mut chars = LFNChars::new_zeroed();
+        chars.as_mut_bytes()[..current_chars.len()].copy_from_slice(current_chars);
 
         let lfn_mask = if self.current_entry
             >= u8::try_from(self.chars.len()).expect("we won't be stored more that 20 entries")
@@ -152,13 +152,13 @@ impl Iterator for LFNEntryGenerator {
 
         Some(LFNEntry {
             order: lfn_mask | (self.current_entry + 1),
-            first_chars: chars[..10].try_into().unwrap(),
+            first_chars: chars.first,
             _lfn_attribute: RawAttributes::LFN,
             _long_entry_type: LONG_ENTRY_TYPE,
             checksum: self.checksum,
-            mid_chars: chars[10..22].try_into().unwrap(),
+            mid_chars: chars.mid,
             _zeroed: [0, 0],
-            last_chars: chars[22..].try_into().unwrap(),
+            last_chars: chars.last,
         })
     }
 }
