@@ -41,19 +41,20 @@ pub(crate) struct LFNEntry {
     pub(crate) last_chars: [u8; LFN_LAST_CHARS * 2],
 }
 
+#[derive(Debug, Immutable, FromBytes, IntoBytes)]
+#[repr(C)]
+pub(crate) struct LFNChars {
+    first: [u8; LFN_FIRST_CHARS * 2],
+    mid: [u8; LFN_MID_CHARS * 2],
+    last: [u8; LFN_LAST_CHARS * 2],
+}
+
 impl LFNEntry {
     pub(crate) fn copy_lfn_name(&self, slice: &mut [u16; CHARS_PER_LFN_ENTRY]) {
-        {
-            // SAFETY: The pointer below is properly aligned and we aren't accessing
-            // the original reference for as long as this pointer is in-scope
-            let slice = unsafe { &mut *(slice.as_mut_ptr() as *mut [u8; CHARS_PER_LFN_ENTRY * 2]) };
-
-            // copy the bytes from the lfn name into it
-            slice[..LFN_FIRST_CHARS * 2].copy_from_slice(&self.first_chars);
-            slice[LFN_FIRST_CHARS * 2..(LFN_FIRST_CHARS + LFN_MID_CHARS) * 2]
-                .copy_from_slice(&self.mid_chars);
-            slice[(LFN_FIRST_CHARS + LFN_MID_CHARS) * 2..].copy_from_slice(&self.last_chars);
-        }
+        let chars: &mut LFNChars = zerocopy::transmute_mut!(slice);
+        chars.first = self.first_chars;
+        chars.mid = self.mid_chars;
+        chars.last = self.last_chars;
 
         // fix endian (if required)
         slice.iter_mut().for_each(|c| *c = c.to_le());
