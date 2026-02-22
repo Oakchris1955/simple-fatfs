@@ -6,7 +6,7 @@ use core::{iter, num};
 
 #[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
-use zerocopy::{FromBytes, Immutable, IntoBytes};
+use zerocopy::{little_endian::U16, FromBytes, FromZeros, Immutable, IntoBytes};
 
 use crate::*;
 
@@ -26,7 +26,7 @@ const LFN_MAX_ENTRIES: usize = LFN_CHAR_LIMIT.div_ceil(CHARS_PER_LFN_ENTRY);
 pub(crate) struct LFNEntry {
     /// masked with 0x40 if this is the last entry
     pub(crate) order: u8,
-    pub(crate) first_chars: [u8; LFN_FIRST_CHARS * 2],
+    pub(crate) first_chars: [U16; LFN_FIRST_CHARS],
     /// Always equals RawAttributes::LFN
     pub(crate) _lfn_attribute: RawAttributes,
     /// Both OSDev and the FAT specification say this is always 0
@@ -36,24 +36,25 @@ pub(crate) struct LFNEntry {
     /// A [`LFNEntry`] will be marked as corrupt even if it isn't, if the Sfn is modified by a legacy system,
     /// since the new Sfn's signature and the one on this field won't (probably) match
     pub(crate) checksum: u8,
-    pub(crate) mid_chars: [u8; LFN_MID_CHARS * 2],
+    pub(crate) mid_chars: [U16; LFN_MID_CHARS],
     pub(crate) _zeroed: [u8; 2],
-    pub(crate) last_chars: [u8; LFN_LAST_CHARS * 2],
+    pub(crate) last_chars: [U16; LFN_LAST_CHARS],
+}
+
+#[derive(Debug, Immutable, FromBytes, IntoBytes)]
+#[repr(C)]
+pub(crate) struct LFNChars {
+    first: [U16; LFN_FIRST_CHARS],
+    mid: [U16; LFN_MID_CHARS],
+    last: [U16; LFN_LAST_CHARS],
 }
 
 impl LFNEntry {
     pub(crate) fn copy_lfn_name(&self, slice: &mut [u16; CHARS_PER_LFN_ENTRY]) {
-        {
-            // SAFETY: The pointer below is properly aligned and we aren't accessing
-            // the original reference for as long as this pointer is in-scope
-            let slice = unsafe { &mut *(slice.as_mut_ptr() as *mut [u8; CHARS_PER_LFN_ENTRY * 2]) };
-
-            // copy the bytes from the lfn name into it
-            slice[..LFN_FIRST_CHARS * 2].copy_from_slice(&self.first_chars);
-            slice[LFN_FIRST_CHARS * 2..(LFN_FIRST_CHARS + LFN_MID_CHARS) * 2]
-                .copy_from_slice(&self.mid_chars);
-            slice[(LFN_FIRST_CHARS + LFN_MID_CHARS) * 2..].copy_from_slice(&self.last_chars);
-        }
+        let chars: &mut LFNChars = zerocopy::transmute_mut!(slice);
+        chars.first = self.first_chars;
+        chars.mid = self.mid_chars;
+        chars.last = self.last_chars;
 
         // fix endian (if required)
         slice.iter_mut().for_each(|c| *c = c.to_le());
@@ -132,8 +133,8 @@ impl Iterator for LFNEntryGenerator {
         }
 
         let current_chars = &self.chars[usize::from(self.current_entry - 1)];
-        let mut chars = [0_u8; CHARS_PER_LFN_ENTRY * 2];
-        chars[..current_chars.len()].copy_from_slice(current_chars);
+        let mut chars = LFNChars::new_zeroed();
+        chars.as_mut_bytes()[..current_chars.len()].copy_from_slice(current_chars);
 
         let lfn_mask = if self.current_entry
             >= u8::try_from(self.chars.len()).expect("we won't be stored more that 20 entries")
@@ -151,13 +152,13 @@ impl Iterator for LFNEntryGenerator {
 
         Some(LFNEntry {
             order: lfn_mask | (self.current_entry + 1),
-            first_chars: chars[..10].try_into().unwrap(),
+            first_chars: chars.first,
             _lfn_attribute: RawAttributes::LFN,
             _long_entry_type: LONG_ENTRY_TYPE,
             checksum: self.checksum,
-            mid_chars: chars[10..22].try_into().unwrap(),
+            mid_chars: chars.mid,
             _zeroed: [0, 0],
-            last_chars: chars[22..].try_into().unwrap(),
+            last_chars: chars.last,
         })
     }
 }
