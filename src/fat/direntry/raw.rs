@@ -2,7 +2,10 @@ use super::*;
 
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::String};
-use zerocopy::{little_endian::{U16, U32}, FromBytes, Immutable, IntoBytes};
+use zerocopy::{
+    little_endian::{U16, U32},
+    FromBytes, Immutable, IntoBytes,
+};
 
 use crate::*;
 
@@ -101,7 +104,7 @@ impl From<RawProperties> for MinProperties {
             created: value.created,
             modified: value.modified,
             accessed: value.accessed,
-            file_size: value.file_size.into(),
+            file_size: value.file_size,
             data_cluster: value.data_cluster,
         }
     }
@@ -193,7 +196,7 @@ impl From<Properties> for RawProperties {
             created: value.created,
             modified: value.modified,
             accessed: value.accessed,
-            file_size: value.file_size.into(),
+            file_size: value.file_size,
             data_cluster: value.data_cluster,
             chain: value.chain,
         }
