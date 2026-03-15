@@ -38,6 +38,7 @@ impl<const BS: BlockSize> BlockWrite for Storage<'_, BS> {
     }
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn test_block_translator1() {
     let mut translated_c_buffer1 = [0u8; 4];
@@ -45,6 +46,7 @@ fn test_block_translator1() {
     run_block_translator(Some([&mut translated_c_buffer1]));
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn test_block_translator2() {
     let mut translated_c_buffer1 = [0u8; 4];
@@ -53,6 +55,7 @@ fn test_block_translator2() {
     run_block_translator(Some([&mut translated_c_buffer1, &mut translated_c_buffer2]));
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn test_block_translator3() {
     let mut translated_c_buffer1 = [0u8; 4];
@@ -66,6 +69,7 @@ fn test_block_translator3() {
     ]));
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn test_block_translator8() {
     let mut translated_c_buffer1 = [0u8; 4];
@@ -89,21 +93,25 @@ fn test_block_translator8() {
     ]));
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn test_block_translator1_heap() {
     run_block_translator::<1>(None);
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn test_block_translator2_heap() {
     run_block_translator::<2>(None);
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn test_block_translator3_heap() {
     run_block_translator::<3>(None);
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn test_block_translator8_heap() {
     run_block_translator::<8>(None);

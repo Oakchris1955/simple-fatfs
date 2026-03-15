@@ -135,6 +135,7 @@ fn seek_n_read() {
     );
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 // this won't actually modify the .img file or the static slices,
 // since we run .to_owned(), which basically clones the data in the static slices,
@@ -217,12 +218,17 @@ fn create_subdir_file() {
     assert_file_is_i_dont_need_a_badge(&mut file);
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn create_lots_of_files() {
     use regex::Regex;
     use std::io::Cursor;
 
+    #[cfg(not(miri))]
     const FILE_COUNT: usize = 1000;
+
+    #[cfg(miri)]
+    const FILE_COUNT: usize = 10;
 
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     #[cfg(not(feature = "bloom"))]
