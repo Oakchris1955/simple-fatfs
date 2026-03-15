@@ -43,21 +43,18 @@ pub(crate) struct LFNEntry {
 
 #[derive(Debug, Immutable, FromBytes, IntoBytes)]
 #[repr(C)]
-pub(crate) struct LFNChars {
-    first: [U16; LFN_FIRST_CHARS],
-    mid: [U16; LFN_MID_CHARS],
-    last: [U16; LFN_LAST_CHARS],
+pub(crate) struct LFNCharsSlice {
+    first: [u16; LFN_FIRST_CHARS],
+    mid: [u16; LFN_MID_CHARS],
+    last: [u16; LFN_LAST_CHARS],
 }
 
 impl LFNEntry {
     pub(crate) fn copy_lfn_name(&self, slice: &mut [u16; CHARS_PER_LFN_ENTRY]) {
-        let chars: &mut LFNChars = zerocopy::transmute_mut!(slice);
-        chars.first = self.first_chars;
-        chars.mid = self.mid_chars;
-        chars.last = self.last_chars;
-
-        // fix endian (if required)
-        slice.iter_mut().for_each(|c| *c = c.to_le());
+        let chars: &mut LFNCharsSlice = zerocopy::transmute_mut!(slice);
+        chars.first = self.first_chars.map(U16::into);
+        chars.mid = self.mid_chars.map(U16::into);
+        chars.last = self.last_chars.map(U16::into);
     }
 
     #[inline]
@@ -133,7 +130,7 @@ impl Iterator for LFNEntryGenerator {
         }
 
         let current_chars = &self.chars[usize::from(self.current_entry - 1)];
-        let mut chars = LFNChars::new_zeroed();
+        let mut chars = LFNCharsSlice::new_zeroed();
         chars.as_mut_bytes()[..current_chars.len()].copy_from_slice(current_chars);
 
         let lfn_mask = if self.current_entry
@@ -152,13 +149,13 @@ impl Iterator for LFNEntryGenerator {
 
         Some(LFNEntry {
             order: lfn_mask | (self.current_entry + 1),
-            first_chars: chars.first,
+            first_chars: zerocopy::transmute!(chars.first),
             _lfn_attribute: RawAttributes::LFN,
             _long_entry_type: LONG_ENTRY_TYPE,
             checksum: self.checksum,
-            mid_chars: chars.mid,
+            mid_chars: zerocopy::transmute!(chars.mid),
             _zeroed: [0, 0],
-            last_chars: chars.last,
+            last_chars: zerocopy::transmute!(chars.last),
         })
     }
 }
