@@ -32,4 +32,15 @@ jobs:
         run: |
           cargo build --verbose --no-default-features --all-targets
           timeout 1m cargo test --verbose --no-default-features --all-targets -- --nocapture
+      - if: ${{ matrix.toolchain == 'nightly' }}
+        uses: taiki-e/install-action@nextest
+      - name: Install Miri (nightly only)
+        if: ${{ matrix.toolchain == 'nightly' }}
+        run: |
+          rustup toolchain install nightly --component miri
+          rustup override set nightly
+          cargo miri setup
+      - name: Run tests - Big endian target (nightly only)
+        if: ${{ matrix.toolchain == 'nightly' }}
+        run: cargo miri nextest run --target powerpc-unknown-linux-gnu --verbose
 
