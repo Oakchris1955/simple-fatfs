@@ -23,7 +23,7 @@ pub struct DefaultClock;
 
 impl Clock for DefaultClock {
     fn now(&self) -> PrimitiveDateTime {
-        #[cfg(feature = "std")]
+        #[cfg(all(feature = "std", not(miri)))]
         {
             use time::OffsetDateTime;
 
@@ -34,7 +34,7 @@ impl Clock for DefaultClock {
 
             PrimitiveDateTime::new(now_odt.date(), now_odt.time())
         }
-        #[cfg(not(feature = "std"))]
+        #[cfg(any(not(feature = "std"), miri))]
         EPOCH
     }
 }
