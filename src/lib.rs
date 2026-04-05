@@ -26,7 +26,7 @@
 //! use simple_fatfs::io::*;
 //! use simple_fatfs::block_io::FromStd;
 //!
-//! const FAT_IMG: &[u8] = include_bytes!("../imgs/fat12.img");
+//! const FAT_IMG: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/common/imgs/fat12.img"));
 //!
 //! fn main() {
 //!     let mut cursor = FromStd::new(std::io::Cursor::new(FAT_IMG.to_owned())).unwrap();

@@ -261,7 +261,10 @@ fn run_gen_sfn(string: &str) -> Option<Sfn> {
     use crate::{FSOptions, FromStd};
     use std::io::Cursor;
 
-    const FAT16: &[u8] = include_bytes!("../../imgs/fat16.img");
+    const FAT16: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/common/imgs/fat16.img"
+    ));
     let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 

@@ -7,8 +7,6 @@ mod file;
 mod fs;
 mod options;
 mod storage;
-#[cfg(all(test, feature = "std"))]
-mod tests;
 mod types;
 
 pub(crate) use block_io::*;
