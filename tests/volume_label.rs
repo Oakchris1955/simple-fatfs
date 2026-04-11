@@ -5,9 +5,7 @@ use test_log::test;
 
 #[test]
 fn volume_label_bpb_correct1() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     assert_eq!(fs.volume_label_bpb(), Some(String::from("SIMPLEFATFS")))
@@ -15,9 +13,7 @@ fn volume_label_bpb_correct1() {
 
 #[test]
 fn volume_label_bpb_correct2() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(MINFS.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(MINFS);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     assert_eq!(fs.volume_label_bpb(), Some(String::from("TEST FS")))
@@ -25,9 +21,7 @@ fn volume_label_bpb_correct2() {
 
 #[test]
 fn volume_label_bpb_none() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     assert_eq!(fs.volume_label_bpb(), None)
@@ -35,9 +29,7 @@ fn volume_label_bpb_none() {
 
 #[test]
 fn volume_label_root_none() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     assert!(fs
@@ -47,9 +39,7 @@ fn volume_label_root_none() {
 
 #[test]
 fn volume_label_root_correct() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(MINFS.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(MINFS);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     assert_eq!(
@@ -60,9 +50,7 @@ fn volume_label_root_correct() {
 
 #[test]
 fn set_volume_label_bpb() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.set_volume_label_bpb("DEADBEEF");
@@ -76,9 +64,7 @@ fn set_volume_label_bpb() {
 
 #[test]
 fn set_volume_label_root_dir() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.set_volume_label_root_dir("DEADBEEF").unwrap();

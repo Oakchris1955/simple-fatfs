@@ -222,69 +222,76 @@ where
     ))
 }
 
-#[test]
-fn test_sfn_generator_long() {
-    let mut generator = SfnGenerator::new("HELLO-WORLD.TXT", Codepage::default());
-
-    assert_eq!(generator.next(), Some(Sfn::new(*b"HELLO-~1", *b"TXT")));
-    assert_eq!(generator.next(), Some(Sfn::new(*b"HELLO-~2", *b"TXT")));
-    let mut generator = generator.skip(7);
-    assert_eq!(generator.next(), Some(Sfn::new(*b"HELLO~10", *b"TXT")));
-}
-
-#[test]
-fn test_sfn_generator_short() {
-    let mut generator = SfnGenerator::new("run.jpeg", Codepage::default());
-
-    assert_eq!(generator.next(), Some(Sfn::new(*b"RUN~1   ", *b"JPE")));
-    assert_eq!(generator.next(), Some(Sfn::new(*b"RUN~2   ", *b"JPE")));
-    let mut generator = generator.skip(7);
-    assert_eq!(generator.next(), Some(Sfn::new(*b"RUN~10  ", *b"JPE")));
-}
-
-#[test]
-fn test_sfn_generator_cp_chars_cp437() {
-    let mut generator = SfnGenerator::new("tëst.txt", Codepage::CP437);
-
-    assert_eq!(generator.next(), Some(Sfn::new(*b"T\x89ST~1  ", *b"TXT")));
-}
-
-#[test]
-fn test_sfn_generator_unknown_chars() {
-    let mut generator = SfnGenerator::new("😇.😈", Codepage::default());
-
-    assert_eq!(generator.next(), Some(Sfn::new(*b"~1      ", *b"   ")));
-}
-
-#[cfg(all(test, feature = "std"))]
-fn run_gen_sfn(string: &str) -> Option<Sfn> {
-    use crate::{FSOptions, FromStd};
-    use std::io::Cursor;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
     const FAT16: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/common/imgs/fat16.img"
     ));
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    gen_sfn(string, &fs, "/").ok()
-}
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/common/wrapper.rs"
+    ));
 
-#[cfg(all(test, feature = "std"))]
-#[test]
-fn test_gen_sfn_match() {
-    assert_eq!(
-        run_gen_sfn("TEST.TXT"),
-        Some(Sfn::new(*b"TEST    ", *b"TXT"))
-    )
-}
+    #[test]
+    fn test_sfn_generator_long() {
+        let mut generator = SfnGenerator::new("HELLO-WORLD.TXT", Codepage::default());
 
-#[cfg(all(test, feature = "std"))]
-#[test]
-fn test_gen_sfn_mismatch() {
-    assert_eq!(
-        run_gen_sfn("test.txt"),
-        Some(Sfn::new(*b"TEST~1  ", *b"TXT"))
-    )
+        assert_eq!(generator.next(), Some(Sfn::new(*b"HELLO-~1", *b"TXT")));
+        assert_eq!(generator.next(), Some(Sfn::new(*b"HELLO-~2", *b"TXT")));
+        let mut generator = generator.skip(7);
+        assert_eq!(generator.next(), Some(Sfn::new(*b"HELLO~10", *b"TXT")));
+    }
+
+    #[test]
+    fn test_sfn_generator_short() {
+        let mut generator = SfnGenerator::new("run.jpeg", Codepage::default());
+
+        assert_eq!(generator.next(), Some(Sfn::new(*b"RUN~1   ", *b"JPE")));
+        assert_eq!(generator.next(), Some(Sfn::new(*b"RUN~2   ", *b"JPE")));
+        let mut generator = generator.skip(7);
+        assert_eq!(generator.next(), Some(Sfn::new(*b"RUN~10  ", *b"JPE")));
+    }
+
+    #[test]
+    fn test_sfn_generator_cp_chars_cp437() {
+        let mut generator = SfnGenerator::new("tëst.txt", Codepage::CP437);
+
+        assert_eq!(generator.next(), Some(Sfn::new(*b"T\x89ST~1  ", *b"TXT")));
+    }
+
+    #[test]
+    fn test_sfn_generator_unknown_chars() {
+        let mut generator = SfnGenerator::new("😇.😈", Codepage::default());
+
+        assert_eq!(generator.next(), Some(Sfn::new(*b"~1      ", *b"   ")));
+    }
+
+    fn run_gen_sfn(string: &str) -> Option<Sfn> {
+        use crate::FSOptions;
+
+        let mut storage = MemoryDevice::from(FAT16);
+        let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+
+        gen_sfn(string, &fs, "/").ok()
+    }
+
+    #[test]
+    fn test_gen_sfn_match() {
+        assert_eq!(
+            run_gen_sfn("TEST.TXT"),
+            Some(Sfn::new(*b"TEST    ", *b"TXT"))
+        )
+    }
+
+    #[test]
+    fn test_gen_sfn_mismatch() {
+        assert_eq!(
+            run_gen_sfn("test.txt"),
+            Some(Sfn::new(*b"TEST~1  ", *b"TXT"))
+        )
+    }
 }

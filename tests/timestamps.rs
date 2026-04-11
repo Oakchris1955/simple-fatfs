@@ -5,9 +5,7 @@ use test_log::test;
 
 #[test]
 fn check_last_accessed_ro() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file("/rootdir/example.txt").unwrap();
@@ -25,9 +23,7 @@ fn check_last_accessed_ro() {
 
 #[test]
 fn check_last_accessed_rw() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
 
     let mut file = fs.get_rw_file("/bee movie script.txt").unwrap();
@@ -47,9 +43,7 @@ fn check_last_accessed_rw() {
 fn check_last_modified() {
     use ::time::Duration;
 
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
 
     let mut file = fs.get_rw_file("/bee movie script.txt").unwrap();
@@ -70,9 +64,7 @@ fn check_last_modified() {
 fn check_file_timestamps() {
     use ::time::macros::*;
 
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let file = fs.get_ro_file("/rootdir/example.txt").unwrap();
@@ -89,9 +81,7 @@ fn check_file_timestamps() {
 fn modify_file_timestamps() {
     use ::time::macros::*;
 
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_rw_file("/bee movie script.txt").unwrap();

@@ -4,6 +4,9 @@
 pub use embedded_io::*;
 pub use simple_fatfs::{block_io::*, *};
 
+mod wrapper;
+pub use wrapper::*;
+
 pub static MINFS: &[u8] = include_bytes!("imgs/minfs.img");
 pub static FAT12: &[u8] = include_bytes!("imgs/fat12.img");
 pub static FAT16: &[u8] = include_bytes!("imgs/fat16.img");

@@ -9,9 +9,7 @@ pub use test_log::test;
 // since we run .to_owned(), which basically clones the data in the static slices,
 // in order to make the Cursor readable/writable
 fn write_to_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT12.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT12);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_rw_file("/root.txt").unwrap();
@@ -56,9 +54,7 @@ fn write_to_file() {
 
 #[test]
 fn truncate_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_rw_file("/bee movie script.txt").unwrap();

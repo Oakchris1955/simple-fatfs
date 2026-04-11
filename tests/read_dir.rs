@@ -5,9 +5,7 @@ pub use test_log::test;
 
 #[test]
 fn read_dir_and_go_back() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     for entry in fs.read_dir("/").unwrap() {

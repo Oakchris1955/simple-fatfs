@@ -5,9 +5,7 @@ use test_log::test;
 
 #[test]
 fn remove_empty_dir() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = "/another root directory/";
@@ -27,9 +25,7 @@ fn remove_empty_dir() {
 
 #[test]
 fn remove_nonempty_dir_with_readonly_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = "/rootdir/";

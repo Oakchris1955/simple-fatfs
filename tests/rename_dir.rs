@@ -5,9 +5,7 @@ use test_log::test;
 
 #[test]
 fn rename_root_directory() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename("/rootdir", "/rootdir2").unwrap();
@@ -23,9 +21,7 @@ fn rename_root_directory() {
 
 #[test]
 fn rename_root_directory_fat32() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename("/secret", "/emptydir/secret").unwrap();

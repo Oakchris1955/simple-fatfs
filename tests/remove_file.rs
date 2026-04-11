@@ -5,9 +5,7 @@ use test_log::test;
 
 #[test]
 fn remove_root_dir_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     // the bee movie script (here) is in the root directory region
@@ -28,9 +26,7 @@ fn remove_root_dir_file() {
 
 #[test]
 fn remove_data_region_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT12.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT12);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     // the bee movie script (here) is in the data region
@@ -51,9 +47,7 @@ fn remove_data_region_file() {
 
 #[test]
 fn attempt_to_remove_file_as_directory() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = "/hello.txt";

@@ -5,9 +5,7 @@ use test_log::test;
 
 #[test]
 fn create_directory_in_root_and_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.create_dir("/unbelievable").unwrap();
@@ -21,9 +19,7 @@ fn create_directory_in_root_and_file() {
 
 #[test]
 fn create_directory_in_subdir_and_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.create_dir("/another root directory2").unwrap();
@@ -41,9 +37,7 @@ fn create_directory_in_subdir_and_file() {
 
 #[test]
 fn create_directory_in_root_and_file_fat32() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.create_dir("/unbelievable").unwrap();
@@ -57,9 +51,7 @@ fn create_directory_in_root_and_file_fat32() {
 
 #[test]
 fn create_directory_in_subdir_and_file_fat32() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.create_dir("/another root directory").unwrap();

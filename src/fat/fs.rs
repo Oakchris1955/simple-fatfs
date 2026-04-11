@@ -2516,15 +2516,21 @@ mod tests {
         "/tests/common/bee movie script.txt"
     ));
 
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/common/wrapper.rs"
+    ));
+
+    #[cfg(not(feature = "std"))]
+    use alloc::borrow::ToOwned;
+
     /// Check the reserved FAT entries (first two) for expected values
     #[test]
     #[expect(non_snake_case)]
     fn check_FAT_offset() {
         use crate::fat::BootRecord;
 
-        use std::io::Cursor;
-
-        let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+        let mut storage = MemoryDevice::from(FAT16);
         let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
         let fat_offset = match &*fs.boot_record.borrow() {
@@ -2552,9 +2558,7 @@ mod tests {
     #[test]
     #[expect(non_snake_case)]
     fn FAT_tables_after_write_are_identical() {
-        use std::io::Cursor;
-
-        let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+        let mut storage = MemoryDevice::from(FAT16);
         let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
         assert!(
@@ -2581,9 +2585,7 @@ mod tests {
     fn FAT_tables_after_fat32_write_are_identical() {
         use crate::fat::{BootRecord, Ebr};
 
-        use std::io::Cursor;
-
-        let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+        let mut storage = MemoryDevice::from(FAT32);
         let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
         match &*fs.boot_record.borrow() {
@@ -2627,9 +2629,7 @@ mod tests {
         ];
 
         for case in TEST_CASES {
-            use std::io::Cursor;
-
-            let mut storage = FromStd::new(Cursor::new(case.0)).unwrap();
+            let mut storage = MemoryDevice::from(case.0);
             let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
             assert_eq!(fs.fat_type(), case.1)
@@ -2642,9 +2642,7 @@ mod tests {
             &[(MINFS, 512), (FAT12, 512), (FAT16, 512), (FAT32, 512)];
 
         for case in TEST_CASES {
-            use std::io::Cursor;
-
-            let mut storage = FromStd::new(Cursor::new(case.0)).unwrap();
+            let mut storage = MemoryDevice::from(case.0);
             let sector_size = determine_fs_sector_size(&mut storage).unwrap();
 
             assert_eq!(sector_size, case.1)
@@ -2660,9 +2658,7 @@ mod tests {
         fn entry_defragment_~*fat_type() {
             const UNUSED_ENTRY_COUNT: EntryCount = *unused_entries;
 
-            use std::io::Cursor;
-
-            let mut storage = FromStd::new(Cursor::new(~*fat_type.to_owned())).unwrap();
+            let mut storage = MemoryDevice::from(~*fat_type);
             let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
             fs.show_hidden(true);
 

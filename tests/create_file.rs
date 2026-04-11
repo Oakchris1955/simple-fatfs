@@ -5,9 +5,7 @@ pub use test_log::test;
 
 #[test]
 fn create_root_dir_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.create_file("/new.txt").unwrap();
@@ -20,9 +18,7 @@ fn create_root_dir_file() {
 
 #[test]
 fn create_subdir_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
@@ -39,7 +35,6 @@ fn create_subdir_file() {
 #[test]
 fn create_lots_of_files() {
     use regex::Regex;
-    use std::io::Cursor;
 
     #[cfg(not(miri))]
     const FILE_COUNT: usize = 1000;
@@ -47,7 +42,7 @@ fn create_lots_of_files() {
     #[cfg(miri)]
     const FILE_COUNT: usize = 10;
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     #[cfg(not(feature = "bloom"))]
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
     #[cfg(feature = "bloom")]
@@ -109,9 +104,7 @@ fn create_lots_of_files() {
 
 #[test]
 fn create_file_root_dir_fat32() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs
@@ -126,9 +119,7 @@ fn create_file_root_dir_fat32() {
 
 #[test]
 fn create_file_subdir_fat32() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.create_file("/secret/baby i am free.txt").unwrap();

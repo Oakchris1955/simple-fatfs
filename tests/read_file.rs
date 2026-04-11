@@ -5,9 +5,7 @@ use test_log::test;
 
 #[test]
 fn read_file_in_root_dir() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file("/root.txt").unwrap();
@@ -21,9 +19,7 @@ fn read_file_in_root_dir() {
 
 #[test]
 fn read_huge_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file("/bee movie script.txt").unwrap();
@@ -32,12 +28,10 @@ fn read_huge_file() {
 
 #[test]
 fn seek_n_read() {
-    use std::io::Cursor;
-
     // this uses the famous "I'd like to interject for a moment" copypasta as a test file
     // you can find it online by just searching this term
 
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file("/GNU ⁄ Linux copypasta.txt").unwrap();
@@ -64,9 +58,7 @@ fn seek_n_read() {
 
 #[test]
 fn read_file_in_subdir() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file("/rootdir/example.txt").unwrap();
@@ -80,9 +72,7 @@ fn read_file_in_subdir() {
 
 #[test]
 fn read_file_fat12() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT12.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT12);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     {
@@ -105,9 +95,7 @@ fn read_file_fat12() {
 
 #[test]
 fn read_file_fat32() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file("/secret/bee movie script.txt").unwrap();

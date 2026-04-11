@@ -8,9 +8,7 @@ pub use test_log::test;
 
 #[test]
 fn seek_n_read_fat32() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_ro_file("/hello.txt").unwrap();
@@ -28,9 +26,7 @@ fn seek_n_read_fat32() {
 
 #[test]
 fn write_to_fat32_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let mut file = fs.get_rw_file("/hello.txt").unwrap();
@@ -67,9 +63,7 @@ fn write_to_fat32_file() {
 
 #[test]
 fn truncate_fat32_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     const EXPECTED_STR: &str = "Hello fr";
@@ -88,9 +82,7 @@ fn truncate_fat32_file() {
 
 #[test]
 fn remove_fat32_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let file_path = "/secret/bee movie script.txt";
@@ -111,9 +103,7 @@ fn remove_fat32_file() {
 
 #[test]
 fn remove_empty_fat32_dir() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = "/emptydir/";
@@ -133,9 +123,7 @@ fn remove_empty_fat32_dir() {
 
 #[test]
 fn remove_nonempty_fat32_dir() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     let dir_path = "/secret/";

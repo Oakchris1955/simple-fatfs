@@ -5,9 +5,7 @@ use test_log::test;
 
 #[test]
 fn rename_root_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename("/root.txt", "/rootdir/not root.txt").unwrap();
@@ -23,9 +21,7 @@ fn rename_root_file() {
 
 #[test]
 fn rename_nonroot_file() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT16.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename("/rootdir/example.txt", "/another root directory/hello.txt")
@@ -42,9 +38,7 @@ fn rename_nonroot_file() {
 
 #[test]
 fn rename_root_file_fat32() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename("/hello.txt", "/emptydir/bye.txt").unwrap();
@@ -60,9 +54,7 @@ fn rename_root_file_fat32() {
 
 #[test]
 fn rename_nonroot_file_fat32() {
-    use std::io::Cursor;
-
-    let mut storage = FromStd::new(Cursor::new(FAT32.to_owned())).unwrap();
+    let mut storage = MemoryDevice::from(FAT32);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
     fs.rename("/secret/bee movie script.txt", "/BEES.txt")
