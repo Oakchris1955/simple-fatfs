@@ -24,6 +24,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
+      - name: Install the `wild` linker
+        uses: wild-linker/action@latest
       - name: Run tests - All features enabled
         run: |
           cargo build --verbose --all-features
