@@ -418,7 +418,7 @@ where
     }
 
     // Begin by reading the boot record
-    let mut buffer = vec![0_u8; block_size.try_into().unwrap()].into_boxed_slice();
+    let mut buffer = SectorBuffer::new(&mut storage)?;
 
     storage.read(0, &mut buffer)?;
 
