@@ -695,14 +695,15 @@ where
             }
         };
 
+        let bytes_allocated = if self.file_size == 0 {
+            // even if the file size is zero, a file has a cluster already allocated
+            self.fs.props.cluster_size
+        } else {
+            self.file_size.next_multiple_of(self.fs.cluster_size())
+        };
+
         // in case the cursor goes beyond the EOF, allocate more clusters
-        if offset > self.file_size.next_multiple_of(self.fs.cluster_size()) {
-            let bytes_allocated = if self.file_size == 0 {
-                // even if the file size is zero, a file has a cluster already allocated
-                self.fs.props.cluster_size
-            } else {
-                self.file_size.next_multiple_of(self.fs.cluster_size())
-            };
+        if offset > bytes_allocated {
             let clusters_to_allocate = (offset - bytes_allocated).div_ceil(self.fs.cluster_size());
             log::debug!("Seeking beyond EOF, allocating {clusters_to_allocate} more clusters");
 
@@ -721,6 +722,14 @@ where
             self.file_size = offset;
             log::debug!(
                 "New file size after reallocation is {} bytes",
+                self.file_size
+            );
+        } else if offset > self.file_size {
+            self.file_size = offset;
+
+            self.file_size = offset;
+            log::debug!(
+                "New file size (without new reallocation) is {} bytes",
                 self.file_size
             );
         }
