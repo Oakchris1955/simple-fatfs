@@ -210,6 +210,9 @@ mod path;
 mod time;
 mod utils;
 
+#[cfg(test)]
+mod test_commons;
+
 pub use codepage::*;
 pub use embedded_io as io;
 pub use error::*;

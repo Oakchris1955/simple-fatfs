@@ -1,13 +1,13 @@
 mod common;
 use common::*;
 
+use rstest::*;
+use rstest_reuse::*;
 pub use test_log::test;
 
 #[test]
-fn read_only_file() {
-    let mut storage = MemoryDevice::from(FAT16);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
+#[apply(fs)]
+fn read_only_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
     let file_result = fs.get_rw_file("/rootdir/example.txt");
 
     match file_result {
@@ -20,11 +20,9 @@ fn read_only_file() {
 }
 
 #[test]
-fn get_hidden_file() {
-    let mut storage = MemoryDevice::from(FAT12);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-    let file_path = "/hidden";
+#[apply(fs)]
+fn get_hidden_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+    let file_path = "/hidden/hidden.txt";
     {
         let file_result = fs.get_ro_file(file_path);
         match file_result {

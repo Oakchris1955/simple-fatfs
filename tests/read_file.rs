@@ -1,45 +1,40 @@
 mod common;
 use common::*;
 
+use embedded_io::*;
+
+use rstest::*;
+use rstest_reuse::{self, *};
 use test_log::test;
 
 #[test]
-fn read_file_in_root_dir() {
-    let mut storage = MemoryDevice::from(FAT16);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
+#[apply(fs)]
+fn read_file_in_root_dir(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
     let mut file = fs.get_ro_file("/root.txt").unwrap();
 
     let mut file_buf = vec![0; file.file_size() as usize];
     file.read_exact(&mut file_buf).unwrap();
     let file_string = str::from_utf8(&file_buf).unwrap();
-    const EXPECTED_STR: &str = "I am in the filesystem's root!!!\n\n";
+    const EXPECTED_STR: &str = "I am in the filesystem's root!!!\n\nbottom text\n";
     assert_eq!(file_string, EXPECTED_STR);
 }
 
 #[test]
-fn read_huge_file() {
-    let mut storage = MemoryDevice::from(FAT16);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-    let mut file = fs.get_ro_file("/bee movie script.txt").unwrap();
+#[apply(fs)]
+fn read_huge_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+    let mut file = fs.get_ro_file("/subdir/bee movie script.txt").unwrap();
     assert_file_is_bee_movie_script(&mut file);
 }
 
 #[test]
-fn seek_n_read() {
-    // this uses the famous "I'd like to interject for a moment" copypasta as a test file
-    // you can find it online by just searching this term
-
-    let mut storage = MemoryDevice::from(FAT16);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-    let mut file = fs.get_ro_file("/GNU ⁄ Linux copypasta.txt").unwrap();
+#[apply(fs)]
+fn seek_n_read(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+    let mut file = fs.get_ro_file("/copypasta.txt").unwrap();
     let mut file_bytes = [0_u8; 4096];
 
     // we first perform a forward seek...
     const EXPECTED_STR1: &str = "Linux is the kernel";
-    file.seek(SeekFrom::Start(792)).unwrap();
+    file.seek(SeekFrom::Start(848)).unwrap();
     let bytes_read = file.read(&mut file_bytes[..EXPECTED_STR1.len()]).unwrap();
     assert_eq!(
         String::from_utf8_lossy(&file_bytes[..bytes_read]),
@@ -47,8 +42,8 @@ fn seek_n_read() {
     );
 
     // ...then a backward one
-    const EXPECTED_STR2: &str = "What you're referring to as Linux, is in fact, GNU/Linux";
-    file.seek(SeekFrom::Start(39)).unwrap();
+    const EXPECTED_STR2: &str = "What you're refering to as Linux, is in fact, GNU/Linux";
+    file.seek(SeekFrom::Start(96)).unwrap();
     let bytes_read = file.read(&mut file_bytes[..EXPECTED_STR2.len()]).unwrap();
     assert_eq!(
         String::from_utf8_lossy(&file_bytes[..bytes_read]),
@@ -66,39 +61,6 @@ fn read_file_in_subdir() {
     let mut file_buf = vec![0; file.file_size() as usize];
     file.read_exact(&mut file_buf).unwrap();
     let file_string = str::from_utf8(&file_buf).unwrap();
-    const EXPECTED_STR: &str = "I am not in the root directory :(\n\n";
+    const EXPECTED_STR: &str = "I am not in the root directory :(\n";
     assert_eq!(file_string, EXPECTED_STR);
-}
-
-#[test]
-fn read_file_fat12() {
-    let mut storage = MemoryDevice::from(FAT12);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-    {
-        let mut file = fs.get_ro_file("/foo/bar.txt").unwrap();
-        let mut file_buf = vec![0; file.file_size() as usize];
-        file.read_exact(&mut file_buf).unwrap();
-        let file_string = str::from_utf8(&file_buf).unwrap();
-        const EXPECTED_STR: &str = "Hello, World!\n";
-        assert_eq!(file_string, EXPECTED_STR);
-    }
-
-    {
-        // please not that the FAT12 image has been modified so that
-        // one FAT entry of the file we are reading is split between different sectors
-        // this way, we also test for this case
-        let mut file = fs.get_ro_file("/test/bee movie script.txt").unwrap();
-        assert_file_is_bee_movie_script(&mut file);
-    }
-}
-
-#[test]
-fn read_file_fat32() {
-    let mut storage = MemoryDevice::from(FAT32);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-    let mut file = fs.get_ro_file("/secret/bee movie script.txt").unwrap();
-
-    assert_file_is_bee_movie_script(&mut file);
 }

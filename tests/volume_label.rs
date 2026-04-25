@@ -1,77 +1,58 @@
 mod common;
 use common::*;
 
+use rstest::*;
+use rstest_reuse::*;
 use test_log::test;
 
 #[test]
-fn volume_label_bpb_correct1() {
-    let mut storage = MemoryDevice::from(FAT16);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-    assert_eq!(fs.volume_label_bpb(), Some(String::from("SIMPLEFATFS")))
+#[rstest]
+#[case(fat12_fs(), None)]
+#[case(fat16_fs(), Some("SOMETHINGEL".into()))]
+#[case(fat32_fs(), Some("SIMPLEFATFS".into()))]
+fn volume_label_bpb(
+    #[case] fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>,
+    #[case] bpb_volume_label: Option<String>,
+) {
+    assert_eq!(fs.volume_label_bpb(), bpb_volume_label)
 }
 
 #[test]
-fn volume_label_bpb_correct2() {
-    let mut storage = MemoryDevice::from(MINFS);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-    assert_eq!(fs.volume_label_bpb(), Some(String::from("TEST FS")))
+#[rstest]
+#[case(fat12_fs(), Some("HELLOWORLD".into()))]
+#[case(fat16_fs(), Some("SOMETHINGEL".into()))]
+#[case(fat32_fs(), None)]
+fn volume_label_root(
+    #[case] fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>,
+    #[case] root_volume_label: Option<String>,
+) {
+    assert_eq!(fs.volume_label_root_dir().unwrap(), root_volume_label)
 }
 
 #[test]
-fn volume_label_bpb_none() {
-    let mut storage = MemoryDevice::from(FAT32);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-    assert_eq!(fs.volume_label_bpb(), None)
-}
-
-#[test]
-fn volume_label_root_none() {
-    let mut storage = MemoryDevice::from(FAT32);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-    assert!(fs
-        .volume_label_root_dir()
-        .is_ok_and(|label| label.is_none()))
-}
-
-#[test]
-fn volume_label_root_correct() {
-    let mut storage = MemoryDevice::from(MINFS);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-    assert_eq!(
-        fs.volume_label_root_dir().unwrap(),
-        Some(String::from("TEST FS"))
-    )
-}
-
-#[test]
-fn set_volume_label_bpb() {
-    let mut storage = MemoryDevice::from(FAT32);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+#[apply(device)]
+fn set_volume_label_bpb(mut device: MemoryDevice<Box<[u8]>>) {
+    let fs = FileSystem::new(&mut device, FSOptions::new()).unwrap();
 
     fs.set_volume_label_bpb("DEADBEEF");
 
     drop(fs);
 
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut device, FSOptions::new()).unwrap();
 
     assert_eq!(fs.volume_label_bpb(), Some(String::from("DEADBEEF")));
 }
 
 #[test]
-fn set_volume_label_root_dir() {
-    let mut storage = MemoryDevice::from(FAT32);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+#[apply(device)]
+fn set_volume_label_root_dir(mut device: MemoryDevice<Box<[u8]>>) {
+    let fs = FileSystem::new(&mut device, FSOptions::new()).unwrap();
 
     fs.set_volume_label_root_dir("DEADBEEF").unwrap();
 
     drop(fs);
 
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+    let fs = FileSystem::new(&mut device, FSOptions::new()).unwrap();
 
     assert_eq!(
         fs.volume_label_root_dir().unwrap(),

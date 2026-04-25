@@ -1,16 +1,5 @@
 use core::ops::{Deref, DerefMut};
 use embedded_io::ErrorType;
-#[cfg(not(test))]
-use simple_fatfs::block_io::*;
-
-#[cfg(test)]
-#[cfg_attr(test, allow(unused))]
-use crate::block_io::*;
-
-#[cfg(not(feature = "std"))]
-extern crate alloc;
-#[cfg(not(feature = "std"))]
-use alloc::boxed::Box;
 
 pub struct MemoryDevice<A>(A)
 where

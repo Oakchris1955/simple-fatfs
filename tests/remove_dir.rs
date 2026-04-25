@@ -1,14 +1,15 @@
 mod common;
 use common::*;
 
+use rstest::*;
+use rstest_reuse::*;
 use test_log::test;
 
 #[test]
-fn remove_empty_dir() {
-    let mut storage = MemoryDevice::from(FAT16);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+#[apply(fs)]
 
-    let dir_path = "/another root directory/";
+fn remove_empty_dir(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+    let dir_path = "/emptydir/";
 
     fs.remove_empty_dir(dir_path).unwrap();
 
@@ -24,13 +25,14 @@ fn remove_empty_dir() {
 }
 
 #[test]
-fn remove_nonempty_dir_with_readonly_file() {
-    let mut storage = MemoryDevice::from(FAT16);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
+#[apply(fs)]
+
+fn remove_nonempty_dir_with_readonly_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+    fs.show_hidden(true);
 
     let dir_path = "/rootdir/";
 
-    // the directory should contain a read-only file (example.txt)
+    // the directory should contain a read-only file (hidden.txt)
     let del_result = fs.remove_dir_all(dir_path);
     match del_result {
         Err(err) => match err {

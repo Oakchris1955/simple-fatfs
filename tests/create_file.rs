@@ -1,13 +1,15 @@
 mod common;
 use common::*;
 
+use embedded_io::*;
+
+use rstest::*;
+use rstest_reuse::*;
 pub use test_log::test;
 
 #[test]
-fn create_root_dir_file() {
-    let mut storage = MemoryDevice::from(FAT16);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
+#[apply(fs)]
+fn create_root_dir_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
     let mut file = fs.create_file("/new.txt").unwrap();
 
     file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
@@ -17,13 +19,9 @@ fn create_root_dir_file() {
 }
 
 #[test]
-fn create_subdir_file() {
-    let mut storage = MemoryDevice::from(FAT16);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-    let mut file = fs
-        .create_file("/another root directory/baby i am free.txt")
-        .unwrap();
+#[apply(fs)]
+fn create_subdir_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+    let mut file = fs.create_file("/subdir/baby i am free.txt").unwrap();
 
     file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
     file.rewind().unwrap();
@@ -33,7 +31,10 @@ fn create_subdir_file() {
 
 #[cfg_attr(miri, ignore)]
 #[test]
-fn create_lots_of_files() {
+#[rstest]
+#[case(device(FAT16))]
+#[case(device(FAT32))]
+fn create_lots_of_files(#[case] mut storage: MemoryDevice<Box<[u8]>>) {
     use regex::Regex;
 
     #[cfg(not(miri))]
@@ -42,7 +43,6 @@ fn create_lots_of_files() {
     #[cfg(miri)]
     const FILE_COUNT: usize = 10;
 
-    let mut storage = MemoryDevice::from(FAT16);
     #[cfg(not(feature = "bloom"))]
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
     #[cfg(feature = "bloom")]
@@ -56,10 +56,10 @@ fn create_lots_of_files() {
     .unwrap();
 
     #[cfg(feature = "bloom")]
-    fs.cache_dir("/another root directory").unwrap();
+    fs.cache_dir("/subdir").unwrap();
 
     for i in 1..=FILE_COUNT {
-        let name = PathBuf::from(&format!("/another root directory/{i}.txt"));
+        let name = PathBuf::from(&format!("/subdir/{i}.txt"));
         let mut file = fs.create_file(&name).unwrap();
 
         file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
@@ -68,9 +68,9 @@ fn create_lots_of_files() {
         drop(file);
     }
 
-    let dir = fs.read_dir("/another root directory/").unwrap();
+    let dir = fs.read_dir("/subdir/").unwrap();
     let mut found = [false; FILE_COUNT];
-    let re = Regex::new(r"([0-9]*).txt").unwrap();
+    let re = Regex::new(r"([0-9]+).txt").unwrap();
     for entry in dir {
         let entry = entry.unwrap();
         if entry.is_file() {
@@ -100,32 +100,4 @@ fn create_lots_of_files() {
         all_found,
         "Some files that were created weren't found during directory iteration"
     )
-}
-
-#[test]
-fn create_file_root_dir_fat32() {
-    let mut storage = MemoryDevice::from(FAT32);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-    let mut file = fs
-        .create_file("/bee movie script or something ig.txt")
-        .unwrap();
-
-    file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
-    file.rewind().unwrap();
-
-    assert_file_is_i_dont_need_a_badge(&mut file);
-}
-
-#[test]
-fn create_file_subdir_fat32() {
-    let mut storage = MemoryDevice::from(FAT32);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-    let mut file = fs.create_file("/secret/baby i am free.txt").unwrap();
-
-    file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
-    file.rewind().unwrap();
-
-    assert_file_is_i_dont_need_a_badge(&mut file);
 }

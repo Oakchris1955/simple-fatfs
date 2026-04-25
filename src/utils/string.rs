@@ -226,15 +226,7 @@ where
 mod tests {
     use super::*;
 
-    const FAT16: &[u8] = include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/common/imgs/fat16.img"
-    ));
-
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/common/wrapper.rs"
-    ));
+    use crate::test_commons::*;
 
     #[test]
     fn test_sfn_generator_long() {

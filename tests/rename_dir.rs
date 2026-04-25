@@ -1,13 +1,15 @@
 mod common;
 use common::*;
 
+use embedded_io::*;
+
+use rstest::*;
+use rstest_reuse::*;
 use test_log::test;
 
 #[test]
-fn rename_root_directory() {
-    let mut storage = MemoryDevice::from(FAT16);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
+#[apply(fs)]
+fn rename_root_directory(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
     fs.rename("/rootdir", "/rootdir2").unwrap();
 
     let mut file = fs.get_ro_file("/rootdir2/example.txt").unwrap();
@@ -15,16 +17,14 @@ fn rename_root_directory() {
     let mut file_buf = vec![0; file.file_size() as usize];
     file.read_exact(&mut file_buf).unwrap();
     let file_string = str::from_utf8(&file_buf).unwrap();
-    const EXPECTED_STR: &str = "I am not in the root directory :(\n\n";
+    const EXPECTED_STR: &str = "I am not in the root directory :(\n";
     assert_eq!(file_string, EXPECTED_STR);
 }
 
 #[test]
-fn rename_root_directory_fat32() {
-    let mut storage = MemoryDevice::from(FAT32);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-    fs.rename("/secret", "/emptydir/secret").unwrap();
+#[apply(fs)]
+fn rename_root_directory_fat32(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+    fs.rename("/subdir", "/emptydir/secret").unwrap();
 
     let mut file = fs
         .get_ro_file("/emptydir/secret/bee movie script.txt")

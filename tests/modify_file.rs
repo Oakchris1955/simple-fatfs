@@ -1,6 +1,8 @@
 mod common;
 use common::*;
 
+use embedded_io::*;
+
 pub use test_log::test;
 
 #[cfg_attr(miri, ignore)]
@@ -57,7 +59,7 @@ fn truncate_file() {
     let mut storage = MemoryDevice::from(FAT16);
     let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
 
-    let mut file = fs.get_rw_file("/bee movie script.txt").unwrap();
+    let mut file = fs.get_rw_file("/subdir/bee movie script.txt").unwrap();
 
     // we are gonna truncate the bee movie script down to 20 000 bytes
     const NEW_SIZE: usize = 20_000;
