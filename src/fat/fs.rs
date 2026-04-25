@@ -1836,6 +1836,7 @@ where
                     .path()
                     .file_name()
                     .is_some_and(|entry_name| entry_name == file_name)
+                    && dir_entry.is_file()
                 {
                     entry = Some(dir_entry.entry);
 
