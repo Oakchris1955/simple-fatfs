@@ -57,8 +57,23 @@ impl FATType {
         match self {
             FATType::FAT12 => 12,
             FATType::FAT16 => 16,
-            // the high 4 bits are ignored, but are still part of the entry
+            // the high 4 bits are reserved, but are still part of the entry
             FATType::FAT32 => 32,
+            FATType::ExFAT => 32,
+        }
+    }
+
+    #[inline]
+    // this is currently used only in a test case, but it might be useful in the future
+    #[cfg_attr(not(test), expect(dead_code))]
+    /// How many bits this [`FATType`] uses to address clusters in the disk,
+    /// minus those reserved
+    fn actual_bits_per_entry(&self) -> u8 {
+        match self {
+            FATType::FAT12 => 12,
+            FATType::FAT16 => 16,
+            // the high 4 bits are reserved
+            FATType::FAT32 => 28,
             FATType::ExFAT => 32,
         }
     }
@@ -951,7 +966,7 @@ where
     }
 
     #[expect(non_snake_case)]
-    pub(crate) fn read_nth_FAT_entry(&self, n: FATEntryIndex) -> Result<FATEntry, S::Error> {
+    fn read_nth_FAT_entry_value(&self, n: FATEntryIndex) -> Result<FATEntryValue, S::Error> {
         // the size of an entry rounded up to bytes
         let entry_size = self.fat_type.entry_size();
         let entry_props = FATEntryProps::new(n, self);
@@ -991,6 +1006,13 @@ where
             FATType::FAT32 => value &= 0x0FFFFFFF,
             _ => (),
         }
+
+        Ok(value)
+    }
+
+    #[expect(non_snake_case)]
+    pub(crate) fn read_nth_FAT_entry(&self, n: FATEntryIndex) -> Result<FATEntry, S::Error> {
+        let value = self.read_nth_FAT_entry_value(n)?;
 
         /*
         // pad unused bytes with 1s
@@ -2498,44 +2520,42 @@ mod tests {
     use test_log::test;
 
     use rstest::*;
+    use rstest_reuse::*;
 
     #[cfg(not(feature = "std"))]
     use alloc::borrow::ToOwned;
 
-    /*
-    temp removed, TODO: proper way to get entry bytes for all FAT types
+    /// Check the reserved FAT entries (first two) for expected values
+    #[test]
+    #[apply(fs)]
+    fn check_file_allocation_table_offset(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+        use crate::fat::BootRecord;
 
-        /// Check the reserved FAT entries (first two) for expected values
-        #[test]
-        #[apply(fs)]
-        fn check_file_allocation_table_offset(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
-            use crate::fat::BootRecord;
+        let fat_offset = match &*fs.boot_record.borrow() {
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.first_fat_sector(),
+            BootRecord::ExFAT(_boot_record_exfat) => unreachable!(),
+        };
 
-            let fat_offset = match &*fs.boot_record.borrow() {
-                BootRecord::Fat(boot_record_fat) => boot_record_fat.first_fat_sector(),
-                BootRecord::ExFAT(_boot_record_exfat) => unreachable!(),
-            };
+        // we manually read the first and second entry of the FAT table
+        fs.load_nth_sector(fat_offset.into()).unwrap();
 
-            // we manually read the first and second entry of the FAT table
-            fs.load_nth_sector(fat_offset.into()).unwrap();
+        let first_entry = fs.read_nth_FAT_entry_value(0).unwrap();
+        let media_type = if let BootRecord::Fat(boot_record_fat) = &*fs.boot_record.borrow() {
+            boot_record_fat.bpb._media_type
+        } else {
+            todo!("ExFAT is not yet implemented")
+        };
+        assert_eq!(
+            u32::from(media_type),
+            utils::bits::setbits_u32(8) & first_entry
+        );
 
-            let first_entry = u16::from_le_bytes(fs.sector_buffer.borrow()[..2].try_into().unwrap());
-            let media_type = if let BootRecord::Fat(boot_record_fat) = &*fs.boot_record.borrow() {
-                boot_record_fat.bpb._media_type
-            } else {
-                todo!("ExFAT is not yet implemented")
-            };
-            assert_eq!(u16::MAX << 8 | u16::from(media_type), first_entry);
-
-            // apart from the high 2 bits, everything is guaranteed to be set to 1
-            // (these 2 high bits holds dirty volume flag, for which we don't care in this test)
-            let second_entry = u16::from_le_bytes(fs.sector_buffer.borrow()[2..4].try_into().unwrap());
-            let mask = crate::utils::bits::setbits_u16((u16::BITS - 2).try_into().unwrap());
-            panic!("{:?}", second_entry);
-            assert_eq!(mask, second_entry & mask);
-        }
-
-        */
+        // apart from the high non-reserved 2 bits, everything is guaranteed to be set to 1
+        // (these 2 high bits hold dirty volume flag, for which we don't care in this test)
+        let second_entry = fs.read_nth_FAT_entry_value(1).unwrap();
+        let mask = crate::utils::bits::setbits_u32(fs.fat_type().actual_bits_per_entry() - 2);
+        assert_eq!(mask, second_entry & mask);
+    }
 
     /// Ensure that changes are mirrored to both FAT tables
     #[test]
