@@ -1,11 +1,9 @@
 use core::ops::{Deref, DerefMut};
 use embedded_io::ErrorType;
 
-pub struct MemoryDevice<A>(A)
-where
-    A: Deref<Target = [u8]>;
+pub struct MemoryDevice(Box<[u8]>);
 
-impl From<&[u8]> for MemoryDevice<Box<[u8]>> {
+impl From<&[u8]> for MemoryDevice {
     fn from(value: &[u8]) -> Self {
         Self(Box::from(value))
     }
@@ -20,17 +18,11 @@ impl embedded_io::Error for WrapperError {
     }
 }
 
-impl<A> ErrorType for MemoryDevice<A>
-where
-    A: Deref<Target = [u8]>,
-{
+impl ErrorType for MemoryDevice {
     type Error = WrapperError;
 }
 
-impl<A> BlockBase for MemoryDevice<A>
-where
-    A: Deref<Target = [u8]>,
-{
+impl BlockBase for MemoryDevice {
     fn block_size(&self) -> BlockSize {
         1
     }
@@ -40,10 +32,7 @@ where
     }
 }
 
-impl<A> BlockRead for MemoryDevice<A>
-where
-    A: Deref<Target = [u8]>,
-{
+impl BlockRead for MemoryDevice {
     fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
         // this is fine for testing
         #![expect(clippy::cast_possible_truncation)]
@@ -56,10 +45,7 @@ where
     }
 }
 
-impl<A> BlockWrite for MemoryDevice<A>
-where
-    A: Deref<Target = [u8]> + DerefMut,
-{
+impl BlockWrite for MemoryDevice {
     fn write(&mut self, block: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
         // this is fine for testing
         #![expect(clippy::cast_possible_truncation)]

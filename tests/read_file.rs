@@ -9,7 +9,7 @@ use test_log::test;
 
 #[test]
 #[apply(fs)]
-fn read_file_in_root_dir(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn read_file_in_root_dir(fs: FileSystem<MemoryDevice, DefaultClock>) {
     let mut file = fs.get_ro_file("/root.txt").unwrap();
 
     let mut file_buf = vec![0; file.file_size() as usize];
@@ -21,14 +21,14 @@ fn read_file_in_root_dir(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) 
 
 #[test]
 #[apply(fs)]
-fn read_huge_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn read_huge_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
     let mut file = fs.get_ro_file("/subdir/bee movie script.txt").unwrap();
     assert_file_is_bee_movie_script(&mut file);
 }
 
 #[test]
 #[apply(fs)]
-fn seek_n_read(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn seek_n_read(fs: FileSystem<MemoryDevice, DefaultClock>) {
     let mut file = fs.get_ro_file("/copypasta.txt").unwrap();
     let mut file_bytes = [0_u8; 4096];
 
@@ -53,7 +53,7 @@ fn seek_n_read(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
 
 #[test]
 #[apply(fs)]
-fn read_file_in_subdir(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn read_file_in_subdir(fs: FileSystem<MemoryDevice, DefaultClock>) {
     let mut file = fs.get_ro_file("/rootdir/example.txt").unwrap();
 
     let mut file_buf = vec![0; file.file_size() as usize];

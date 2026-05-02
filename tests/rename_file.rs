@@ -9,7 +9,7 @@ use test_log::test;
 
 #[test]
 #[apply(fs)]
-fn rename_root_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn rename_root_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
     fs.rename("/root.txt", "/rootdir/not root.txt").unwrap();
 
     let mut file = fs.get_ro_file("/rootdir/not root.txt").unwrap();
@@ -23,7 +23,7 @@ fn rename_root_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
 
 #[test]
 #[apply(fs)]
-fn rename_nonroot_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn rename_nonroot_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
     fs.rename("/rootdir/example.txt", "/subdir/hello.txt")
         .unwrap();
 

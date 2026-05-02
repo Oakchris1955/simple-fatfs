@@ -7,7 +7,7 @@ pub use test_log::test;
 
 #[test]
 #[apply(fs)]
-fn read_only_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn read_only_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
     let file_result = fs.get_rw_file("/rootdir/example.txt");
 
     match file_result {
@@ -21,7 +21,7 @@ fn read_only_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
 
 #[test]
 #[apply(fs)]
-fn get_hidden_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn get_hidden_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
     let file_path = "/hidden/hidden.txt";
     {
         let file_result = fs.get_ro_file(file_path);

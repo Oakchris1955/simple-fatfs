@@ -8,7 +8,7 @@ use test_log::test;
 #[test]
 #[apply(fs)]
 
-fn remove_empty_dir(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn remove_empty_dir(fs: FileSystem<MemoryDevice, DefaultClock>) {
     let dir_path = "/emptydir/";
 
     fs.remove_empty_dir(dir_path).unwrap();
@@ -27,7 +27,7 @@ fn remove_empty_dir(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
 #[test]
 #[apply(fs)]
 
-fn remove_nonempty_dir_with_readonly_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn remove_nonempty_dir_with_readonly_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
     fs.show_hidden(true);
 
     let dir_path = "/rootdir/";

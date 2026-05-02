@@ -2528,7 +2528,7 @@ mod tests {
     /// Check the reserved FAT entries (first two) for expected values
     #[test]
     #[apply(fs)]
-    fn check_file_allocation_table_offset(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+    fn check_file_allocation_table_offset(fs: FileSystem<MemoryDevice, DefaultClock>) {
         use crate::fat::BootRecord;
 
         let fat_offset = match &*fs.boot_record.borrow() {
@@ -2563,7 +2563,7 @@ mod tests {
     #[case(fat12_fs())]
     #[case(fat16_fs())]
     fn file_allocation_tables_after_write_are_identical(
-        #[case] fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>,
+        #[case] fs: FileSystem<MemoryDevice, DefaultClock>,
     ) {
         assert!(
             fs.FAT_tables_are_identical().unwrap(),
@@ -2589,7 +2589,7 @@ mod tests {
     #[rstest]
     #[case(fat32_fs())]
     fn file_allocation_tables_after_fat32_write_are_identical(
-        #[case] fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>,
+        #[case] fs: FileSystem<MemoryDevice, DefaultClock>,
     ) {
         use crate::fat::{BootRecord, Ebr};
 
@@ -2631,7 +2631,7 @@ mod tests {
     #[case(fat16_fs(), FATType::FAT16)]
     #[case(fat32_fs(), FATType::FAT32)]
     fn assert_img_fat_type(
-        #[case] fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>,
+        #[case] fs: FileSystem<MemoryDevice, DefaultClock>,
         #[case] fat_type: FATType,
     ) {
         assert_eq!(fs.fat_type(), fat_type)
@@ -2643,10 +2643,7 @@ mod tests {
     #[case(device(FAT12), 512)]
     #[case(device(FAT16), 512)]
     #[case(device(FAT32), 512)]
-    fn assert_fat_sector_size(
-        #[case] mut device: MemoryDevice<Box<[u8]>>,
-        #[case] expected_sector_size: u16,
-    ) {
+    fn assert_fat_sector_size(#[case] mut device: MemoryDevice, #[case] expected_sector_size: u16) {
         let sector_size = determine_fs_sector_size(&mut device).unwrap();
 
         assert_eq!(sector_size, expected_sector_size)
@@ -2661,7 +2658,7 @@ mod tests {
     #[case(fat16_fs(), 2)]
     #[case(fat32_fs(), 3)]
     fn entry_defragment(
-        #[case] fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>,
+        #[case] fs: FileSystem<MemoryDevice, DefaultClock>,
         #[case] unused_entries: EntryCount,
     ) {
         fs.show_hidden(true);

@@ -9,7 +9,7 @@ pub use test_log::test;
 
 #[test]
 #[apply(fs)]
-fn create_root_dir_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn create_root_dir_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
     let mut file = fs.create_file("/new.txt").unwrap();
 
     file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
@@ -20,7 +20,7 @@ fn create_root_dir_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
 
 #[test]
 #[apply(fs)]
-fn create_subdir_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn create_subdir_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
     let mut file = fs.create_file("/subdir/baby i am free.txt").unwrap();
 
     file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
@@ -34,7 +34,7 @@ fn create_subdir_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
 #[rstest]
 #[case(device(FAT16))]
 #[case(device(FAT32))]
-fn create_lots_of_files(#[case] mut storage: MemoryDevice<Box<[u8]>>) {
+fn create_lots_of_files(#[case] mut storage: MemoryDevice) {
     use regex::Regex;
 
     #[cfg(not(miri))]

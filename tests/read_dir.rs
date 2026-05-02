@@ -7,7 +7,7 @@ use test_log::test;
 
 #[test]
 #[apply(fs)]
-fn read_dir_and_go_back(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn read_dir_and_go_back(fs: FileSystem<MemoryDevice, DefaultClock>) {
     for entry in fs.read_dir("/").unwrap() {
         let entry = entry.unwrap();
 

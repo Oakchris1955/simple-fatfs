@@ -1,26 +1,26 @@
 use embedded_io::Read;
 
-pub fn device(storage: &[u8]) -> MemoryDevice<Box<[u8]>> {
+pub fn device(storage: &[u8]) -> MemoryDevice {
     MemoryDevice::from(storage)
 }
 
-pub fn new_fs(storage: &[u8]) -> FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock> {
+pub fn new_fs(storage: &[u8]) -> FileSystem<MemoryDevice, DefaultClock> {
     FileSystem::new(device(storage), FSOptions::new()).unwrap()
 }
 
-pub fn minfs() -> FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock> {
+pub fn minfs() -> FileSystem<MemoryDevice, DefaultClock> {
     new_fs(MINFS)
 }
 
-pub fn fat12_fs() -> FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock> {
+pub fn fat12_fs() -> FileSystem<MemoryDevice, DefaultClock> {
     new_fs(FAT12)
 }
 
-pub fn fat16_fs() -> FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock> {
+pub fn fat16_fs() -> FileSystem<MemoryDevice, DefaultClock> {
     new_fs(FAT16)
 }
 
-pub fn fat32_fs() -> FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock> {
+pub fn fat32_fs() -> FileSystem<MemoryDevice, DefaultClock> {
     new_fs(FAT32)
 }
 

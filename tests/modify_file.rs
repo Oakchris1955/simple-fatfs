@@ -11,7 +11,7 @@ use rstest_reuse::*;
 #[cfg_attr(miri, ignore)]
 #[test]
 #[apply(fs)]
-fn write_to_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn write_to_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
     let mut file = fs.get_rw_file("/root.txt").unwrap();
 
     file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
@@ -54,7 +54,7 @@ fn write_to_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
 
 #[test]
 #[apply(fs)]
-fn truncate_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn truncate_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
     let mut file = fs.get_rw_file("/subdir/bee movie script.txt").unwrap();
 
     // we are gonna truncate the bee movie script down to 20 000 bytes

@@ -11,7 +11,7 @@ use test_log::test;
 #[case(fat16_fs(), Some("SOMETHINGEL".into()))]
 #[case(fat32_fs(), Some("SIMPLEFATFS".into()))]
 fn volume_label_bpb(
-    #[case] fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>,
+    #[case] fs: FileSystem<MemoryDevice, DefaultClock>,
     #[case] bpb_volume_label: Option<String>,
 ) {
     assert_eq!(fs.volume_label_bpb(), bpb_volume_label)
@@ -23,7 +23,7 @@ fn volume_label_bpb(
 #[case(fat16_fs(), Some("SOMETHINGEL".into()))]
 #[case(fat32_fs(), None)]
 fn volume_label_root(
-    #[case] fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>,
+    #[case] fs: FileSystem<MemoryDevice, DefaultClock>,
     #[case] root_volume_label: Option<String>,
 ) {
     assert_eq!(fs.volume_label_root_dir().unwrap(), root_volume_label)
@@ -31,7 +31,7 @@ fn volume_label_root(
 
 #[test]
 #[apply(device)]
-fn set_volume_label_bpb(mut device: MemoryDevice<Box<[u8]>>) {
+fn set_volume_label_bpb(mut device: MemoryDevice) {
     let fs = FileSystem::new(&mut device, FSOptions::new()).unwrap();
 
     fs.set_volume_label_bpb("DEADBEEF");
@@ -45,7 +45,7 @@ fn set_volume_label_bpb(mut device: MemoryDevice<Box<[u8]>>) {
 
 #[test]
 #[apply(device)]
-fn set_volume_label_root_dir(mut device: MemoryDevice<Box<[u8]>>) {
+fn set_volume_label_root_dir(mut device: MemoryDevice) {
     let fs = FileSystem::new(&mut device, FSOptions::new()).unwrap();
 
     fs.set_volume_label_root_dir("DEADBEEF").unwrap();

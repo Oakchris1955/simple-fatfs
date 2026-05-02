@@ -8,7 +8,7 @@ use test_log::test;
 #[test]
 #[apply(fs)]
 
-fn remove_root_dir_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn remove_root_dir_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
     // the "I don't need a bagde" file is in the root directory region
     let file_path = "/I don't need a badge.txt";
     let file = fs.get_rw_file(file_path).unwrap();
@@ -27,7 +27,7 @@ fn remove_root_dir_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
 
 #[test]
 #[apply(fs)]
-fn remove_data_region_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn remove_data_region_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
     // the bee movie script  is in the data region
     let file_path = "/subdir/bee movie script.txt";
     let file = fs.get_rw_file(file_path).unwrap();
@@ -46,7 +46,7 @@ fn remove_data_region_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>
 
 #[test]
 #[apply(fs)]
-fn attempt_to_remove_file_as_directory(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn attempt_to_remove_file_as_directory(fs: FileSystem<MemoryDevice, DefaultClock>) {
     let target_path = "/hello 🗺️.txt";
 
     let fs_result = fs.remove_dir_all(target_path);

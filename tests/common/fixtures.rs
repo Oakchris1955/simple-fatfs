@@ -5,7 +5,7 @@ use rstest_reuse::*;
 #[case(device(FAT12))]
 #[case(device(FAT16))]
 #[case(device(FAT32))]
-pub fn device(#[case] device: MemoryDevice<Box<[u8]>>) {}
+pub fn device(#[case] device: MemoryDevice) {}
 
 #[allow(unused)]
 #[template]

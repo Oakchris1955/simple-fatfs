@@ -9,7 +9,7 @@ use test_log::test;
 
 #[test]
 #[apply(fs)]
-fn create_directory_in_root_and_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn create_directory_in_root_and_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
     fs.create_dir("/unbelievable").unwrap();
     let mut file = fs.create_file("/bee movie script.txt").unwrap();
 
@@ -21,7 +21,7 @@ fn create_directory_in_root_and_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, Def
 
 #[test]
 #[apply(fs)]
-fn create_directory_in_subdir_and_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn create_directory_in_subdir_and_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
     fs.create_dir("/subdir/another dir ig").unwrap();
     let mut file = fs
         .create_file(PathBuf::from("/subdir/i don't need a badge.txt"))

@@ -9,7 +9,7 @@ use test_log::test;
 
 #[test]
 #[apply(fs)]
-fn check_last_accessed_ro(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn check_last_accessed_ro(fs: FileSystem<MemoryDevice, DefaultClock>) {
     let mut file = fs.get_ro_file("/rootdir/example.txt").unwrap();
 
     // read some data
@@ -25,7 +25,7 @@ fn check_last_accessed_ro(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>)
 
 #[test]
 #[apply(device)]
-fn check_last_accessed_rw(#[case] mut storage: MemoryDevice<Box<[u8]>>) {
+fn check_last_accessed_rw(#[case] mut storage: MemoryDevice) {
     let fs = FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
 
     let mut file = fs.get_rw_file("/I don't need a badge.txt").unwrap();
@@ -43,7 +43,7 @@ fn check_last_accessed_rw(#[case] mut storage: MemoryDevice<Box<[u8]>>) {
 
 #[test]
 #[apply(device)]
-fn check_last_modified(#[case] mut storage: MemoryDevice<Box<[u8]>>) {
+fn check_last_modified(#[case] mut storage: MemoryDevice) {
     use ::time::Duration;
 
     let fs = FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
@@ -70,7 +70,7 @@ use time::macros::*;
 #[case(fat16_fs(), Some(datetime!(2026-04-15 16:48:20.29)), datetime!(2026-04-12 13:43:52.0),Some(date!(2026 - 04 - 12)))]
 #[case(fat32_fs(), Some(datetime!(2026-04-12 14:19:35.38)), datetime!(2026-04-12 13:43:52.0),Some(date!(2026 - 04 - 12)))]
 fn check_file_timestamps(
-    #[case] fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>,
+    #[case] fs: FileSystem<MemoryDevice, DefaultClock>,
     #[case] creation_time: Option<time::PrimitiveDateTime>,
     #[case] modification_time: time::PrimitiveDateTime,
     #[case] last_access_date: Option<time::Date>,
@@ -84,7 +84,7 @@ fn check_file_timestamps(
 
 #[test]
 #[apply(fs)]
-fn modify_file_timestamps(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn modify_file_timestamps(fs: FileSystem<MemoryDevice, DefaultClock>) {
     use ::time::macros::*;
 
     let mut file = fs.get_rw_file("/I don't need a badge.txt").unwrap();

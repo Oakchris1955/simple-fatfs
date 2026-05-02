@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     #[apply(fs)]
-    fn test_gen_sfn_match(fs: FileSystem<MemoryDevice<Box<[u8]>>, crate::DefaultClock>) {
+    fn test_gen_sfn_match(fs: FileSystem<MemoryDevice, crate::DefaultClock>) {
         assert_eq!(
             run_gen_sfn_root("TEST.TXT", &fs),
             Some(Sfn::new(*b"TEST    ", *b"TXT"))
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     #[apply(fs)]
-    fn test_gen_sfn_mismatch(fs: FileSystem<MemoryDevice<Box<[u8]>>, crate::DefaultClock>) {
+    fn test_gen_sfn_mismatch(fs: FileSystem<MemoryDevice, crate::DefaultClock>) {
         assert_eq!(
             run_gen_sfn_root("test.txt", &fs),
             Some(Sfn::new(*b"TEST~1  ", *b"TXT"))

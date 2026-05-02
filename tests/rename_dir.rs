@@ -9,7 +9,7 @@ use test_log::test;
 
 #[test]
 #[apply(fs)]
-fn rename_root_directory(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn rename_root_directory(fs: FileSystem<MemoryDevice, DefaultClock>) {
     fs.rename("/rootdir", "/rootdir2").unwrap();
 
     let mut file = fs.get_ro_file("/rootdir2/example.txt").unwrap();
@@ -23,7 +23,7 @@ fn rename_root_directory(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) 
 
 #[test]
 #[apply(fs)]
-fn rename_root_directory_fat32(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
+fn rename_root_directory_fat32(fs: FileSystem<MemoryDevice, DefaultClock>) {
     fs.rename("/subdir", "/emptydir/secret").unwrap();
 
     let mut file = fs
