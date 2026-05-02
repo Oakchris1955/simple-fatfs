@@ -52,10 +52,8 @@ fn seek_n_read(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
 }
 
 #[test]
-fn read_file_in_subdir() {
-    let mut storage = MemoryDevice::from(FAT16);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
+#[apply(fs)]
+fn read_file_in_subdir(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
     let mut file = fs.get_ro_file("/rootdir/example.txt").unwrap();
 
     let mut file_buf = vec![0; file.file_size() as usize];

@@ -226,6 +226,11 @@ where
 mod tests {
     use super::*;
 
+    use rstest::*;
+    use rstest_reuse::*;
+
+    use test_log::test;
+
     use crate::test_commons::*;
 
     #[test]
@@ -262,27 +267,28 @@ mod tests {
         assert_eq!(generator.next(), Some(Sfn::new(*b"~1      ", *b"   ")));
     }
 
-    fn run_gen_sfn(string: &str) -> Option<Sfn> {
-        use crate::FSOptions;
-
-        let mut storage = MemoryDevice::from(FAT16);
-        let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
-        gen_sfn(string, &fs, "/").ok()
+    fn run_gen_sfn_root<S, C>(string: &str, fs: &FileSystem<S, C>) -> Option<Sfn>
+    where
+        S: BlockWrite,
+        C: Clock,
+    {
+        gen_sfn(string, fs, "/").ok()
     }
 
     #[test]
-    fn test_gen_sfn_match() {
+    #[apply(fs)]
+    fn test_gen_sfn_match(fs: FileSystem<MemoryDevice<Box<[u8]>>, crate::DefaultClock>) {
         assert_eq!(
-            run_gen_sfn("TEST.TXT"),
+            run_gen_sfn_root("TEST.TXT", &fs),
             Some(Sfn::new(*b"TEST    ", *b"TXT"))
         )
     }
 
     #[test]
-    fn test_gen_sfn_mismatch() {
+    #[apply(fs)]
+    fn test_gen_sfn_mismatch(fs: FileSystem<MemoryDevice<Box<[u8]>>, crate::DefaultClock>) {
         assert_eq!(
-            run_gen_sfn("test.txt"),
+            run_gen_sfn_root("test.txt", &fs),
             Some(Sfn::new(*b"TEST~1  ", *b"TXT"))
         )
     }

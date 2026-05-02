@@ -45,10 +45,8 @@ fn remove_data_region_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>
 }
 
 #[test]
-fn attempt_to_remove_file_as_directory() {
-    let mut storage = MemoryDevice::from(FAT32);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
+#[apply(fs)]
+fn attempt_to_remove_file_as_directory(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
     let target_path = "/hello 🗺️.txt";
 
     let fs_result = fs.remove_dir_all(target_path);

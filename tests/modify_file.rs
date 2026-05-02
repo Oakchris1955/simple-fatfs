@@ -3,17 +3,15 @@ use common::*;
 
 use embedded_io::*;
 
-pub use test_log::test;
+use test_log::test;
+
+use rstest::*;
+use rstest_reuse::*;
 
 #[cfg_attr(miri, ignore)]
 #[test]
-// this won't actually modify the .img file or the static slices,
-// since we run .to_owned(), which basically clones the data in the static slices,
-// in order to make the Cursor readable/writable
-fn write_to_file() {
-    let mut storage = MemoryDevice::from(FAT12);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
+#[apply(fs)]
+fn write_to_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
     let mut file = fs.get_rw_file("/root.txt").unwrap();
 
     file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
@@ -55,10 +53,8 @@ fn write_to_file() {
 }
 
 #[test]
-fn truncate_file() {
-    let mut storage = MemoryDevice::from(FAT16);
-    let fs = FileSystem::new(&mut storage, FSOptions::new()).unwrap();
-
+#[apply(fs)]
+fn truncate_file(fs: FileSystem<MemoryDevice<Box<[u8]>>, DefaultClock>) {
     let mut file = fs.get_rw_file("/subdir/bee movie script.txt").unwrap();
 
     // we are gonna truncate the bee movie script down to 20 000 bytes
