@@ -192,7 +192,7 @@ where
                 + SectorCount::from(self.fs.sectors_per_cluster())
                 - sector_init_offset
                 - 1;
-            log::debug!(
+            log::trace!(
                 "Reading cluster {} from sectors {} to {}",
                 self.props.current_cluster,
                 first_sector_of_cluster,
@@ -208,7 +208,7 @@ where
                     read_cap - bytes_read,
                     usize::from(self.fs.sector_size()) - start_index,
                 );
-                log::debug!(
+                log::trace!(
                     "Gonna read {bytes_to_read} bytes from sector {sector} starting at byte {start_index}"
                 );
 
@@ -415,7 +415,7 @@ where
         // don't forget to seek back to where we started
         self.seek(SeekFrom::Start(previous_offset.into()))?;
 
-        log::debug!(
+        log::trace!(
             "Successfully truncated file {} from {} to {} bytes",
             self.path,
             previous_size,
@@ -705,7 +705,7 @@ where
         // in case the cursor goes beyond the EOF, allocate more clusters
         if offset > bytes_allocated {
             let clusters_to_allocate = (offset - bytes_allocated).div_ceil(self.fs.cluster_size());
-            log::debug!("Seeking beyond EOF, allocating {clusters_to_allocate} more clusters");
+            log::trace!("Seeking beyond EOF, allocating {clusters_to_allocate} more clusters");
 
             let last_cluster_in_chain = self.last_cluster_in_chain()?;
 
@@ -720,7 +720,7 @@ where
             };
 
             self.file_size = offset;
-            log::debug!(
+            log::trace!(
                 "New file size after reallocation is {} bytes",
                 self.file_size
             );
@@ -728,7 +728,7 @@ where
             self.file_size = offset;
 
             self.file_size = offset;
-            log::debug!(
+            log::trace!(
                 "New file size (without new reallocation) is {} bytes",
                 self.file_size
             );

@@ -950,7 +950,7 @@ where
             // let's sync the current sector first
             let sync_sector_option = *self.sync_f.borrow();
             if let Some(sync_sector_buffer) = sync_sector_option {
-                log::debug!("Syncing sector {stored_sector}");
+                log::trace!("Syncing sector {stored_sector}");
 
                 sync_sector_buffer(self)?;
 
