@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::{error::*, path::*, utils, Clock};
+use crate::{error::*, local_log, path::*, utils, Clock};
 
 use core::{
     cell::{Ref, RefCell, RefMut},
@@ -423,12 +423,12 @@ where
     let block_size = storage.block_size();
 
     if !block_size.is_power_of_two() {
-        // block size is 0 or not a power of 2
+        log::error!("block size ({block_size}) is 0 or not a power of 2");
         return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
     }
     #[expect(clippy::cast_possible_truncation)]
     if block_size > MAX_SECTOR_SIZE as BlockSize {
-        // block size is larger than MAX_SECTOR_SIZE
+        log::error!("block size ({block_size}) is larger than MAX_SECTOR_SIZE ({MAX_SECTOR_SIZE})");
         return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
     }
 
@@ -524,12 +524,14 @@ where
         let block_size = storage.block_size();
 
         if !block_size.is_power_of_two() {
-            // block size is 0 or not a power of 2
+            log::error!("block size ({block_size}) is 0 or not a power of 2");
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
         #[expect(clippy::cast_possible_truncation)]
         if block_size > MAX_SECTOR_SIZE as BlockSize {
-            // block size is larger than MAX_SECTOR_SIZE
+            log::error!(
+                "block size ({block_size}) is larger than MAX_SECTOR_SIZE ({MAX_SECTOR_SIZE})"
+            );
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
 
@@ -540,12 +542,17 @@ where
         let (bpb, _) = BpbFat::read_from_prefix(&buffer).unwrap();
 
         if block_size > BlockSize::from(bpb.bytes_per_sector) {
-            // block size is larger than sector size
+            log::error!(
+                "block size ({block_size}) is larger than sector size ({})",
+                bpb.bytes_per_sector
+            );
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
 
         let mut buffer = buffer.init(&mut storage, bpb.bytes_per_sector.get())?;
         let storage = RefCell::from(storage);
+
+        local_log::trace!("Successful initialized sector buffer");
 
         let ebr = if bpb.table_size_16 == 0 {
             let (ebr_fat32, _) = EBRFAT32::read_from_prefix(&buffer[BPBFAT_SIZE..]).unwrap();
@@ -618,6 +625,7 @@ where
         };
 
         if !fs.FAT_tables_are_identical()? {
+            log::error!("The FAT and it's copies do not match");
             return Err(FSError::InternalFSError(
                 InternalFSError::MismatchingFATTables,
             ));
@@ -950,8 +958,6 @@ where
             // let's sync the current sector first
             let sync_sector_option = *self.sync_f.borrow();
             if let Some(sync_sector_buffer) = sync_sector_option {
-                log::trace!("Syncing sector {stored_sector}");
-
                 sync_sector_buffer(self)?;
 
                 // Now that we have synced the sector buffer, there's no reason
@@ -1284,8 +1290,10 @@ where
                 .unwrap();
 
                 if remaining_entries < n.get() - chain_len {
+                    log::error!("Root directory is full, can't allocate any more entries");
                     Err(FSError::RootDirectoryFull)
                 } else {
+                    local_log::trace!("Successful allocated {n} contiguous FAT directory entries on the root directory");
                     Ok(first_entry)
                 }
             }
@@ -1332,7 +1340,9 @@ where
                         }
                     }
                 }
-
+                local_log::trace!(
+                    "Successful allocated {n} contiguous FAT directory entries on the data region"
+                );
                 Ok(first_entry)
             }
         }
@@ -1413,6 +1423,8 @@ where
             self.set_modified();
         }
 
+        local_log::trace!("Successful created a new cluster chain with parent {parent:?}");
+
         Ok(dir_cluster)
     }
 
@@ -1462,6 +1474,11 @@ where
                 .expect("This entry chain should be valid, we just generated it");
         }
 
+        local_log::trace!(
+            "Successful inserted the following {} entries at the entry chain:\n{entries:?}",
+            entries.len()
+        );
+
         Ok(DirEntryChain {
             len: entries_needed,
             location: first_entry,
@@ -1478,6 +1495,8 @@ where
         };
         let mut new_chain_end = current_entry_loc;
         let mut entry_count: EntryCount = 0;
+
+        local_log::trace!("Defragmenting current entry chain starting at {current_entry_loc:?}");
 
         loop {
             match current_entry_loc.entry_status(self)? {
@@ -1521,6 +1540,8 @@ where
 
         self.dir_info.borrow_mut().chain_end = Some(new_chain_end);
 
+        local_log::trace!("Defragmented current entry chain, new entry count is {entry_count}");
+
         Ok(entry_count)
     }
 
@@ -1528,6 +1549,8 @@ where
     ///
     /// Note: No validation is done to check whether or not the chain is valid
     pub(crate) fn remove_entry_chain(&self, chain: &DirEntryChain) -> Result<(), S::Error> {
+        local_log::trace!("Removing entry chain starting at {chain:?}");
+
         let mut entries_freed = 0;
         let mut current_entry = chain.location;
 
@@ -1584,6 +1607,8 @@ where
         let mut last_cluster_in_chain = first_cluster;
         let mut first_allocated_cluster = None;
 
+        local_log::trace!("Allocating {n} clusters, starting at {first_cluster:?}");
+
         for i in 0..n.into() {
             match self.next_free_cluster()? {
                 Some(next_free_cluster) => {
@@ -1605,12 +1630,8 @@ where
                     }
                     // we also set the next free cluster to be EOF
                     self.write_nth_FAT_entry(next_free_cluster, FATEntry::Eof)?;
-                    if let Some(last_cluster_in_chain) = last_cluster_in_chain {
-                        log::trace!(
-                            "cluster {last_cluster_in_chain} now points to {next_free_cluster}"
-                        );
-                    }
-                    // now the next free cluster i the last allocated one
+
+                    // now the next free cluster is the last allocated one
                     last_cluster_in_chain = Some(next_free_cluster);
                 }
                 None => {
@@ -1650,7 +1671,7 @@ where
         // If this is called, we assume the sector buffer has been modified
         let stored_sector = self.sector_buffer.borrow().stored_sector();
         if let Some(fat_sector_props) = FATSectorProps::new(stored_sector, self) {
-            log::trace!("syncing FAT sector {}", fat_sector_props.sector_offset,);
+            local_log::trace!("syncing FAT sector {}", fat_sector_props.sector_offset,);
             match &*self.boot_record.borrow() {
                 BootRecord::Fat(boot_record_fat) => match &boot_record_fat.ebr {
                     Ebr::FAT12_16(_) => {
@@ -1667,8 +1688,8 @@ where
                 BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
             }
         } else {
-            log::trace!(
-                "syncing sector {}",
+            local_log::trace!(
+                "syncing data sector {}",
                 self.sector_buffer.borrow().stored_sector()
             );
             self._sync_current_sector()?;
@@ -1683,6 +1704,8 @@ where
     /// Sync the [`FSInfoFAT32`] back to the storage medium
     /// if this is FAT32
     pub(crate) fn sync_fsinfo(&self) -> FSResult<(), S::Error> {
+        local_log::trace!("Syncing FSInfo struct");
+
         if *self.fsinfo_modified.borrow() {
             if let BootRecord::Fat(boot_record_fat) = &*self.boot_record.borrow() {
                 if let Ebr::FAT32(ebr_fat32, fsinfo) = &boot_record_fat.ebr {
@@ -1701,6 +1724,8 @@ where
     }
 
     pub(crate) fn sync_boot_sector(&self) -> FSResult<(), S::Error> {
+        local_log::trace!("Syncing boot sector struct");
+
         if *self.boot_sector_modified.borrow() {
             self.load_nth_sector(0)?;
 
@@ -1766,6 +1791,8 @@ where
         }
 
         let path = path.normalize();
+
+        local_log::debug!("Reading directory {path}");
 
         self.go_to_dir(&path)?;
 
@@ -1834,11 +1861,14 @@ where
             return Err(FSError::MalformedPath);
         }
 
+        local_log::debug!("Getting file at {path}");
+
         if let Some(file_name) = path.file_name() {
             // IO operations are expensive, check the bloom filter
             #[cfg(feature = "bloom")]
             if let Some(filter) = &self.dir_info.borrow().filter {
                 if !filter.check(file_name) {
+                    log::error!("File not found when checking the bloom filter");
                     return Err(FSError::NotFound);
                 }
             }
@@ -1887,13 +1917,12 @@ where
                     }
                 }
                 None => {
-                    log::error!("ROFile {path} not found");
-
+                    log::error!("File {path} not found");
                     Err(FSError::NotFound)
                 }
             }
         } else {
-            log::error!("Is a directory (not a file)");
+            log::error!("{path} is a directory (not a file)");
             Err(FSError::IsADirectory)
         }
     }
@@ -1935,6 +1964,8 @@ where
                 filter.set(long_filename.as_str());
             }
         }
+
+        local_log::trace!("Successful cached directory {} using bloom filter", path);
 
         self.dir_info.borrow_mut().filter = Some(filter);
 
@@ -1987,6 +2018,7 @@ where
                 let entry = entry?;
 
                 if entry.name(self.options.codepage) == file_name {
+                    log::error!("Couldn't create file as it already exists");
                     return Err(FSError::AlreadyExists);
                 }
             }
@@ -2021,6 +2053,7 @@ where
                 filter.set(long_filename);
             }
             filter.set(&Box::from(raw_properties.sfn.decode(self.options.codepage)));
+            local_log::trace!("Added newly-created file {} to the bloom filter", path);
         }
 
         Ok(RWFile::from_props(
