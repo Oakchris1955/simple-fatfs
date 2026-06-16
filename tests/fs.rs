@@ -494,57 +494,31 @@ mod rename_file {
 
     #[test_log]
     #[apply(fs)]
+    fn rename_root_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
+        fs.rename("/root.txt", "/rootdir/not root.txt").unwrap();
 
-    fn remove_root_dir_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
-        // the "I don't need a bagde" file is in the root directory region
-        let file_path = "/I don't need a badge.txt";
-        let file = fs.get_rw_file(file_path).unwrap();
-        file.remove().unwrap();
+        let mut file = fs.get_ro_file("/rootdir/not root.txt").unwrap();
 
-        // the file should now be gone
-        let file_result = fs.get_ro_file(file_path);
-        match file_result {
-            Err(err) => match err {
-                FSError::NotFound => (),
-                _ => panic!("unexpected IOError: {err:?}"),
-            },
-            _ => panic!("file should have been deleted by now"),
-        }
+        let mut file_buf = vec![0; file.file_size() as usize];
+        file.read_exact(&mut file_buf).unwrap();
+        let file_string = str::from_utf8(&file_buf).unwrap();
+        const EXPECTED_STR: &str = "I am in the filesystem's root!!!\n\nbottom text\n";
+        assert_eq!(file_string, EXPECTED_STR);
     }
 
     #[test_log]
     #[apply(fs)]
-    fn remove_data_region_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
-        // the bee movie script  is in the data region
-        let file_path = "/subdir/bee movie script.txt";
-        let file = fs.get_rw_file(file_path).unwrap();
-        file.remove().unwrap();
+    fn rename_nonroot_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
+        fs.rename("/rootdir/example.txt", "/subdir/hello.txt")
+            .unwrap();
 
-        // the file should now be gone
-        let file_result = fs.get_ro_file(file_path);
-        match file_result {
-            Err(err) => match err {
-                FSError::NotFound => (),
-                _ => panic!("unexpected IOError: {err:?}"),
-            },
-            _ => panic!("file should have been deleted by now"),
-        }
-    }
+        let mut file = fs.get_ro_file("/subdir/hello.txt").unwrap();
 
-    #[test_log]
-    #[apply(fs)]
-    fn attempt_to_remove_file_as_directory(fs: FileSystem<MemoryDevice, DefaultClock>) {
-        let target_path = "/hello 🗺️.txt";
-
-        let fs_result = fs.remove_dir_all(target_path);
-
-        match fs_result {
-            Err(err) => match err {
-                FSError::NotADirectory => (),
-                _ => panic!("unexpected IOError: {err:?}"),
-            },
-            _ => panic!("the filesystem struct should have detected that this isn't a directory"),
-        }
+        let mut file_buf = vec![0; file.file_size() as usize];
+        file.read_exact(&mut file_buf).unwrap();
+        let file_string = str::from_utf8(&file_buf).unwrap();
+        const EXPECTED_STR: &str = "I am not in the root directory :(\n";
+        assert_eq!(file_string, EXPECTED_STR);
     }
 }
 
