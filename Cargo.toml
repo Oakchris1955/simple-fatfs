@@ -48,8 +48,9 @@ cp869 = []
 cp874 = []
 
 [dev-dependencies]
-akin = "0.4.0"
 embedded-io-adapters = { version = "0.6.2", features = ["std"] }
 rand = { version = "0.9.3", default-features = false, features = ["thread_rng"] }
 regex = "1.11.2"
+rstest = "0.26.1"
+rstest_reuse = "0.7.0"
 test-log = "0.2.16"

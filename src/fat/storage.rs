@@ -3,7 +3,7 @@ use super::*;
 use core::ops::{Deref, DerefMut};
 
 #[cfg(not(feature = "std"))]
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec};
 use core::cell::RefCell;
 
 #[derive(Debug)]
@@ -20,7 +20,18 @@ impl SectorBuffer<false> {
         let block_size = storage.block_size();
 
         let mut slf = Self {
-            slice: [0u8; MAX_SECTOR_SIZE].into(),
+            // checked something similar to this on Godbolt,
+            // should compile to the same bytecode as [0u8; N].into()
+            // for rust 1.92 and upwards at least
+            slice: vec![
+                0u8;
+                MAX_SECTOR_SIZE.min(
+                    (storage.block_count() * BlockCount::from(block_size))
+                        .try_into()
+                        .unwrap()
+                )
+            ]
+            .into_boxed_slice(),
             stored_sector: 0,
             blocks_per_sector: 1,
             block_size,

@@ -20,20 +20,19 @@
 //!
 //! ## Examples
 //! ```
-//! # // this test fails on a no_std environment, don't run it in such a case
 //! extern crate simple_fatfs;
 //! use simple_fatfs::*;
 //! use simple_fatfs::io::*;
-//! use simple_fatfs::block_io::FromStd;
-//!
-//! const FAT_IMG: &[u8] = include_bytes!("../imgs/fat12.img");
+//! use simple_fatfs::block_io::*;
+//! # include! {concat!(env!("CARGO_MANIFEST_DIR"), "/tests/common/var.rs")}
+//! # include! {concat!(env!("CARGO_MANIFEST_DIR"), "/tests/common/wrapper.rs")}
 //!
 //! fn main() {
-//!     let mut cursor = FromStd::new(std::io::Cursor::new(FAT_IMG.to_owned())).unwrap();
+//!     let mut device = device(FAT12);
 //!
 //!     // We can either pass by value or by (mutable) reference
 //!     // (Yes, the storage medium might be Read-Only, but reading is a mutable action)
-//!     let mut fs = FileSystem::new(&mut cursor, FSOptions::new()).unwrap();
+//!     let mut fs = FileSystem::new(&mut device, FSOptions::new()).unwrap();
 //!
 //!     // Let's see what entries there are in the root directory
 //!     for entry in fs.read_dir("/").unwrap() {
@@ -206,13 +205,18 @@ extern crate alloc;
 mod codepage;
 mod error;
 mod fat;
+mod log;
 mod path;
 mod time;
 mod utils;
+
+#[cfg(test)]
+mod test_commons;
 
 pub use codepage::*;
 pub use embedded_io as io;
 pub use error::*;
 pub use fat::*;
+pub(crate) use log as local_log;
 pub use path::*;
 pub use time::*;

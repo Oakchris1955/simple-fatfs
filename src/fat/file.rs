@@ -4,6 +4,7 @@ use core::{cmp, num, ops};
 
 use time::{Date, PrimitiveDateTime};
 
+use crate::local_log;
 use crate::{Clock, FSError, FSResult, InternalFSError};
 
 use embedded_io::*;
@@ -192,12 +193,6 @@ where
                 + SectorCount::from(self.fs.sectors_per_cluster())
                 - sector_init_offset
                 - 1;
-            log::debug!(
-                "Reading cluster {} from sectors {} to {}",
-                self.props.current_cluster,
-                first_sector_of_cluster,
-                last_sector_of_cluster
-            );
 
             for sector in first_sector_of_cluster..=last_sector_of_cluster {
                 self.fs.load_nth_sector(sector)?;
@@ -208,8 +203,9 @@ where
                     read_cap - bytes_read,
                     usize::from(self.fs.sector_size()) - start_index,
                 );
-                log::debug!(
-                    "Gonna read {bytes_to_read} bytes from sector {sector} starting at byte {start_index}"
+                local_log::trace!(
+                    "Gonna read {bytes_to_read} bytes from sector {sector} (cluster {}) starting at byte {start_index}",
+                    self.props.current_cluster
                 );
 
                 buf[bytes_read..bytes_read + bytes_to_read].copy_from_slice(
@@ -255,8 +251,8 @@ where
         let offset = FileSize::try_from(offset)
             .expect("file_size is u32, so offset must be able to fit in a u32 too");
 
-        log::trace!(
-            "Previous cursor offset is {}, new cursor offset is {}",
+        local_log::trace!(
+            "Previous cursor offset was {}, new cursor offset is {}",
             self.props.offset,
             offset
         );
@@ -395,6 +391,10 @@ where
         self.seek(SeekFrom::Start(size.into()))?;
 
         // set what the new filesize will be
+        #[cfg_attr(
+            not(debug_assertions),
+            expect(unused_variables, reason = "local_log doesn't actually use this")
+        )]
         let previous_size = self.file_size;
         self.file_size = size;
 
@@ -415,7 +415,7 @@ where
         // don't forget to seek back to where we started
         self.seek(SeekFrom::Start(previous_offset.into()))?;
 
-        log::debug!(
+        local_log::trace!(
             "Successfully truncated file {} from {} to {} bytes",
             self.path,
             previous_size,
@@ -616,11 +616,6 @@ where
         let mut bytes_written = 0;
 
         'outer: loop {
-            log::trace!(
-                "writing file data to cluster: {}",
-                self.props.current_cluster
-            );
-
             let sector_init_offset =
                 self.props.offset % self.fs.cluster_size() / u32::from(self.fs.sector_size());
             let first_sector_of_cluster = self
@@ -640,6 +635,11 @@ where
                 let bytes_to_write = cmp::min(
                     buf.len() - bytes_written,
                     usize::from(self.fs.sector_size()) - start_index,
+                );
+
+                local_log::trace!(
+                    "Gonna write {bytes_to_write} bytes to sector {sector} (cluster {}) starting at byte {start_index}",
+                    self.props.current_cluster
                 );
 
                 self.fs.sector_buffer.borrow_mut()[start_index..start_index + bytes_to_write]
@@ -695,16 +695,19 @@ where
             }
         };
 
+        let bytes_allocated = if self.file_size == 0 {
+            // even if the file size is zero, a file has a cluster already allocated
+            self.fs.props.cluster_size
+        } else {
+            self.file_size.next_multiple_of(self.fs.cluster_size())
+        };
+
         // in case the cursor goes beyond the EOF, allocate more clusters
-        if offset > self.file_size.next_multiple_of(self.fs.cluster_size()) {
-            let bytes_allocated = if self.file_size == 0 {
-                // even if the file size is zero, a file has a cluster already allocated
-                self.fs.props.cluster_size
-            } else {
-                self.file_size.next_multiple_of(self.fs.cluster_size())
-            };
+        if offset > bytes_allocated {
             let clusters_to_allocate = (offset - bytes_allocated).div_ceil(self.fs.cluster_size());
-            log::debug!("Seeking beyond EOF, allocating {clusters_to_allocate} more clusters");
+            local_log::trace!(
+                "Seeking beyond EOF, allocating {clusters_to_allocate} more clusters"
+            );
 
             let last_cluster_in_chain = self.last_cluster_in_chain()?;
 
@@ -719,8 +722,16 @@ where
             };
 
             self.file_size = offset;
-            log::debug!(
+            local_log::trace!(
                 "New file size after reallocation is {} bytes",
+                self.file_size
+            );
+        } else if offset > self.file_size {
+            self.file_size = offset;
+
+            self.file_size = offset;
+            local_log::trace!(
+                "New file size (without new reallocation) is {} bytes",
                 self.file_size
             );
         }

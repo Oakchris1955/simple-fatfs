@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::{error::*, path::*, utils, Clock};
+use crate::{error::*, local_log, path::*, utils, Clock};
 
 use core::{
     cell::{Ref, RefCell, RefMut},
@@ -57,8 +57,23 @@ impl FATType {
         match self {
             FATType::FAT12 => 12,
             FATType::FAT16 => 16,
-            // the high 4 bits are ignored, but are still part of the entry
+            // the high 4 bits are reserved, but are still part of the entry
             FATType::FAT32 => 32,
+            FATType::ExFAT => 32,
+        }
+    }
+
+    #[inline]
+    // this is currently used only in a test case, but it might be useful in the future
+    #[cfg_attr(not(test), expect(dead_code))]
+    /// How many bits this [`FATType`] uses to address clusters in the disk,
+    /// minus those reserved
+    fn actual_bits_per_entry(&self) -> u8 {
+        match self {
+            FATType::FAT12 => 12,
+            FATType::FAT16 => 16,
+            // the high 4 bits are reserved
+            FATType::FAT32 => 28,
             FATType::ExFAT => 32,
         }
     }
@@ -408,17 +423,17 @@ where
     let block_size = storage.block_size();
 
     if !block_size.is_power_of_two() {
-        // block size is 0 or not a power of 2
+        log::error!("block size ({block_size}) is 0 or not a power of 2");
         return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
     }
     #[expect(clippy::cast_possible_truncation)]
     if block_size > MAX_SECTOR_SIZE as BlockSize {
-        // block size is larger than MAX_SECTOR_SIZE
+        log::error!("block size ({block_size}) is larger than MAX_SECTOR_SIZE ({MAX_SECTOR_SIZE})");
         return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
     }
 
     // Begin by reading the boot record
-    let mut buffer = vec![0_u8; block_size.try_into().unwrap()].into_boxed_slice();
+    let mut buffer = SectorBuffer::new(&mut storage)?;
 
     storage.read(0, &mut buffer)?;
 
@@ -509,12 +524,14 @@ where
         let block_size = storage.block_size();
 
         if !block_size.is_power_of_two() {
-            // block size is 0 or not a power of 2
+            log::error!("block size ({block_size}) is 0 or not a power of 2");
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
         #[expect(clippy::cast_possible_truncation)]
         if block_size > MAX_SECTOR_SIZE as BlockSize {
-            // block size is larger than MAX_SECTOR_SIZE
+            log::error!(
+                "block size ({block_size}) is larger than MAX_SECTOR_SIZE ({MAX_SECTOR_SIZE})"
+            );
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
 
@@ -525,12 +542,17 @@ where
         let (bpb, _) = BpbFat::read_from_prefix(&buffer).unwrap();
 
         if block_size > BlockSize::from(bpb.bytes_per_sector) {
-            // block size is larger than sector size
+            log::error!(
+                "block size ({block_size}) is larger than sector size ({})",
+                bpb.bytes_per_sector
+            );
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
 
         let mut buffer = buffer.init(&mut storage, bpb.bytes_per_sector.get())?;
         let storage = RefCell::from(storage);
+
+        local_log::trace!("Successful initialized sector buffer");
 
         let ebr = if bpb.table_size_16 == 0 {
             let (ebr_fat32, _) = EBRFAT32::read_from_prefix(&buffer[BPBFAT_SIZE..]).unwrap();
@@ -603,6 +625,7 @@ where
         };
 
         if !fs.FAT_tables_are_identical()? {
+            log::error!("The FAT and it's copies do not match");
             return Err(FSError::InternalFSError(
                 InternalFSError::MismatchingFATTables,
             ));
@@ -935,8 +958,6 @@ where
             // let's sync the current sector first
             let sync_sector_option = *self.sync_f.borrow();
             if let Some(sync_sector_buffer) = sync_sector_option {
-                log::debug!("Syncing sector {stored_sector}");
-
                 sync_sector_buffer(self)?;
 
                 // Now that we have synced the sector buffer, there's no reason
@@ -951,7 +972,7 @@ where
     }
 
     #[expect(non_snake_case)]
-    pub(crate) fn read_nth_FAT_entry(&self, n: FATEntryIndex) -> Result<FATEntry, S::Error> {
+    fn read_nth_FAT_entry_value(&self, n: FATEntryIndex) -> Result<FATEntryValue, S::Error> {
         // the size of an entry rounded up to bytes
         let entry_size = self.fat_type.entry_size();
         let entry_props = FATEntryProps::new(n, self);
@@ -991,6 +1012,13 @@ where
             FATType::FAT32 => value &= 0x0FFFFFFF,
             _ => (),
         }
+
+        Ok(value)
+    }
+
+    #[expect(non_snake_case)]
+    pub(crate) fn read_nth_FAT_entry(&self, n: FATEntryIndex) -> Result<FATEntry, S::Error> {
+        let value = self.read_nth_FAT_entry_value(n)?;
 
         /*
         // pad unused bytes with 1s
@@ -1262,8 +1290,10 @@ where
                 .unwrap();
 
                 if remaining_entries < n.get() - chain_len {
+                    log::error!("Root directory is full, can't allocate any more entries");
                     Err(FSError::RootDirectoryFull)
                 } else {
+                    local_log::trace!("Successful allocated {n} contiguous FAT directory entries on the root directory");
                     Ok(first_entry)
                 }
             }
@@ -1310,7 +1340,9 @@ where
                         }
                     }
                 }
-
+                local_log::trace!(
+                    "Successful allocated {n} contiguous FAT directory entries on the data region"
+                );
                 Ok(first_entry)
             }
         }
@@ -1391,6 +1423,8 @@ where
             self.set_modified();
         }
 
+        local_log::trace!("Successful created a new cluster chain with parent {parent:?}");
+
         Ok(dir_cluster)
     }
 
@@ -1440,6 +1474,11 @@ where
                 .expect("This entry chain should be valid, we just generated it");
         }
 
+        local_log::trace!(
+            "Successful inserted the following {} entries at the entry chain:\n{entries:?}",
+            entries.len()
+        );
+
         Ok(DirEntryChain {
             len: entries_needed,
             location: first_entry,
@@ -1456,6 +1495,8 @@ where
         };
         let mut new_chain_end = current_entry_loc;
         let mut entry_count: EntryCount = 0;
+
+        local_log::trace!("Defragmenting current entry chain starting at {current_entry_loc:?}");
 
         loop {
             match current_entry_loc.entry_status(self)? {
@@ -1499,6 +1540,8 @@ where
 
         self.dir_info.borrow_mut().chain_end = Some(new_chain_end);
 
+        local_log::trace!("Defragmented current entry chain, new entry count is {entry_count}");
+
         Ok(entry_count)
     }
 
@@ -1506,6 +1549,8 @@ where
     ///
     /// Note: No validation is done to check whether or not the chain is valid
     pub(crate) fn remove_entry_chain(&self, chain: &DirEntryChain) -> Result<(), S::Error> {
+        local_log::trace!("Removing entry chain starting at {chain:?}");
+
         let mut entries_freed = 0;
         let mut current_entry = chain.location;
 
@@ -1562,6 +1607,8 @@ where
         let mut last_cluster_in_chain = first_cluster;
         let mut first_allocated_cluster = None;
 
+        local_log::trace!("Allocating {n} clusters, starting at {first_cluster:?}");
+
         for i in 0..n.into() {
             match self.next_free_cluster()? {
                 Some(next_free_cluster) => {
@@ -1583,12 +1630,8 @@ where
                     }
                     // we also set the next free cluster to be EOF
                     self.write_nth_FAT_entry(next_free_cluster, FATEntry::Eof)?;
-                    if let Some(last_cluster_in_chain) = last_cluster_in_chain {
-                        log::trace!(
-                            "cluster {last_cluster_in_chain} now points to {next_free_cluster}"
-                        );
-                    }
-                    // now the next free cluster i the last allocated one
+
+                    // now the next free cluster is the last allocated one
                     last_cluster_in_chain = Some(next_free_cluster);
                 }
                 None => {
@@ -1628,7 +1671,7 @@ where
         // If this is called, we assume the sector buffer has been modified
         let stored_sector = self.sector_buffer.borrow().stored_sector();
         if let Some(fat_sector_props) = FATSectorProps::new(stored_sector, self) {
-            log::trace!("syncing FAT sector {}", fat_sector_props.sector_offset,);
+            local_log::trace!("syncing FAT sector {}", fat_sector_props.sector_offset,);
             match &*self.boot_record.borrow() {
                 BootRecord::Fat(boot_record_fat) => match &boot_record_fat.ebr {
                     Ebr::FAT12_16(_) => {
@@ -1645,8 +1688,8 @@ where
                 BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
             }
         } else {
-            log::trace!(
-                "syncing sector {}",
+            local_log::trace!(
+                "syncing data sector {}",
                 self.sector_buffer.borrow().stored_sector()
             );
             self._sync_current_sector()?;
@@ -1661,6 +1704,8 @@ where
     /// Sync the [`FSInfoFAT32`] back to the storage medium
     /// if this is FAT32
     pub(crate) fn sync_fsinfo(&self) -> FSResult<(), S::Error> {
+        local_log::trace!("Syncing FSInfo struct");
+
         if *self.fsinfo_modified.borrow() {
             if let BootRecord::Fat(boot_record_fat) = &*self.boot_record.borrow() {
                 if let Ebr::FAT32(ebr_fat32, fsinfo) = &boot_record_fat.ebr {
@@ -1679,6 +1724,8 @@ where
     }
 
     pub(crate) fn sync_boot_sector(&self) -> FSResult<(), S::Error> {
+        local_log::trace!("Syncing boot sector struct");
+
         if *self.boot_sector_modified.borrow() {
             self.load_nth_sector(0)?;
 
@@ -1744,6 +1791,8 @@ where
         }
 
         let path = path.normalize();
+
+        local_log::debug!("Reading directory {path}");
 
         self.go_to_dir(&path)?;
 
@@ -1812,11 +1861,14 @@ where
             return Err(FSError::MalformedPath);
         }
 
+        local_log::debug!("Getting file at {path}");
+
         if let Some(file_name) = path.file_name() {
             // IO operations are expensive, check the bloom filter
             #[cfg(feature = "bloom")]
             if let Some(filter) = &self.dir_info.borrow().filter {
                 if !filter.check(file_name) {
+                    log::error!("File not found when checking the bloom filter");
                     return Err(FSError::NotFound);
                 }
             }
@@ -1836,6 +1888,7 @@ where
                     .path()
                     .file_name()
                     .is_some_and(|entry_name| entry_name == file_name)
+                    && dir_entry.is_file()
                 {
                     entry = Some(dir_entry.entry);
 
@@ -1864,13 +1917,12 @@ where
                     }
                 }
                 None => {
-                    log::error!("ROFile {path} not found");
-
+                    log::error!("File {path} not found");
                     Err(FSError::NotFound)
                 }
             }
         } else {
-            log::error!("Is a directory (not a file)");
+            log::error!("{path} is a directory (not a file)");
             Err(FSError::IsADirectory)
         }
     }
@@ -1912,6 +1964,8 @@ where
                 filter.set(long_filename.as_str());
             }
         }
+
+        local_log::trace!("Successful cached directory {} using bloom filter", path);
 
         self.dir_info.borrow_mut().filter = Some(filter);
 
@@ -1964,6 +2018,7 @@ where
                 let entry = entry?;
 
                 if entry.name(self.options.codepage) == file_name {
+                    log::error!("Couldn't create file as it already exists");
                     return Err(FSError::AlreadyExists);
                 }
             }
@@ -1998,6 +2053,7 @@ where
                 filter.set(long_filename);
             }
             filter.set(&Box::from(raw_properties.sfn.decode(self.options.codepage)));
+            local_log::trace!("Added newly-created file {} to the bloom filter", path);
         }
 
         Ok(RWFile::from_props(
@@ -2484,5 +2540,209 @@ where
             // nothing to do if this errors out while dropping
             let _ = unmount(self);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::test_commons::*;
+    use crate::DefaultClock;
+
+    use test_log::test;
+
+    use rstest::*;
+    use rstest_reuse::*;
+
+    #[cfg(not(feature = "std"))]
+    use alloc::borrow::ToOwned;
+
+    /// Check the reserved FAT entries (first two) for expected values
+    #[test]
+    #[apply(fs)]
+    fn check_file_allocation_table_offset(fs: FileSystem<MemoryDevice, DefaultClock>) {
+        use crate::fat::BootRecord;
+
+        let fat_offset = match &*fs.boot_record.borrow() {
+            BootRecord::Fat(boot_record_fat) => boot_record_fat.first_fat_sector(),
+            BootRecord::ExFAT(_boot_record_exfat) => unreachable!(),
+        };
+
+        // we manually read the first and second entry of the FAT table
+        fs.load_nth_sector(fat_offset.into()).unwrap();
+
+        let first_entry = fs.read_nth_FAT_entry_value(0).unwrap();
+        let media_type = if let BootRecord::Fat(boot_record_fat) = &*fs.boot_record.borrow() {
+            boot_record_fat.bpb._media_type
+        } else {
+            todo!("ExFAT is not yet implemented")
+        };
+        assert_eq!(
+            u32::from(media_type),
+            utils::bits::setbits_u32(8) & first_entry
+        );
+
+        // apart from the high non-reserved 2 bits, everything is guaranteed to be set to 1
+        // (these 2 high bits hold dirty volume flag, for which we don't care in this test)
+        let second_entry = fs.read_nth_FAT_entry_value(1).unwrap();
+        let mask = crate::utils::bits::setbits_u32(fs.fat_type().actual_bits_per_entry() - 2);
+        assert_eq!(mask, second_entry & mask);
+    }
+
+    /// Ensure that changes are mirrored to both FAT tables
+    #[test]
+    #[rstest]
+    #[case(fat12_fs())]
+    #[case(fat16_fs())]
+    fn file_allocation_tables_after_write_are_identical(
+        #[case] fs: FileSystem<MemoryDevice, DefaultClock>,
+    ) {
+        assert!(
+            fs.FAT_tables_are_identical().unwrap(),
+            concat!(
+                "this should pass. ",
+                "if it doesn't, either the corresponding .img file's FAT tables aren't identical",
+                "or the tables_are_identical function doesn't work correctly"
+            )
+        );
+
+        // let's write the bee movie script to root.txt (why not), check, truncate the file, then check again
+        let mut file = fs.get_rw_file("root.txt").unwrap();
+
+        file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
+        assert!(file.fs.FAT_tables_are_identical().unwrap());
+
+        file.seek(SeekFrom::Start(10_000)).unwrap();
+        assert!(file.fs.FAT_tables_are_identical().unwrap());
+    }
+
+    // separate case due to FAT32's extended flags
+    #[test]
+    #[rstest]
+    #[case(fat32_fs())]
+    fn file_allocation_tables_after_fat32_write_are_identical(
+        #[case] fs: FileSystem<MemoryDevice, DefaultClock>,
+    ) {
+        use crate::fat::{BootRecord, Ebr};
+
+        match &*fs.boot_record.borrow() {
+            BootRecord::Fat(boot_record_fat) => match &boot_record_fat.ebr {
+                Ebr::FAT32(ebr_fat32, _) => assert!(
+                    !ebr_fat32.extended_flags.mirroring_disabled(),
+                    "mirroring should be enabled for this .img file"
+                ),
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        }
+
+        assert!(
+            fs.FAT_tables_are_identical().unwrap(),
+            concat!(
+                "this should pass. ",
+                "if it doesn't, either the corresponding .img file's FAT tables aren't identical",
+                "or the tables_are_identical function doesn't work correctly"
+            )
+        );
+
+        // let's write the bee movie script to root.txt (why not), check, truncate the file, then check again
+        let mut file = fs.get_rw_file("hello 🗺️.txt").unwrap();
+
+        file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
+        assert!(file.fs.FAT_tables_are_identical().unwrap());
+
+        file.seek(SeekFrom::Start(10_000)).unwrap();
+        file.truncate().unwrap();
+        assert!(file.fs.FAT_tables_are_identical().unwrap());
+    }
+
+    #[test]
+    #[rstest]
+    #[case(minfs(), FATType::FAT12)]
+    #[case(fat12_fs(), FATType::FAT12)]
+    #[case(fat16_fs(), FATType::FAT16)]
+    #[case(fat32_fs(), FATType::FAT32)]
+    fn assert_img_fat_type(
+        #[case] fs: FileSystem<MemoryDevice, DefaultClock>,
+        #[case] fat_type: FATType,
+    ) {
+        assert_eq!(fs.fat_type(), fat_type)
+    }
+
+    #[test]
+    #[rstest]
+    #[case(device(MINFS), 512)]
+    #[case(device(FAT12), 512)]
+    #[case(device(FAT16), 512)]
+    #[case(device(FAT32), 512)]
+    fn assert_fat_sector_size(#[case] mut device: MemoryDevice, #[case] expected_sector_size: u16) {
+        let sector_size = determine_fs_sector_size(&mut device).unwrap();
+
+        assert_eq!(sector_size, expected_sector_size)
+    }
+
+    //let &fat_type = [FAT12, FAT16, FAT32];
+    //let &unused_entries = [2, 2, 3];
+
+    #[test]
+    #[rstest]
+    #[case(fat12_fs(), 2)]
+    #[case(fat16_fs(), 2)]
+    #[case(fat32_fs(), 3)]
+    fn entry_defragment(
+        #[case] fs: FileSystem<MemoryDevice, DefaultClock>,
+        #[case] unused_entries: EntryCount,
+    ) {
+        fs.show_hidden(true);
+
+        // ik, this is dirty
+        let old_entry_count = {
+            let mut i: EntryCount = 0;
+
+            fs.go_to_dir("/").unwrap();
+
+            let mut current_entry = EntryLocation {
+                unit: fs.dir_info.borrow().chain_start,
+                index: 0,
+            };
+
+            while let Some(next_entry) = current_entry
+                .next_entry(&fs)
+                .unwrap()
+                .filter(|entry| entry.entry_status(&fs).unwrap() != EntryStatus::LastUnused)
+            {
+                current_entry = next_entry;
+                i += 1
+            }
+
+            // we miss the last entry because of the .filter
+            i + 1
+        };
+
+        log::info!("Old entry count: {old_entry_count}");
+
+        let old_names: Box<[Box<str>]> = fs
+            .read_dir("/")
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .map(|entry| entry.path().file_name().unwrap().to_owned())
+            .map(Box::from)
+            .collect();
+
+        let new_entry_count = fs.defragment_entry_chain().unwrap();
+
+        log::info!("New entry count: {new_entry_count}");
+
+        let new_names: Box<[Box<str>]> = fs
+            .read_dir("/")
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .map(|entry| entry.path().file_name().unwrap().to_owned())
+            .map(Box::from)
+            .collect();
+
+        assert_eq!(old_names, new_names);
+        assert_eq!(old_entry_count - unused_entries, new_entry_count);
     }
 }
