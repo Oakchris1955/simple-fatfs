@@ -63,6 +63,18 @@
 //!
 //!   Enable some trait conversions from and to the standard library's
 //!
+//! - `log`
+//!
+//!   Use the [`log`](https://crates.io/crates/log) framework to log messages
+//!
+//!   Suitable for most use cases
+//!
+//! - `defmt`
+//!
+//!   Use the [`defmt`](https://crates.io/crates/defmt) framework to log messages
+//!
+//!   Suitable for when targeting devices like microcontrollers
+//!
 //! - `bloom`
 //!
 //!   Bloom filter support to cache directories: can be used to reduce
@@ -200,6 +212,9 @@ compile_error!(
     )
 );
 
+#[cfg(all(feature = "log", feature = "defmt"))]
+compile_error!("The log and defmt logging frameworks can't both be used at the same time");
+
 extern crate alloc;
 
 mod codepage;
@@ -217,6 +232,6 @@ pub use codepage::*;
 pub use embedded_io as io;
 pub use error::*;
 pub use fat::*;
-pub(crate) use log as local_log;
+pub(crate) use log::*;
 pub use path::*;
 pub use time::*;
