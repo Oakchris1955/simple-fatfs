@@ -25,6 +25,7 @@ use zerocopy::{FromBytes, IntoBytes};
 /// The logic is essentially the same in all of them, the only thing that
 /// changes is the size in bytes of FAT entries, and thus the maximum volume size
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 // no need for enum variant documentation here
 pub enum FATType {
     /// One of the earliest versions, originally used all the way back to 1980.
@@ -423,13 +424,15 @@ where
     let block_size = storage.block_size();
 
     if !block_size.is_power_of_two() {
-        global_log::error!("block size ({block_size}) is 0 or not a power of 2");
+        global_log::error!("block size ({}) is 0 or not a power of 2", block_size);
         return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
     }
     #[expect(clippy::cast_possible_truncation)]
     if block_size > MAX_SECTOR_SIZE as BlockSize {
         global_log::error!(
-            "block size ({block_size}) is larger than MAX_SECTOR_SIZE ({MAX_SECTOR_SIZE})"
+            "block size ({}) is larger than MAX_SECTOR_SIZE ({})",
+            block_size,
+            MAX_SECTOR_SIZE
         );
         return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
     }
@@ -526,13 +529,15 @@ where
         let block_size = storage.block_size();
 
         if !block_size.is_power_of_two() {
-            global_log::error!("block size ({block_size}) is 0 or not a power of 2");
+            global_log::error!("block size ({}) is 0 or not a power of 2", block_size);
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
         #[expect(clippy::cast_possible_truncation)]
         if block_size > MAX_SECTOR_SIZE as BlockSize {
             global_log::error!(
-                "block size ({block_size}) is larger than MAX_SECTOR_SIZE ({MAX_SECTOR_SIZE})"
+                "block size ({}) is larger than MAX_SECTOR_SIZE ({})",
+                block_size,
+                MAX_SECTOR_SIZE
             );
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
@@ -545,8 +550,9 @@ where
 
         if block_size > BlockSize::from(bpb.bytes_per_sector) {
             global_log::error!(
-                "block size ({block_size}) is larger than sector size ({})",
-                bpb.bytes_per_sector
+                "block size ({}) is larger than sector size ({})",
+                block_size,
+                bpb.bytes_per_sector.get()
             );
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
@@ -588,7 +594,7 @@ where
             return Err(FSError::UnsupportedFS);
         }
 
-        global_log::info!("The FAT type of the filesystem is {fat_type:?}");
+        global_log::info!("The FAT type of the filesystem is {:?}", fat_type);
 
         match &boot_record {
             BootRecord::Fat(boot_record_fat) => {
@@ -1921,12 +1927,12 @@ where
                     }
                 }
                 None => {
-                    global_log::error!("File {path} not found");
+                    global_log::error!("File {} not found", path.as_str());
                     Err(FSError::NotFound)
                 }
             }
         } else {
-            global_log::error!("{path} is a directory (not a file)");
+            global_log::error!("{} is a directory (not a file)", path.as_str());
             Err(FSError::IsADirectory)
         }
     }
@@ -2337,10 +2343,7 @@ where
         // let's make sure there are no read-only files
 
         if self.check_for_readonly_files(&path)? {
-            global_log::error!(concat!(
-                "A read-only file has been found ",
-                "in a directory pending deletion."
-            ));
+            global_log::error!("A read-only file has been found in a directory pending deletion.");
             return Err(FSError::ReadOnlyFile);
         }
 

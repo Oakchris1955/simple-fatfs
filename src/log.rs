@@ -2,6 +2,7 @@
 //!
 //! Use them to not pollute other libraries or applications with our logging
 //! messages that aren't useful for them.
+#![allow(unused_imports)]
 
 // expr_nop macro is a noop copy of [`log`]'s message macros
 // [`log`] can be found here: <https://github.com/rust-lang/log>
@@ -39,11 +40,11 @@ mod macros {
 pub(crate) mod local_log {
     use super::*;
 
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, feature = "log"))]
     #[allow(unused_imports)]
     pub(crate) use macros::{debug, error, info, trace, warn};
 
-    #[cfg(not(debug_assertions))]
+    #[cfg(any(not(debug_assertions), not(feature = "log")))]
     #[allow(unused_imports)]
     pub(crate) use noop_macros::*;
 }
