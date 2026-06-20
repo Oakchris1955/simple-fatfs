@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::{error::*, local_log, path::*, utils, Clock};
+use crate::{error::*, global_log, local_log, path::*, utils, Clock};
 
 use core::{
     cell::{Ref, RefCell, RefMut},
@@ -25,6 +25,7 @@ use zerocopy::{FromBytes, IntoBytes};
 /// The logic is essentially the same in all of them, the only thing that
 /// changes is the size in bytes of FAT entries, and thus the maximum volume size
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 // no need for enum variant documentation here
 pub enum FATType {
     /// One of the earliest versions, originally used all the way back to 1980.
@@ -423,12 +424,16 @@ where
     let block_size = storage.block_size();
 
     if !block_size.is_power_of_two() {
-        log::error!("block size ({block_size}) is 0 or not a power of 2");
+        global_log::error!("block size ({}) is 0 or not a power of 2", block_size);
         return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
     }
     #[expect(clippy::cast_possible_truncation)]
     if block_size > MAX_SECTOR_SIZE as BlockSize {
-        log::error!("block size ({block_size}) is larger than MAX_SECTOR_SIZE ({MAX_SECTOR_SIZE})");
+        global_log::error!(
+            "block size ({}) is larger than MAX_SECTOR_SIZE ({})",
+            block_size,
+            MAX_SECTOR_SIZE
+        );
         return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
     }
 
@@ -524,13 +529,15 @@ where
         let block_size = storage.block_size();
 
         if !block_size.is_power_of_two() {
-            log::error!("block size ({block_size}) is 0 or not a power of 2");
+            global_log::error!("block size ({}) is 0 or not a power of 2", block_size);
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
         #[expect(clippy::cast_possible_truncation)]
         if block_size > MAX_SECTOR_SIZE as BlockSize {
-            log::error!(
-                "block size ({block_size}) is larger than MAX_SECTOR_SIZE ({MAX_SECTOR_SIZE})"
+            global_log::error!(
+                "block size ({}) is larger than MAX_SECTOR_SIZE ({})",
+                block_size,
+                MAX_SECTOR_SIZE
             );
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
@@ -542,9 +549,10 @@ where
         let (bpb, _) = BpbFat::read_from_prefix(&buffer).unwrap();
 
         if block_size > BlockSize::from(bpb.bytes_per_sector) {
-            log::error!(
-                "block size ({block_size}) is larger than sector size ({})",
-                bpb.bytes_per_sector
+            global_log::error!(
+                "block size ({}) is larger than sector size ({})",
+                block_size,
+                bpb.bytes_per_sector.get()
             );
             return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
         }
@@ -562,7 +570,7 @@ where
             let fsinfo = FSInfoFAT32::read_from_bytes(&buffer).unwrap();
 
             if !fsinfo.verify_signature() {
-                log::error!("FAT32 FSInfo has invalid signature(s)");
+                global_log::error!("FAT32 FSInfo has invalid signature(s)");
                 return Err(FSError::InternalFSError(InternalFSError::InvalidFSInfoSig));
             }
 
@@ -582,16 +590,16 @@ where
         let fat_type = boot_record.fat_type();
 
         if fat_type == FATType::ExFAT {
-            log::error!("Filesystem is ExFAT, which is currently unsupported");
+            global_log::error!("Filesystem is ExFAT, which is currently unsupported");
             return Err(FSError::UnsupportedFS);
         }
 
-        log::info!("The FAT type of the filesystem is {fat_type:?}");
+        global_log::info!("The FAT type of the filesystem is {:?}", fat_type);
 
         match &boot_record {
             BootRecord::Fat(boot_record_fat) => {
                 if options.check_boot_signature && boot_record_fat.verify_signature() {
-                    log::error!("FAT boot record has invalid signature(s)");
+                    global_log::error!("FAT boot record has invalid signature(s)");
                     return Err(FSError::InternalFSError(InternalFSError::InvalidBPBSig));
                 }
             }
@@ -604,7 +612,7 @@ where
         if u64::from(props.total_sectors) * u64::from(props.sector_size)
             > u64::from(storage.borrow().block_count()) * u64::from(block_size)
         {
-            log::error!("the filesystem seems to be larger than the storage medium");
+            global_log::error!("the filesystem seems to be larger than the storage medium");
             return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));
         }
 
@@ -625,7 +633,7 @@ where
         };
 
         if !fs.FAT_tables_are_identical()? {
-            log::error!("The FAT and it's copies do not match");
+            global_log::error!("The FAT and it's copies do not match");
             return Err(FSError::InternalFSError(
                 InternalFSError::MismatchingFATTables,
             ));
@@ -1290,7 +1298,7 @@ where
                 .unwrap();
 
                 if remaining_entries < n.get() - chain_len {
-                    log::error!("Root directory is full, can't allocate any more entries");
+                    global_log::error!("Root directory is full, can't allocate any more entries");
                     Err(FSError::RootDirectoryFull)
                 } else {
                     local_log::trace!("Successful allocated {n} contiguous FAT directory entries on the root directory");
@@ -1635,7 +1643,9 @@ where
                     last_cluster_in_chain = Some(next_free_cluster);
                 }
                 None => {
-                    log::error!("storage medium full while attempting to allocate more clusters");
+                    global_log::error!(
+                        "storage medium full while attempting to allocate more clusters"
+                    );
                     return Err(FSError::StorageFull);
                 }
             }
@@ -1868,7 +1878,7 @@ where
             #[cfg(feature = "bloom")]
             if let Some(filter) = &self.dir_info.borrow().filter {
                 if !filter.check(file_name) {
-                    log::error!("File not found when checking the bloom filter");
+                    global_log::error!("File not found when checking the bloom filter");
                     return Err(FSError::NotFound);
                 }
             }
@@ -1910,19 +1920,19 @@ where
                     if file.cluster_chain_is_healthy()? {
                         Ok(file)
                     } else {
-                        log::error!("The cluster chain of a file is malformed");
+                        global_log::error!("The cluster chain of a file is malformed");
                         Err(FSError::InternalFSError(
                             InternalFSError::MalformedClusterChain,
                         ))
                     }
                 }
                 None => {
-                    log::error!("File {path} not found");
+                    global_log::error!("File {} not found", path.as_str());
                     Err(FSError::NotFound)
                 }
             }
         } else {
-            log::error!("{path} is a directory (not a file)");
+            global_log::error!("{} is a directory (not a file)", path.as_str());
             Err(FSError::IsADirectory)
         }
     }
@@ -2018,7 +2028,7 @@ where
                 let entry = entry?;
 
                 if entry.name(self.options.codepage) == file_name {
-                    log::error!("Couldn't create file as it already exists");
+                    global_log::error!("Couldn't create file as it already exists");
                     return Err(FSError::AlreadyExists);
                 }
             }
@@ -2333,10 +2343,7 @@ where
         // let's make sure there are no read-only files
 
         if self.check_for_readonly_files(&path)? {
-            log::error!(concat!(
-                "A read-only file has been found ",
-                "in a directory pending deletion."
-            ));
+            global_log::error!("A read-only file has been found in a directory pending deletion.");
             return Err(FSError::ReadOnlyFile);
         }
 

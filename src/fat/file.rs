@@ -4,7 +4,7 @@ use core::{cmp, num, ops};
 
 use time::{Date, PrimitiveDateTime};
 
-use crate::local_log;
+use crate::{global_log, local_log};
 use crate::{Clock, FSError, FSResult, InternalFSError};
 
 use embedded_io::*;
@@ -391,10 +391,7 @@ where
         self.seek(SeekFrom::Start(size.into()))?;
 
         // set what the new filesize will be
-        #[cfg_attr(
-            not(debug_assertions),
-            expect(unused_variables, reason = "local_log doesn't actually use this")
-        )]
+        #[expect(unused_variables, reason = "local_log may not actually use this")]
         let previous_size = self.file_size;
         self.file_size = size;
 
@@ -603,7 +600,9 @@ where
         // seek beyond EOF behaviour is implementation-defined,
         // so we just allocate the maximum possible space
         if u64::try_from(buf.len()).unwrap_or(u64::MAX) > FileSize::MAX.into() {
-            log::warn!("a file can be up to 2^32 bytes long, can't have a file larger than that");
+            global_log::warn!(
+                "a file can be up to 2^32 bytes long, can't have a file larger than that"
+            );
 
             buf = &buf[..FileSize::MAX as usize];
         };
@@ -687,7 +686,7 @@ where
         let offset = match FileSize::try_from(offset) {
             Ok(offset) => offset,
             Err(_) => {
-                log::warn!(
+                global_log::warn!(
                     "a file can be up to 2^32 bytes long, can't have a file larger than that"
                 );
 
