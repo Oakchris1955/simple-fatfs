@@ -24,10 +24,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
-      - name: Run tests - All features enabled
-        run: |
-          cargo build --verbose --all-features
-          timeout 1m cargo test --verbose --all-features -- --nocapture
+      # FIXME: the `log` and `defmt` features are incompatible with each other
+      # Perhaps https://github.com/frewsxcv/cargo-all-features could come in handy?
+      #
+      #- name: Run tests - All features enabled
+      #  run: |
+      #    cargo build --verbose --all-features
+      #    timeout 1m cargo test --verbose --all-features -- --nocapture
       - name: Run tests - No features enabled
         run: |
           cargo build --verbose --no-default-features
