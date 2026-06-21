@@ -28,14 +28,18 @@ impl BlockBase for MemoryDevice {
     }
 
     fn block_count(&self) -> BlockCount {
-        self.0.len() as BlockCount
+        // this is fine for testing
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            self.0.len() as BlockCount
+        }
     }
 }
 
 impl BlockRead for MemoryDevice {
     fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
         // this is fine for testing
-        #![expect(clippy::cast_possible_truncation)]
+        #![allow(clippy::cast_possible_truncation)]
         let start = block as usize;
         let end = start + buf.len();
 
@@ -48,7 +52,7 @@ impl BlockRead for MemoryDevice {
 impl BlockWrite for MemoryDevice {
     fn write(&mut self, block: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
         // this is fine for testing
-        #![expect(clippy::cast_possible_truncation)]
+        #![allow(clippy::cast_possible_truncation)]
         let start = block as usize;
         let end = start + buf.len();
 
