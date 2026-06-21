@@ -10,6 +10,8 @@ impl<const BS: BlockSize> BlockBase for Storage<'_, BS> {
     }
 
     fn block_count(&self) -> BlockCount {
+        // this is fine for testing
+        #[allow(clippy::useless_conversion)]
         (64 / BS).into()
     }
 }
