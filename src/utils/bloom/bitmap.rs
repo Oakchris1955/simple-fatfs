@@ -2,7 +2,7 @@ use core::fmt::Debug;
 use core::num;
 
 #[cfg(not(feature = "std"))]
-use alloc::{vec, vec::Vec};
+use alloc::{vec, boxed::Box};
 
 #[derive(Clone, Debug)]
 pub(crate) struct BitMap {

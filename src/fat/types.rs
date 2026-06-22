@@ -52,3 +52,6 @@ pub(crate) type FATEntryCount = FATEntryIndex;
 pub(crate) type FATEntryValue = u32;
 
 pub(crate) type FileSize = u32;
+
+#[cfg(feature = "bloom")]
+pub(crate) type BloomFloat = f64;

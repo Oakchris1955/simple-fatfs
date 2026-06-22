@@ -112,18 +112,35 @@ impl<C: Clock> FSOptions<C> {
 /// (mainly to compute the desired filter size from certain parameters)
 #[cfg(feature = "bloom")]
 pub mod bloom {
+    use core::f64::consts::LN_2;
     use core::{cmp, num};
 
-    use core::f64::consts::LN_2;
-    const LN2_2: f64 = LN_2 * LN_2;
+    use crate::BloomFloat;
+
+    type FloatMethod = fn(BloomFloat) -> BloomFloat;
+
+    const LN2_2: BloomFloat = LN_2 * LN_2;
 
     /// Compute a recommended bitmap size for items_count items
     /// and a fp_p rate of false positives.
     /// fp_p obviously has to be within the ]0.0, 1.0[ range
     /// or this will panic
     #[inline]
-    pub fn compute_bitmap_size(items_count: num::NonZeroUsize, fp_p: f64) -> num::NonZeroUsize {
+    pub fn compute_bitmap_size(
+        items_count: num::NonZeroUsize,
+        fp_p: BloomFloat,
+    ) -> num::NonZeroUsize {
         assert!(fp_p > 0.0 && fp_p < 1.0);
+
+        #[cfg(feature = "std")]
+        const LN: FloatMethod = BloomFloat::ln;
+        #[cfg(not(feature = "std"))]
+        const LN: FloatMethod = libm::Libm::<BloomFloat>::log;
+
+        #[cfg(feature = "std")]
+        const CEIL: FloatMethod = BloomFloat::ceil;
+        #[cfg(not(feature = "std"))]
+        const CEIL: FloatMethod = libm::Libm::<BloomFloat>::ceil;
 
         #[expect(
             clippy::cast_precision_loss,
@@ -131,7 +148,7 @@ pub mod bloom {
             clippy::cast_sign_loss
         )]
         num::NonZero::new(
-            ((items_count.get() as f64) * f64::ln(fp_p) / (-8.0 * LN2_2)).ceil() as usize,
+            CEIL((items_count.get() as BloomFloat) * LN(fp_p) / (-8.0 * LN2_2)) as usize,
         )
         .unwrap()
     }
@@ -143,11 +160,15 @@ pub mod bloom {
     pub fn compute_false_positive_rate(
         bitmap_size: num::NonZeroUsize,
         items_count: num::NonZeroUsize,
-    ) -> f64 {
-        let m = (bitmap_size.get() * 8) as f64;
-        let n = items_count.get() as f64;
-        let e = core::f64::consts::E;
-        e.powf(-m * LN2_2 / n)
+    ) -> BloomFloat {
+        #[cfg(feature = "std")]
+        const EXP: FloatMethod = BloomFloat::exp;
+        #[cfg(not(feature = "std"))]
+        const EXP: FloatMethod = libm::Libm::<BloomFloat>::exp;
+
+        let m = (bitmap_size.get() * 8) as BloomFloat;
+        let n = items_count.get() as BloomFloat;
+        EXP(-m * LN2_2 / n)
     }
 
     #[expect(
@@ -160,10 +181,15 @@ pub mod bloom {
         bitmap_size: num::NonZeroU64,
         items_count: num::NonZeroUsize,
     ) -> num::NonZeroU32 {
-        let m = (bitmap_size.get() * 8) as f64;
-        let n = items_count.get() as f64;
+        #[cfg(feature = "std")]
+        const ROUND: FloatMethod = BloomFloat::round;
+        #[cfg(not(feature = "std"))]
+        const ROUND: FloatMethod = libm::Libm::<BloomFloat>::round;
 
-        num::NonZero::new(cmp::max((m * LN_2 / n).round() as u32, 1)).expect("1 > 0")
+        let m = (bitmap_size.get() * 8) as BloomFloat;
+        let n = items_count.get() as BloomFloat;
+
+        num::NonZero::new(cmp::max(ROUND(m * LN_2 / n) as u32, 1)).expect("1 > 0")
     }
 }
 
@@ -180,9 +206,12 @@ mod bloom_compute_tests {
 
     use core::num::NonZeroUsize;
 
+    #[cfg(not(feature = "std"))]
+    use alloc::{boxed::Box, format, vec};
+
     struct Params {
         items_count: NonZeroUsize,
-        fp_p: f64,
+        fp_p: BloomFloat,
         bitmap_size: NonZeroUsize,
     }
 
@@ -247,7 +276,7 @@ mod bloom_compute_tests {
 
         // TODO: find a proper way to deal with floating-points errors
         // till then, this is good enough
-        const FP_P_ERROR_FACTOR: f64 = 1e-3;
+        const FP_P_ERROR_FACTOR: BloomFloat = 1e-3;
 
         for (i, param) in PARAMS_LIST.iter().enumerate() {
             let predicted_fp_p =

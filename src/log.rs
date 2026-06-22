@@ -2,7 +2,10 @@
 //!
 //! Use them to not pollute other libraries or applications with our logging
 //! messages that aren't useful for them.
-#![allow(unused_imports)]
+#![allow(
+    unused,
+    reason = "due to various features flag combinations, some (or most) code here might be unused"
+)]
 
 // expr_nop macro is a noop copy of [`log`]'s message macros
 // [`log`] can be found here: <https://github.com/rust-lang/log>

@@ -391,7 +391,7 @@ where
         self.seek(SeekFrom::Start(size.into()))?;
 
         // set what the new filesize will be
-        #[expect(unused_variables, reason = "local_log may not actually use this")]
+        #[allow(unused_variables, reason = "local_log may not actually use this")]
         let previous_size = self.file_size;
         self.file_size = size;
 
