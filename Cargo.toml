@@ -60,3 +60,22 @@ regex = "1.11.2"
 rstest = "0.26.1"
 rstest_reuse = "0.7.0"
 test-log = "0.2.16"
+
+[package.metadata.cargo-fc]
+exclude_feature_sets = [
+    ["log", "defmt"],
+]
+
+only_features = [
+    "std",
+    "defmt",
+    "log",
+    "bloom",
+    "lba64"
+]
+
+[package.metadata.cargo-fc.target.'cfg(target_os = "none")']
+exclude_features = { add = ["std"] }
+
+[package.metadata.cargo-fc.subcommands.test]
+exclude_features = { add = ["defmt"] }

@@ -23,19 +23,16 @@ jobs:
           - nightly
     steps:
       - uses: actions/checkout@v4
-      - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
-      # FIXME: the `log` and `defmt` features are incompatible with each other
-      # Perhaps https://github.com/frewsxcv/cargo-all-features could come in handy?
-      #
-      #- name: Run tests - All features enabled
-      #  run: |
-      #    cargo build --verbose --all-features
-      #    timeout 1m cargo test --verbose --all-features -- --nocapture
-      - name: Run tests - No features enabled
-        run: |
-          cargo build --verbose --no-default-features
-          timeout 1m cargo test --verbose --no-default-features -- --nocapture
-      - if: ${{ matrix.toolchain == 'nightly' }}
+      - run: rustup override set ${{ matrix.toolchain }}
+      - uses: romnn/cargo-feature-combinations@main
+      - name: Build target combinations
+        timeout-minutes: 1
+        run: cargo fc build
+      - name: Test target combinations
+        timeout-minutes: 5
+        run: cargo fc test
+      - name: Install nextest (nightly only)
+        if: ${{ matrix.toolchain == 'nightly' }}
         uses: taiki-e/install-action@nextest
       - name: Install Miri (nightly only)
         if: ${{ matrix.toolchain == 'nightly' }}
