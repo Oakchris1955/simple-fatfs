@@ -1,6 +1,7 @@
 use core::ops::{Deref, DerefMut};
 use embedded_io::ErrorType;
 
+#[derive(Debug)]
 pub struct MemoryDevice(Box<[u8]>);
 
 impl From<&[u8]> for MemoryDevice {

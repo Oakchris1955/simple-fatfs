@@ -769,6 +769,41 @@ where
         Ok(())
     }
 
+    fn _read_dir<P: AsRef<Path>>(
+        &self,
+        path: P,
+        internal: bool,
+    ) -> FSResult<ReadDir<'_, S, C>, S::Error> {
+        // normalize the given path
+        let path = path.as_ref();
+
+        if !path.is_valid() {
+            return Err(FSError::MalformedPath);
+        }
+
+        let path = path.normalize();
+
+        local_log::debug!("Reading directory {path}");
+
+        self.go_to_dir(&path)?;
+
+        Ok(ReadDir::new(
+            self,
+            &self.dir_info.borrow().chain_start,
+            &self.dir_info.borrow().path,
+            internal,
+        ))
+    }
+
+    /// Like [`read_dir`](Self::read_dir), but doesn't filter files based on whether
+    /// they are hidden or system files.
+    ///
+    /// Can come in handy if you don't want to skip hidden or system files, for
+    /// example during a directory deletion.
+    fn read_dir_internal<P: AsRef<Path>>(&self, path: P) -> FSResult<ReadDir<'_, S, C>, S::Error> {
+        self._read_dir(path, true)
+    }
+
     // There are many ways this can be achieved. That's how we'll do it:
     // Firstly, we find the common path prefix of the `current_path` and the `target`
     // Then, we check whether it is faster to start from the root directory
@@ -1793,24 +1828,7 @@ where
     ///
     /// Fails if `path` doesn't represent a directory, or if that directory doesn't exist
     pub fn read_dir<P: AsRef<Path>>(&self, path: P) -> FSResult<ReadDir<'_, S, C>, S::Error> {
-        // normalize the given path
-        let path = path.as_ref();
-
-        if !path.is_valid() {
-            return Err(FSError::MalformedPath);
-        }
-
-        let path = path.normalize();
-
-        local_log::debug!("Reading directory {path}");
-
-        self.go_to_dir(&path)?;
-
-        Ok(ReadDir::new(
-            self,
-            &self.dir_info.borrow().chain_start,
-            &self.dir_info.borrow().path,
-        ))
+        self._read_dir(path, false)
     }
 
     /// Reads the volume label from the BIOS parameter block
@@ -2166,7 +2184,7 @@ where
         let entry_from = {
             let mut entry_from = None;
 
-            for entry in self.read_dir(parent_from)? {
+            for entry in self.read_dir_internal(parent_from)? {
                 let entry = entry?;
 
                 if *entry.path() == from {
@@ -2182,7 +2200,7 @@ where
             }
         };
 
-        for entry in self.read_dir(parent_to)? {
+        for entry in self.read_dir_internal(parent_to)? {
             let entry = entry?;
 
             if *entry.path() == to {
@@ -2296,7 +2314,7 @@ where
             return Err(FSError::InvalidInput);
         }
 
-        if self.read_dir(path)?.next().is_some() {
+        if self.read_dir_internal(path)?.next().is_some() {
             return Err(FSError::DirectoryNotEmpty);
         }
 
@@ -2304,7 +2322,7 @@ where
             .parent()
             .expect("we aren't in the root directory, this shouldn't panic");
 
-        let parent_dir_entries = self.read_dir(parent_path)?;
+        let parent_dir_entries = self.read_dir_internal(parent_path)?;
 
         let entry = {
             let mut entry = None;
@@ -2364,7 +2382,7 @@ where
             return Err(FSError::MalformedPath);
         }
 
-        let mut read_dir = self.read_dir(path)?;
+        let mut read_dir = self.read_dir_internal(path)?;
         loop {
             let entry = match read_dir.next() {
                 Some(entry) => entry?,
@@ -2396,7 +2414,7 @@ where
             return Err(FSError::MalformedPath);
         }
 
-        let mut read_dir = self.read_dir(path)?;
+        let mut read_dir = self.read_dir_internal(path)?;
 
         loop {
             let entry = match read_dir.next() {

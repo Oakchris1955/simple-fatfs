@@ -298,6 +298,7 @@ where
                 self.fs,
                 &EntryLocationUnit::DataCluster(self.data_cluster),
                 self.path(),
+                false,
             )
         })
     }
@@ -341,6 +342,8 @@ where
 {
     inner: ReadDirInt<'a, S, C>,
     parent: Box<Path>,
+    /// Whether this iterator is intended for internal or public use
+    internal: bool,
 }
 
 impl<'a, S, C> ReadDir<'a, S, C>
@@ -352,6 +355,7 @@ where
         fs: &'a FileSystem<S, C>,
         chain_start: &EntryLocationUnit,
         parent: P,
+        internal: bool,
     ) -> Self
     where
         P: AsRef<Path>,
@@ -359,6 +363,7 @@ where
         Self {
             inner: ReadDirInt::new(fs, chain_start),
             parent: parent.as_ref().into(),
+            internal,
         }
     }
 }
@@ -375,7 +380,8 @@ where
             let res = self.inner.next()?;
             match res {
                 Ok(value) => {
-                    if self.inner.fs.filter.borrow().filter(&value)
+                    if (self.internal
+                        || self.inner.fs.filter.borrow().filter(&value))
                         // we shouldn't expose the special entries to the user
                         && ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
                             .contains(&value.name(self.inner.fs.options.codepage).as_str())

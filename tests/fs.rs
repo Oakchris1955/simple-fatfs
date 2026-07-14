@@ -367,6 +367,26 @@ mod remove_dir {
     #[test_log]
     #[apply(fs)]
 
+    fn try_remove_dir_with_hidden_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
+        let dir_path = "/hidden/";
+
+        // manually remove the only public file in the directory
+        fs.remove_file("/hidden/public.txt").unwrap();
+
+        let rm_result = fs.remove_empty_dir(dir_path);
+
+        match rm_result {
+            Err(err) => match err {
+                FSError::DirectoryNotEmpty => (),
+                _ => panic!("unexpected IOError: {err:?}"),
+            },
+            Ok(()) => panic!("the directory isn't completely empty (has \"hidden.txt\""),
+        }
+    }
+
+    #[test_log]
+    #[apply(fs)]
+
     fn remove_nonempty_dir_with_readonly_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
         fs.show_hidden(true);
 
