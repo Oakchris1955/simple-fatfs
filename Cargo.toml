@@ -1,6 +1,7 @@
 [package]
 name = "simple-fatfs"
 version = "0.1.0-alpha.2"
+rust-version = "1.88.0"
 edition = "2021"
 description = "A simple-to-use FAT filesystem library for Rust (mainly targeted at embedded systems)"
 license = "MIT"
