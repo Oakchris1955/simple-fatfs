@@ -11,6 +11,8 @@ use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::num;
 
+use crate::BloomFloat;
+
 use siphasher::sip::SipHasher13;
 
 const LARGEST_U64_PRIME: u64 = 0xFFFF_FFFF_FFFF_FFC5u64;
@@ -65,7 +67,7 @@ impl<T: ?Sized> Bloom<T> {
     /// Create a new bloom filter structure.
     /// items_count is an estimation of the maximum number of items to store.
     /// fp_p is the wanted rate of false positives, in ]0.0, 1.0[
-    pub fn new_for_fp_rate(items_count: num::NonZeroUsize, fp_p: f64) -> Self {
+    pub fn new_for_fp_rate(items_count: num::NonZeroUsize, fp_p: BloomFloat) -> Self {
         let bitmap_size = Self::compute_bitmap_size(items_count, fp_p);
         Bloom::new(bitmap_size, items_count)
     }
@@ -74,7 +76,10 @@ impl<T: ?Sized> Bloom<T> {
     /// and a fp_p rate of false positives.
     /// fp_p obviously has to be within the ]0.0, 1.0[ range.
     #[inline]
-    pub fn compute_bitmap_size(items_count: num::NonZeroUsize, fp_p: f64) -> num::NonZeroUsize {
+    pub fn compute_bitmap_size(
+        items_count: num::NonZeroUsize,
+        fp_p: BloomFloat,
+    ) -> num::NonZeroUsize {
         crate::bloom::compute_bitmap_size(items_count, fp_p)
     }
 
