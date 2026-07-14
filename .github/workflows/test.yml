@@ -41,6 +41,7 @@ jobs:
           rustup override set nightly
           cargo miri setup
       - name: Run tests - Big endian target (nightly only)
+        timeout-minutes: 10
         if: ${{ matrix.toolchain == 'nightly' }}
         run: cargo miri nextest run --target powerpc-unknown-linux-gnu --verbose
 
