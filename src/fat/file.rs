@@ -132,7 +132,7 @@ where
         loop {
             cluster_count += 1;
 
-            if cluster_count * self.fs.cluster_size() >= self.file_size {
+            if cluster_count * self.fs.props.cluster_size() >= self.file_size {
                 break;
             }
 
@@ -183,25 +183,26 @@ where
         );
 
         'outer: loop {
-            let sector_init_offset =
-                self.props.offset % self.fs.cluster_size() / u32::from(self.fs.sector_size());
+            let sector_init_offset = self.props.offset % self.fs.props.cluster_size()
+                / u32::from(self.fs.props.sector_size());
             let first_sector_of_cluster = self
                 .fs
+                .props
                 .data_cluster_to_partition_sector(self.props.current_cluster)
                 + sector_init_offset;
             let last_sector_of_cluster = first_sector_of_cluster
-                + SectorCount::from(self.fs.sectors_per_cluster())
+                + SectorCount::from(self.fs.props.sectors_per_cluster())
                 - sector_init_offset
                 - 1;
 
             for sector in first_sector_of_cluster..=last_sector_of_cluster {
                 self.fs.load_nth_sector(sector)?;
 
-                let start_index = usize::try_from(self.props.offset % u32::from(self.fs.sector_size()))
+                let start_index = usize::try_from(self.props.offset % u32::from(self.fs.props.sector_size()))
                     .expect("sector_size's upper limit is 2^16, within Rust's usize (Rust support 16, 32 and 64-bit archs)");
                 let bytes_to_read = cmp::min(
                     read_cap - bytes_read,
-                    usize::from(self.fs.sector_size()) - start_index,
+                    usize::from(self.fs.props.sector_size()) - start_index,
                 );
                 local_log::trace!(
                     "Gonna read {bytes_to_read} bytes from sector {sector} (cluster {}) starting at byte {start_index}",
@@ -219,7 +220,10 @@ where
                 if bytes_read >= read_cap {
                     // ...but we must process get the next cluster for future uses,
                     // we do that before breaking
-                    if self.props.offset.is_multiple_of(self.fs.cluster_size())
+                    if self
+                        .props
+                        .offset
+                        .is_multiple_of(self.fs.props.cluster_size())
                         && self.props.offset < self.file_size
                     {
                         self.next_cluster()?;
@@ -269,7 +273,8 @@ where
             }
             Ordering::Equal => (),
             Ordering::Greater => {
-                for _ in self.props.offset / self.fs.cluster_size()..offset / self.fs.cluster_size()
+                for _ in self.props.offset / self.fs.props.cluster_size()
+                    ..offset / self.fs.props.cluster_size()
                 {
                     self.next_cluster()?;
                 }
@@ -376,7 +381,7 @@ where
         let size = self.props.offset;
 
         // looks like the new truncated size would be smaller than the current one, so we just return
-        if size.next_multiple_of(self.fs.props.cluster_size) >= self.file_size {
+        if size.next_multiple_of(self.fs.props.cluster_size()) >= self.file_size {
             if size < self.file_size {
                 self.file_size = size;
             }
@@ -615,25 +620,26 @@ where
         let mut bytes_written = 0;
 
         'outer: loop {
-            let sector_init_offset =
-                self.props.offset % self.fs.cluster_size() / u32::from(self.fs.sector_size());
+            let sector_init_offset = self.props.offset % self.fs.props.cluster_size()
+                / u32::from(self.fs.props.sector_size());
             let first_sector_of_cluster = self
                 .fs
+                .props
                 .data_cluster_to_partition_sector(self.props.current_cluster)
                 + sector_init_offset;
             let last_sector_of_cluster = first_sector_of_cluster
-                + SectorCount::from(self.fs.sectors_per_cluster())
+                + SectorCount::from(self.fs.props.sectors_per_cluster())
                 - sector_init_offset
                 - 1;
             for sector in first_sector_of_cluster..=last_sector_of_cluster {
                 self.fs.load_nth_sector(sector)?;
 
-                let start_index = usize::try_from(self.props.offset % u32::from(self.fs.sector_size()))
+                let start_index = usize::try_from(self.props.offset % u32::from(self.fs.props.sector_size()))
                     .expect("sector_size's upper limit is 2^16, within Rust's usize (Rust support 16, 32 and 64-bit archs)");
 
                 let bytes_to_write = cmp::min(
                     buf.len() - bytes_written,
-                    usize::from(self.fs.sector_size()) - start_index,
+                    usize::from(self.fs.props.sector_size()) - start_index,
                 );
 
                 local_log::trace!(
@@ -652,7 +658,11 @@ where
                 if bytes_written >= buf.len() {
                     // ...but we must process get the next cluster for future uses,
                     // we do that before breaking
-                    if self.props.offset.is_multiple_of(self.fs.cluster_size()) {
+                    if self
+                        .props
+                        .offset
+                        .is_multiple_of(self.fs.props.cluster_size())
+                    {
                         self.next_cluster()?;
                     }
 
@@ -696,14 +706,16 @@ where
 
         let bytes_allocated = if self.file_size == 0 {
             // even if the file size is zero, a file has a cluster already allocated
-            self.fs.props.cluster_size
+            self.fs.props.cluster_size()
         } else {
-            self.file_size.next_multiple_of(self.fs.cluster_size())
+            self.file_size
+                .next_multiple_of(self.fs.props.cluster_size())
         };
 
         // in case the cursor goes beyond the EOF, allocate more clusters
         if offset > bytes_allocated {
-            let clusters_to_allocate = (offset - bytes_allocated).div_ceil(self.fs.cluster_size());
+            let clusters_to_allocate =
+                (offset - bytes_allocated).div_ceil(self.fs.props.cluster_size());
             local_log::trace!(
                 "Seeking beyond EOF, allocating {clusters_to_allocate} more clusters"
             );

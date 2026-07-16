@@ -19,13 +19,13 @@ impl EntryLocationUnit {
         S: BlockRead,
         C: Clock,
     {
-        if sector < fs.first_data_sector() {
+        if sector < fs.props.first_data_sector() {
             EntryLocationUnit::RootDirSector(
-                u16::try_from(sector - fs.props.first_root_dir_sector)
+                u16::try_from(sector - fs.props.first_root_dir_sector())
                     .expect("this should be a valid root dir sector"),
             )
         } else {
-            EntryLocationUnit::DataCluster(fs.partition_sector_to_data_cluster(sector))
+            EntryLocationUnit::DataCluster(fs.props.partition_sector_to_data_cluster(sector))
         }
     }
 
@@ -35,8 +35,8 @@ impl EntryLocationUnit {
         C: Clock,
     {
         let unit_size = match self {
-            EntryLocationUnit::DataCluster(_) => fs.props.cluster_size,
-            EntryLocationUnit::RootDirSector(_) => fs.props.sector_size.into(),
+            EntryLocationUnit::DataCluster(_) => fs.props.cluster_size(),
+            EntryLocationUnit::RootDirSector(_) => fs.props.sector_size().into(),
         };
 
         u16::try_from(unit_size / u32::try_from(DIRENTRY_SIZE).expect("32 can fit to u32"))
@@ -50,10 +50,10 @@ impl EntryLocationUnit {
     {
         match self {
             EntryLocationUnit::RootDirSector(root_dir_sector) => {
-                SectorCount::from(*root_dir_sector) + fs.props.first_root_dir_sector
+                SectorCount::from(*root_dir_sector) + fs.props.first_root_dir_sector()
             }
             EntryLocationUnit::DataCluster(data_cluster) => {
-                fs.data_cluster_to_partition_sector(*data_cluster)
+                fs.props.data_cluster_to_partition_sector(*data_cluster)
             }
         }
     }
@@ -75,7 +75,7 @@ impl EntryLocationUnit {
                     }
 
                     if SectorIndex::from(*sector)
-                        >= fs.props.first_root_dir_sector
+                        >= fs.props.first_root_dir_sector()
                             + SectorCount::from(boot_record_fat.root_dir_sectors())
                     {
                         Ok(None)
@@ -87,7 +87,7 @@ impl EntryLocationUnit {
             },
             EntryLocationUnit::DataCluster(cluster) => Ok(fs
                 .get_next_cluster(*cluster)?
-                .filter(|cluster| *cluster < fs.props.total_clusters)
+                .filter(|cluster| *cluster < fs.props.total_clusters())
                 .map(EntryLocationUnit::DataCluster)),
         }
     }
@@ -144,7 +144,7 @@ impl EntryLocation {
     {
         let sector_offset: SectorCount = SectorCount::from(self.index)
             * SectorCount::try_from(DIRENTRY_SIZE).expect("32 can fit into a u32")
-            / SectorCount::from(fs.sector_size());
+            / SectorCount::from(fs.props.sector_size());
 
         self.unit.get_entry_sector(fs) + sector_offset
     }
@@ -155,7 +155,7 @@ impl EntryLocation {
         S: BlockRead,
         C: Clock,
     {
-        (usize::from(self.index) * DIRENTRY_SIZE) % usize::from(fs.props.sector_size)
+        (usize::from(self.index) * DIRENTRY_SIZE) % usize::from(fs.props.sector_size())
     }
 
     // Note: this could also return a borrowed subslice from fs.sector_buffer,
