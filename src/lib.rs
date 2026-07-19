@@ -202,6 +202,7 @@
 #![warn(clippy::cast_precision_loss)]
 #![warn(clippy::cast_sign_loss)]
 #![warn(clippy::redundant_clone)]
+#![warn(clippy::wildcard_imports)]
 
 #[cfg(target_pointer_width = "16")]
 compile_error!(
@@ -217,21 +218,20 @@ compile_error!("The log and defmt logging frameworks can't both be used at the s
 
 extern crate alloc;
 
-mod codepage;
-mod error;
-mod fat;
-mod log;
-pub mod path;
-mod time;
-mod utils;
+pub(crate) mod codepage;
+pub(crate) mod error;
+pub(crate) mod fat;
+pub(crate) mod log;
+mod path;
+pub(crate) mod time;
+pub(crate) mod utils;
 
 #[cfg(test)]
 mod test_commons;
 
-pub use codepage::*;
+pub use codepage::Codepage;
 pub use embedded_io as io;
 pub use error::*;
 pub use fat::*;
-pub(crate) use log::*;
-//pub use path::*;
+pub use path::*;
 pub use time::*;

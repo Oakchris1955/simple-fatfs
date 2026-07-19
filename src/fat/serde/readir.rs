@@ -3,16 +3,14 @@ use core::iter::FusedIterator;
 #[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
 
+use super::entry_composer::{LAST_AND_UNUSED_ENTRY, UNUSED_ENTRY, USED_KANJI};
+use super::lfn::{LFNEntry, CHARS_PER_LFN_ENTRY, LFN_MAX_ENTRIES};
+use super::location::{DirEntryChain, EntryLocation, EntryLocationUnit};
+use super::props::{FATDirEntry, MinProperties, RawAttributes, RawProperties};
 use crate::block_io::prelude::*;
 use crate::path::{path_consts, Path};
 use crate::utils;
-use crate::Clock;
-use crate::FileSystem;
-use crate::{
-    ClusterIndex, DirEntry, DirEntryChain, EntryLocation, EntryLocationUnit, FATDirEntry, LFNEntry,
-    RawAttributes, RawProperties, CHARS_PER_LFN_ENTRY, LAST_AND_UNUSED_ENTRY, LFN_MAX_ENTRIES,
-    UNUSED_ENTRY, USED_KANJI,
-};
+use crate::{Clock, ClusterIndex, DirEntry, FileSystem};
 
 #[derive(Debug)]
 pub(crate) struct ReadDirInt<'a, S, C>
@@ -151,17 +149,19 @@ where
                     self.entry_location = entry_location.next_entry(self.fs)?;
 
                     return Ok(Some(RawProperties {
-                        name: filename,
-                        sfn: entry.sfn,
+                        props: MinProperties {
+                            name: filename.map(|string| string.into_boxed_str()),
+                            sfn: entry.sfn,
+                            attributes: entry.attributes,
+                            created,
+                            modified,
+                            accessed,
+                            file_size: entry.file_size.into(),
+                            data_cluster: (ClusterIndex::from(entry.cluster_high)
+                                << (ClusterIndex::BITS / 2))
+                                + ClusterIndex::from(entry.cluster_low),
+                        },
                         is_dir: entry.attributes.contains(RawAttributes::DIRECTORY),
-                        attributes: entry.attributes,
-                        created,
-                        modified,
-                        accessed,
-                        file_size: entry.file_size.into(),
-                        data_cluster: (ClusterIndex::from(entry.cluster_high)
-                            << (ClusterIndex::BITS / 2))
-                            + ClusterIndex::from(entry.cluster_low),
                         chain: self
                             .current_chain
                             .take()
@@ -273,4 +273,11 @@ where
             }
         }
     }
+}
+
+impl<S, C> FusedIterator for ReadDir<'_, S, C>
+where
+    S: BlockRead,
+    C: Clock,
+{
 }

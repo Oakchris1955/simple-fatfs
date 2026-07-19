@@ -1,19 +1,17 @@
 pub mod block_io;
-mod block_translator;
-mod consts;
-mod file;
-mod fs;
-mod options;
+pub(crate) mod block_translator;
+pub(crate) mod consts;
+pub(crate) mod file;
+pub(crate) mod fs;
+pub(crate) mod options;
 pub(crate) mod serde;
-mod storage;
-mod types;
+pub(crate) mod storage;
+pub(crate) mod types;
 
-pub(crate) use block_io::*;
 pub use consts::*;
 pub use file::*;
 pub use fs::*;
 pub use options::*;
-pub(crate) use serde::boot_sector::*;
-pub use serde::*;
-pub(crate) use storage::*;
+pub use serde::props::public::*;
+pub use serde::readir::ReadDir;
 pub(crate) use types::*;

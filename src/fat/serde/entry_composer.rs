@@ -1,7 +1,8 @@
 use core::iter::FusedIterator;
 
-use crate::serde::LFNEntryGenerator;
-use crate::{FATDirEntry, MinProperties, DIRENTRY_SIZE};
+use super::lfn::LFNEntryGenerator;
+use super::props::{FATDirEntry, MinProperties};
+use crate::DIRENTRY_SIZE;
 
 /// A special case where due to 0xE5 being a valid
 /// byte sequence in the Japanese codepage, 0x05

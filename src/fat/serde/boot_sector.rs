@@ -1,10 +1,10 @@
-use crate::*;
-
 use bitfield_struct::bitfield;
 use zerocopy::{
     little_endian::{U16, U32},
     FromBytes, Immutable, IntoBytes, KnownLayout,
 };
+
+use crate::{ClusterCount, FATType, SectorCount, SectorIndex, DIRENTRY_SIZE};
 
 #[derive(Debug)]
 #[expect(clippy::large_enum_variant)]

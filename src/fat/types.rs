@@ -12,7 +12,7 @@
 #[cfg(not(feature = "lba64"))]
 /// The number/offset/position of a block.
 ///
-/// A block is defined by the [`BlockBase`](crate::fat::BlockBase) trait.
+/// A block is defined by the [`BlockBase`](crate::block_io::BlockBase) trait.
 ///
 /// Depending on the feature `lba64` it is either [`u32`] or [`u64`].
 pub type BlockIndex = u32;

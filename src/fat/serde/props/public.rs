@@ -1,12 +1,17 @@
 use core::{cmp, ops};
 
+use super::{RawAttributes, RawProperties};
+use crate::block_io::prelude::*;
 use crate::path::Path;
-use crate::*;
+use crate::serde::location::{DirEntryChain, EntryLocationUnit};
+use crate::serde::readir::ReadDir;
+use crate::{
+    Clock, ClusterIndex, Codepage, EntryCount, FileProps, FileSize, FileSystem, ROFile, RWFile,
+};
 
 #[cfg(not(feature = "std"))]
 use alloc::{borrow::ToOwned, boxed::Box, string::String};
 
-use ::time;
 use time::{Date, PrimitiveDateTime};
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
@@ -149,10 +154,9 @@ pub struct Properties {
     pub(crate) created: Option<PrimitiveDateTime>,
     pub(crate) modified: PrimitiveDateTime,
     pub(crate) accessed: Option<Date>,
-    pub(crate) file_size: u32,
-    pub(crate) data_cluster: u32,
+    pub(crate) file_size: FileSize,
+    pub(crate) data_cluster: ClusterIndex,
 
-    // internal fields
     pub(crate) chain: DirEntryChain,
 }
 
@@ -244,18 +248,18 @@ impl Properties {
 }
 
 impl Properties {
-    pub(crate) fn from_raw(raw_props: RawProperties, path: Box<Path>, codepage: Codepage) -> Self {
+    pub(crate) fn from_raw(raw: RawProperties, path: Box<Path>, codepage: Codepage) -> Self {
         Self {
             path,
-            sfn: (raw_props.sfn, codepage),
-            is_dir: raw_props.is_dir,
-            attributes: raw_props.attributes.into(),
-            created: raw_props.created,
-            modified: raw_props.modified,
-            accessed: raw_props.accessed,
-            file_size: raw_props.file_size,
-            data_cluster: raw_props.data_cluster,
-            chain: raw_props.chain,
+            sfn: (raw.sfn, codepage),
+            is_dir: raw.is_dir,
+            attributes: raw.attributes.into(),
+            created: raw.created,
+            modified: raw.modified,
+            accessed: raw.accessed,
+            file_size: raw.file_size,
+            data_cluster: raw.data_cluster,
+            chain: raw.chain,
         }
     }
 }
@@ -313,7 +317,7 @@ where
     /// Get the corresponding [`RWFile`] object of this [`DirEntry`]
     ///
     /// Will return `None` if the entry is a directory
-    pub fn to_rw_file(self) -> Option<RWFile<'a, S, C>> {
+    pub fn into_rw_file(self) -> Option<RWFile<'a, S, C>> {
         self.to_ro_file().map(|ro_file| ro_file.into())
     }
 }

@@ -75,9 +75,8 @@ pub mod prelude {
 
 #[cfg(feature = "std")]
 pub(crate) mod from_std {
-    use crate::{
-        BlockBase, BlockCount, BlockIndex, BlockRead, BlockSize, BlockWrite, MIN_SECTOR_SIZE,
-    };
+    use super::{BlockBase, BlockCount, BlockIndex, BlockRead, BlockSize, BlockWrite};
+    use crate::MIN_SECTOR_SIZE;
     use std::io::{Error, Read, Seek, SeekFrom, Write};
 
     /// Determine the block count of a storage medium

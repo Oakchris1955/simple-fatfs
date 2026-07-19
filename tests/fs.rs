@@ -582,7 +582,7 @@ mod timestamps {
     #[test_log]
     #[apply(device)]
     fn check_last_modified(#[case] mut storage: MemoryDevice) {
-        use ::time::Duration;
+        use time::Duration;
 
         let fs =
             FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
@@ -601,7 +601,7 @@ mod timestamps {
         assert!(DefaultClock.now() - *file.modification_time() < Duration::seconds(15));
     }
 
-    use time::macros::*;
+    use time::macros::{date, datetime};
 
     #[test_log]
     #[rstest]
@@ -624,7 +624,7 @@ mod timestamps {
     #[test_log]
     #[apply(fs)]
     fn modify_file_timestamps(fs: FileSystem<MemoryDevice, DefaultClock>) {
-        use ::time::macros::*;
+        use time::macros::date;
 
         let mut file = fs.get_rw_file("/I don't need a badge.txt").unwrap();
 

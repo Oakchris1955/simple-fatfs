@@ -1,5 +1,8 @@
 use core::ops::{Deref, DerefMut};
+
 use embedded_io::ErrorType;
+
+use crate::block_io::prelude::*;
 
 #[derive(Debug)]
 pub struct MemoryDevice(Box<[u8]>);

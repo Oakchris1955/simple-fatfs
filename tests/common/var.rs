@@ -1,5 +1,7 @@
 use embedded_io::Read;
 
+use crate::block_io::prelude::*;
+
 pub fn device(storage: &[u8]) -> MemoryDevice {
     MemoryDevice::from(storage)
 }

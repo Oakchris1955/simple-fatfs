@@ -1,13 +1,13 @@
-use crate::*;
-
 #[cfg(feature = "bloom")]
 use core::num;
+
+use crate::{Clock, Codepage, DefaultClock};
 
 #[derive(Debug)]
 /// FileSystem mount options
 pub struct FSOptions<C: Clock> {
     pub(crate) clock: C,
-    pub(crate) codepage: codepage::Codepage,
+    pub(crate) codepage: Codepage,
     pub(crate) update_file_fields: bool,
     pub(crate) check_boot_signature: bool,
     #[cfg(feature = "bloom")]
@@ -34,7 +34,7 @@ where
     pub fn new_with_clock(clock: C) -> Self {
         Self {
             clock,
-            codepage: codepage::Codepage::default(),
+            codepage: Codepage::default(),
             update_file_fields: false,
             check_boot_signature: true,
             #[cfg(feature = "bloom")]
@@ -125,6 +125,7 @@ pub mod bloom {
     /// and a fp_p rate of false positives.
     /// fp_p obviously has to be within the ]0.0, 1.0[ range
     /// or this will panic
+    #[expect(clippy::cast_precision_loss)]
     #[inline]
     pub fn compute_bitmap_size(
         items_count: num::NonZeroUsize,
@@ -142,11 +143,7 @@ pub mod bloom {
         #[cfg(not(feature = "std"))]
         const CEIL: FloatMethod = libm::Libm::<BloomFloat>::ceil;
 
-        #[expect(
-            clippy::cast_precision_loss,
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss
-        )]
+        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         num::NonZero::new(
             CEIL((items_count.get() as BloomFloat) * LN(fp_p) / (-8.0 * LN2_2)) as usize,
         )
@@ -208,6 +205,9 @@ mod bloom_compute_tests {
 
     #[cfg(not(feature = "std"))]
     use alloc::{boxed::Box, format, vec};
+
+    #[cfg(feature = "bloom")]
+    use crate::BloomFloat;
 
     struct Params {
         items_count: NonZeroUsize,

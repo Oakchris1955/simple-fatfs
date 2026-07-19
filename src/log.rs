@@ -41,6 +41,10 @@ mod macros {
 /// Logging macros for messages useful for local development and normally
 /// wouldn't be useful to downstream consumers
 pub(crate) mod local_log {
+    #[allow(
+        clippy::wildcard_imports,
+        reason = "features combinations may cause this lint to be unfulfilled"
+    )]
     use super::*;
 
     #[cfg(all(debug_assertions, feature = "log"))]
@@ -54,7 +58,7 @@ pub(crate) mod local_log {
 
 /// Logging macros for messages that normally would be useful to downstream consumers
 pub(crate) mod global_log {
-    use super::*;
+    use super::macros;
 
     #[allow(unused_imports)]
     pub(crate) use macros::{debug, error, info, trace, warn};

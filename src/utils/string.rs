@@ -3,9 +3,9 @@ use alloc::string::String;
 
 use alloc::string::FromUtf16Error;
 
-use crate::{path::Path, Clock, Codepage, FSResult, FileSystem, Sfn, SFN_EXT_LEN, SFN_NAME_LEN};
-
-use crate::fat::BlockWrite;
+use crate::block_io::prelude::*;
+use crate::path::Path;
+use crate::{Clock, Codepage, FSResult, FileSystem, Sfn, SFN_EXT_LEN, SFN_NAME_LEN};
 
 /// variation of <https://stackoverflow.com/a/42067321/19247098> for processing LFNs
 pub(crate) fn string_from_lfn(utf16_src: &[u16]) -> Result<String, FromUtf16Error> {

@@ -1,14 +1,22 @@
+use core::ops;
+
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::String};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+};
 use zerocopy::{
     little_endian::{U16, U32},
     FromBytes, Immutable, IntoBytes,
 };
 
-use crate::path::Path;
-use crate::*;
+use crate::block_io::prelude::*;
+use crate::Attributes;
 
-use ::time;
+use super::super::location::DirEntryChain;
+use super::super::time::{EntryCreationTime, EntryLastAccessedTime, EntryModificationTime};
+use crate::path::Path;
+use crate::{Clock, ClusterIndex, Codepage, DirEntry, FileSize, FileSystem, Properties, Sfn};
 
 use bitflags::bitflags;
 use time::{Date, PrimitiveDateTime};
@@ -48,15 +56,15 @@ bitflags! {
 
 impl RawAttributes {
     pub(crate) fn from_attributes(attributes: Attributes, is_dir: bool) -> Self {
-        let mut raw_attributes = RawAttributes::empty();
+        let mut raw = RawAttributes::empty();
 
-        raw_attributes.set(RawAttributes::READ_ONLY, attributes.read_only);
-        raw_attributes.set(RawAttributes::HIDDEN, attributes.hidden);
-        raw_attributes.set(RawAttributes::SYSTEM, attributes.system);
-        raw_attributes.set(RawAttributes::ARCHIVE, attributes.archive);
-        raw_attributes.set(RawAttributes::DIRECTORY, is_dir);
+        raw.set(RawAttributes::READ_ONLY, attributes.read_only);
+        raw.set(RawAttributes::HIDDEN, attributes.hidden);
+        raw.set(RawAttributes::SYSTEM, attributes.system);
+        raw.set(RawAttributes::ARCHIVE, attributes.archive);
+        raw.set(RawAttributes::DIRECTORY, is_dir);
 
-        raw_attributes
+        raw
     }
 }
 
@@ -64,14 +72,13 @@ impl RawAttributes {
 // at least the `.` and `..` entries
 // TODO: actually check this on runtime
 pub(crate) const NONROOT_MIN_DIRENTRIES: usize = 2;
-const FATDIRENTRY_RESERVED_BYTES: usize = 1;
 
 #[derive(Immutable, FromBytes, IntoBytes, Debug, Clone, Copy)]
 #[repr(C)]
 pub(crate) struct FATDirEntry {
     pub(crate) sfn: Sfn,
     pub(crate) attributes: RawAttributes,
-    _reserved1: [u8; FATDIRENTRY_RESERVED_BYTES],
+    reserved1: [u8; 1],
     pub(crate) created: EntryCreationTime,
     pub(crate) accessed: EntryLastAccessedTime,
     pub(crate) cluster_high: U16,
@@ -96,16 +103,7 @@ pub(crate) struct MinProperties {
 
 impl From<RawProperties> for MinProperties {
     fn from(value: RawProperties) -> Self {
-        Self {
-            name: value.name.map(|name| name.into_boxed_str()),
-            sfn: value.sfn,
-            attributes: value.attributes,
-            created: value.created,
-            modified: value.modified,
-            accessed: value.accessed,
-            file_size: value.file_size,
-            data_cluster: value.data_cluster,
-        }
+        value.props
     }
 }
 
@@ -128,17 +126,8 @@ where
 /// A resolved file/directory entry (for internal usage only)
 #[derive(Debug, Clone)]
 pub(crate) struct RawProperties {
-    /// Set to [`None`] to not generate a long filename when encoding
-    pub(crate) name: Option<String>,
-    pub(crate) sfn: Sfn,
+    pub(crate) props: MinProperties,
     pub(crate) is_dir: bool,
-    pub(crate) attributes: RawAttributes,
-    pub(crate) created: Option<PrimitiveDateTime>,
-    pub(crate) modified: PrimitiveDateTime,
-    pub(crate) accessed: Option<Date>,
-    pub(crate) file_size: FileSize,
-    pub(crate) data_cluster: ClusterIndex,
-
     pub(crate) chain: DirEntryChain,
 }
 
@@ -146,6 +135,7 @@ impl RawProperties {
     pub(crate) fn name(&self, codepage: Codepage) -> String {
         self.name
             .clone()
+            .map(|boxed_str| boxed_str.to_string())
             .unwrap_or_else(|| self.sfn.decode(codepage))
     }
 
@@ -169,34 +159,41 @@ impl RawProperties {
 
     pub(crate) fn from_chain(props: MinProperties, chain: DirEntryChain) -> Self {
         Self {
-            name: props.name.map(|s| s.into_string()),
-            sfn: props.sfn,
             is_dir: props.attributes.contains(RawAttributes::DIRECTORY),
-            attributes: props.attributes,
-            created: props.created,
-            modified: props.modified,
-            accessed: props.accessed,
-            file_size: props.file_size,
-            data_cluster: props.data_cluster,
+            props,
             chain,
         }
+    }
+}
+
+impl ops::Deref for RawProperties {
+    type Target = MinProperties;
+
+    fn deref(&self) -> &Self::Target {
+        &self.props
     }
 }
 
 impl From<Properties> for RawProperties {
     fn from(value: Properties) -> Self {
         Self {
-            name: Some(String::from(
-                value.path.file_name().expect("the path is normalized"),
-            )),
-            sfn: value.sfn.0,
+            props: MinProperties {
+                name: Some(
+                    value
+                        .path
+                        .file_name()
+                        .expect("the path is normalized")
+                        .into(),
+                ),
+                sfn: value.sfn.0,
+                attributes: RawAttributes::from_attributes(value.attributes, value.is_dir),
+                created: value.created,
+                modified: value.modified,
+                accessed: value.accessed,
+                file_size: value.file_size,
+                data_cluster: value.data_cluster,
+            },
             is_dir: value.is_dir,
-            attributes: RawAttributes::from_attributes(value.attributes, value.is_dir),
-            created: value.created,
-            modified: value.modified,
-            accessed: value.accessed,
-            file_size: value.file_size,
-            data_cluster: value.data_cluster,
             chain: value.chain,
         }
     }
@@ -211,7 +208,7 @@ impl From<MinProperties> for FATDirEntry {
         Self {
             sfn: value.sfn,
             attributes: value.attributes,
-            _reserved1: Default::default(),
+            reserved1: Default::default(),
             created: value.created.into(),
             accessed: value.accessed.into(),
             cluster_high: data_cluster_high.into(),

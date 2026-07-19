@@ -1,10 +1,31 @@
-use super::*;
-
-use crate::{error::*, global_log, local_log, path::*, utils, Clock};
+use crate::block_io::prelude::*;
+use crate::log::{global_log, local_log};
+use crate::path::{
+    find_common_path_prefix, keep_path_normals, path_consts, Path, PathBuf, WindowsComponent,
+};
+use crate::serde::boot_sector::{
+    BootRecord, BootRecordFAT, BpbFat, Ebr, FSInfoFAT32, BPBFAT_SIZE, EBRFAT32, VOLUME_LABEL_BYTES,
+};
+use crate::serde::entry_composer::EntryComposer;
+use crate::serde::lfn::calc_lfn_entries_needed;
+use crate::serde::location::{DirEntryChain, EntryLocation, EntryLocationUnit, EntryStatus};
+use crate::serde::props::{
+    FATDirEntry, MinProperties, RawAttributes, RawProperties, NONROOT_MIN_DIRENTRIES,
+};
+use crate::serde::readir::{ReadDir, ReadDirInt};
+use crate::storage::SectorBuffer;
+use crate::{
+    error::{FSError, FSResult, InternalFSError},
+    BlockSize, ClusterCount, ClusterIndex, EntryCount, FATEntryCount, FATEntryIndex, FATEntryValue,
+    FSOptions, FileProps, Properties, ROFile, RWFile, SectorCount, SectorIndex, Sfn,
+    CURRENT_DIR_SFN, DIRENTRY_LIMIT, DIRENTRY_SIZE, EMPTY_VOLUME_LABEL, MAX_SECTOR_SIZE,
+    PARENT_DIR_SFN,
+};
+use crate::{utils, Clock};
 
 use core::{
     cell::{Ref, RefCell, RefMut},
-    cmp, iter, num, ops,
+    cmp, num, ops,
 };
 
 #[cfg(not(feature = "std"))]
@@ -15,9 +36,9 @@ use alloc::{
     vec::Vec,
 };
 
-use ::time;
-use embedded_io::*;
+use embedded_io::ErrorType;
 use time::PrimitiveDateTime;
+use typed_path::Utf8Component;
 use zerocopy::{FromBytes, IntoBytes};
 
 /// An enum representing different variants of the FAT filesystem
@@ -243,15 +264,10 @@ impl DirInfo {
     }
 }
 
-impl<S, C> iter::FusedIterator for ReadDir<'_, S, C>
-where
-    S: BlockRead,
-    C: Clock,
-{
-}
-
 mod fsprops {
-    use super::*;
+    use super::{
+        BootRecord, ClusterCount, ClusterIndex, SectorCount, SectorIndex, RESERVED_FAT_ENTRIES,
+    };
 
     /// Some generic properties common across all FAT versions, like a sector's size, are cached here
     #[derive(Debug)]
@@ -2000,12 +2016,12 @@ where
         for entry in self.process_current_dir() {
             let entry = entry?;
 
-            let long_name = entry.name;
+            let long_name = &entry.name;
             let short_name = entry.sfn.decode(codepage);
 
             filter.set(short_name.as_str());
             if let Some(long_filename) = long_name {
-                filter.set(long_filename.as_str());
+                filter.set(long_filename);
             }
         }
 
@@ -2591,10 +2607,11 @@ mod tests {
     use crate::test_commons::*;
     use crate::DefaultClock;
 
-    use test_log::test;
+    use embedded_io::*;
 
     use rstest::*;
     use rstest_reuse::*;
+    use test_log::test;
 
     #[cfg(not(feature = "std"))]
     use alloc::borrow::ToOwned;
@@ -2603,7 +2620,7 @@ mod tests {
     #[test]
     #[apply(fs)]
     fn check_file_allocation_table_offset(fs: FileSystem<MemoryDevice, DefaultClock>) {
-        use crate::fat::BootRecord;
+        use crate::serde::boot_sector::BootRecord;
 
         let fat_offset = match &*fs.boot_record.borrow() {
             BootRecord::Fat(boot_record_fat) => boot_record_fat.first_fat_sector(),
@@ -2665,7 +2682,7 @@ mod tests {
     fn file_allocation_tables_after_fat32_write_are_identical(
         #[case] fs: FileSystem<MemoryDevice, DefaultClock>,
     ) {
-        use crate::fat::{BootRecord, Ebr};
+        use crate::serde::boot_sector::{BootRecord, Ebr};
 
         match &*fs.boot_record.borrow() {
             BootRecord::Fat(boot_record_fat) => match &boot_record_fat.ebr {

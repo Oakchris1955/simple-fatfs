@@ -4,7 +4,7 @@
 // Licensed under the ICS license (https://opensource.org/licenses/ISC)
 
 mod bitmap;
-use bitmap::*;
+use bitmap::BitMap;
 
 use core::fmt::{self, Debug};
 use core::hash::{Hash, Hasher};

@@ -1,4 +1,4 @@
-use embedded_io::*;
+use embedded_io::{Error, ErrorKind, ReadExactError};
 
 /// An error type that denotes that there is something wrong
 /// with the filesystem's structure itself (perhaps the FS itself is malformed/corrupted)
@@ -122,7 +122,7 @@ where
 
 #[derive(Debug)]
 #[non_exhaustive] // TODO: see whether or not to keep this marked as non-exhaustive
-/// A [`RWFile`]-exclusive IO error struct
+/// A [`RWFile`](crate::RWFile)-exclusive IO error struct
 pub enum RWFileError<I>
 where
     I: Error,

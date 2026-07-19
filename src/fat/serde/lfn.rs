@@ -5,7 +5,8 @@ use core::num;
 use alloc::boxed::Box;
 use zerocopy::{little_endian::U16, FromBytes, FromZeros, Immutable, IntoBytes};
 
-use crate::{EntryCount, RawAttributes};
+use super::props::RawAttributes;
+use crate::EntryCount;
 
 const LAST_LFN_ENTRY_MASK: u8 = 0x40;
 const LFN_FIRST_CHARS: usize = 5;
