@@ -28,9 +28,7 @@ mod create_dir {
     #[apply(fs)]
     fn create_directory_in_subdir_and_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
         fs.create_dir("/subdir/another dir ig").unwrap();
-        let mut file = fs
-            .create_file(PathBuf::from("/subdir/i don't need a badge.txt"))
-            .unwrap();
+        let mut file = fs.create_file("/subdir/i don't need a badge.txt").unwrap();
 
         file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
         file.rewind().unwrap();
@@ -95,8 +93,8 @@ mod create_file {
         fs.cache_dir("/subdir").unwrap();
 
         for i in 1..=FILE_COUNT {
-            let name = PathBuf::from(&format!("/subdir/{i}.txt"));
-            let mut file = fs.create_file(&name).unwrap();
+            let name = format!("/subdir/{i}.txt");
+            let mut file = fs.create_file(name).unwrap();
 
             file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
             file.rewind().unwrap();
