@@ -4,6 +4,7 @@ use core::{cmp, num, ops};
 
 use time::{Date, PrimitiveDateTime};
 
+use crate::error::RWFileError;
 use crate::{global_log, local_log};
 use crate::{Clock, FSError, FSResult, InternalFSError};
 
@@ -515,43 +516,6 @@ where
 
             self.entry_modified = true;
         }
-    }
-}
-
-#[derive(Debug)]
-#[non_exhaustive] // TODO: see whether or not to keep this marked as non-exhaustive
-/// A [`RWFile`]-exclusive IO error struct
-pub enum RWFileError<I>
-where
-    I: Error,
-{
-    /// The underlying storage is full.
-    StorageFull,
-    /// An IO error occured
-    IOError(I),
-}
-
-impl<I> Error for RWFileError<I>
-where
-    I: Error,
-{
-    #[inline]
-    fn kind(&self) -> ErrorKind {
-        match self {
-            // TODO: when embedded-io adds a StorageFull variant, use that instead
-            Self::StorageFull => ErrorKind::OutOfMemory,
-            Self::IOError(err) => err.kind(),
-        }
-    }
-}
-
-impl<I> From<I> for RWFileError<I>
-where
-    I: Error,
-{
-    #[inline]
-    fn from(value: I) -> Self {
-        Self::IOError(value)
     }
 }
 

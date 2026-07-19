@@ -1,5 +1,3 @@
-use super::*;
-
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::String};
 use zerocopy::{
@@ -7,6 +5,7 @@ use zerocopy::{
     FromBytes, Immutable, IntoBytes,
 };
 
+use crate::path::Path;
 use crate::*;
 
 use ::time;

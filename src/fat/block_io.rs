@@ -69,6 +69,10 @@ impl<T: BlockWrite> BlockWrite for &mut T {
     }
 }
 
+pub mod prelude {
+    pub use super::{BlockBase, BlockRead, BlockWrite};
+}
+
 #[cfg(feature = "std")]
 pub(crate) mod from_std {
     use crate::{

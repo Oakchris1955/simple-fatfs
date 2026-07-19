@@ -221,7 +221,7 @@ mod codepage;
 mod error;
 mod fat;
 mod log;
-mod path;
+pub mod path;
 mod time;
 mod utils;
 
@@ -233,5 +233,5 @@ pub use embedded_io as io;
 pub use error::*;
 pub use fat::*;
 pub(crate) use log::*;
-pub use path::*;
+//pub use path::*;
 pub use time::*;

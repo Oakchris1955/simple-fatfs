@@ -1,8 +1,10 @@
-use super::*;
-
 use core::num;
 
-use crate::*;
+use crate::block_io::prelude::*;
+use crate::{
+    BootRecord, Clock, ClusterIndex, EntryIndex, FileSystem, SectorCount, SectorIndex,
+    DIRENTRY_SIZE, LAST_AND_UNUSED_ENTRY, UNUSED_ENTRY,
+};
 
 /// The root directory sector or data cluster a [`FATDirEntry`] belongs too
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

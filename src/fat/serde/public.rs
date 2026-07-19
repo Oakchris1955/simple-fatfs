@@ -1,7 +1,6 @@
-use super::*;
-
 use core::{cmp, ops};
 
+use crate::path::Path;
 use crate::*;
 
 #[cfg(not(feature = "std"))]
@@ -42,6 +41,8 @@ impl From<RawAttributes> for Attributes {
 
 // a directory entry occupies 32 bytes
 pub(crate) const DIRENTRY_SIZE: usize = 32;
+/// The maximum number of directory entries in a directory entry chain
+pub(crate) const DIRENTRY_LIMIT: EntryCount = EntryCount::MAX;
 
 pub(crate) const SFN_NAME_LEN: usize = 8;
 pub(crate) const SFN_EXT_LEN: usize = 3;
@@ -327,72 +328,5 @@ where
     #[inline]
     fn deref(&self) -> &Self::Target {
         &self.entry
-    }
-}
-
-/// Iterator over the entries in a directory.
-///
-/// The order in which this iterator returns entries can vary
-/// and shouldn't be relied upon
-#[derive(Debug)]
-pub struct ReadDir<'a, S, C>
-where
-    S: BlockRead,
-    C: Clock,
-{
-    inner: ReadDirInt<'a, S, C>,
-    parent: Box<Path>,
-    /// Whether this iterator is intended for internal or public use
-    internal: bool,
-}
-
-impl<'a, S, C> ReadDir<'a, S, C>
-where
-    S: BlockRead,
-    C: Clock,
-{
-    pub(crate) fn new<P>(
-        fs: &'a FileSystem<S, C>,
-        chain_start: &EntryLocationUnit,
-        parent: P,
-        internal: bool,
-    ) -> Self
-    where
-        P: AsRef<Path>,
-    {
-        Self {
-            inner: ReadDirInt::new(fs, chain_start),
-            parent: parent.as_ref().into(),
-            internal,
-        }
-    }
-}
-
-impl<'a, S, C> Iterator for ReadDir<'a, S, C>
-where
-    S: BlockRead,
-    C: Clock,
-{
-    type Item = Result<DirEntry<'a, S, C>, S::Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let res = self.inner.next()?;
-            match res {
-                Ok(value) => {
-                    if (self.internal
-                        || self.inner.fs.filter.borrow().filter(&value))
-                        // we shouldn't expose the special entries to the user
-                        && ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
-                            .contains(&value.name(self.inner.fs.options.codepage).as_str())
-                    {
-                        return Some(Ok(value.into_dir_entry(&self.parent, self.inner.fs)));
-                    } else {
-                        continue;
-                    }
-                }
-                Err(err) => return Some(Err(err)),
-            }
-        }
     }
 }

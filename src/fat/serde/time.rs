@@ -2,7 +2,6 @@ use core::num;
 
 use crate::time::EPOCH;
 
-use ::time;
 use bitfield_struct::bitfield;
 use time::{Date, PrimitiveDateTime, Time};
 use zerocopy::{byteorder::little_endian::U16, FromBytes, Immutable, IntoBytes};
@@ -10,9 +9,8 @@ use zerocopy::{byteorder::little_endian::U16, FromBytes, Immutable, IntoBytes};
 #[bitfield(u16, repr = U16, from = U16::new, into = U16::get)]
 #[derive(Immutable, FromBytes, IntoBytes)]
 pub(crate) struct TimeAttribute {
-    /// Multiply by 2
     #[bits(5)]
-    seconds: u8,
+    half_seconds: u8,
     #[bits(6)]
     minutes: u8,
     #[bits(5)]
@@ -22,7 +20,7 @@ pub(crate) struct TimeAttribute {
 impl From<Time> for TimeAttribute {
     fn from(value: Time) -> Self {
         Self::new()
-            .with_seconds(value.second() / 2)
+            .with_half_seconds(value.second() / 2)
             .with_minutes(value.minute())
             .with_hour(value.hour())
     }
@@ -58,7 +56,7 @@ impl TryFrom<TimeAttribute> for Time {
         time::parsing::Parsed::new()
             .with_hour_24(value.hour())
             .and_then(|parsed| parsed.with_minute(value.minutes()))
-            .and_then(|parsed| parsed.with_second(value.seconds() * 2))
+            .and_then(|parsed| parsed.with_second(value.half_seconds() * 2))
             .and_then(|parsed| parsed.try_into().ok())
             .ok_or(())
     }

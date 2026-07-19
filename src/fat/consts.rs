@@ -1,4 +1,4 @@
-use super::*;
+use crate::VOLUME_LABEL_BYTES;
 
 /// The minimum size (in bytes) a sector is allowed to have
 pub const MIN_SECTOR_SIZE: usize = 512;

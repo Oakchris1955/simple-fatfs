@@ -1,4 +1,4 @@
-use super::*;
+use crate::*;
 
 use bitfield_struct::bitfield;
 use zerocopy::{
@@ -245,7 +245,6 @@ pub(crate) struct FATVersion {
     major: u8,
 }
 
-const EBRFAT32_RESERVED_BYTES: usize = 12;
 #[derive(Immutable, FromBytes, IntoBytes, Debug, Clone)]
 #[repr(C)]
 pub(crate) struct EBRFAT32 {
@@ -255,7 +254,7 @@ pub(crate) struct EBRFAT32 {
     pub root_cluster: U32,
     pub fat_info: U16,
     pub backup_boot_sector: U16,
-    pub _reserved_bytes: [u8; EBRFAT32_RESERVED_BYTES],
+    pub _reserved_bytes: [u8; 12],
     pub _drive_num: u8,
     pub _windows_nt_flags: u8,
     pub boot_signature: u8,
@@ -269,17 +268,15 @@ pub(crate) struct EBRFAT32 {
 const FSINFO_LEAD_SIGNATURE: u32 = 0x41615252;
 const FSINFO_MID_SIGNATURE: u32 = 0x61417272;
 const FSINFO_TRAIL_SIGNATURE: u32 = 0xAA550000;
-const FSINFO_RESERVED1_BYTES: usize = 480;
-const FSINFO_RESERVED2_BYTES: usize = 12;
 #[derive(Immutable, FromBytes, IntoBytes, Debug, Clone)]
 #[repr(C)]
 pub(crate) struct FSInfoFAT32 {
     pub lead_signature: U32,
-    _reserved1: [u8; FSINFO_RESERVED1_BYTES],
+    _reserved1: [u8; 480],
     pub mid_signature: U32,
     pub free_cluster_count: U32,
     pub first_free_cluster: U32,
-    _reserved2: [u8; FSINFO_RESERVED2_BYTES],
+    _reserved2: [u8; 12],
     pub trail_signature: U32,
 }
 

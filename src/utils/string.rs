@@ -3,7 +3,7 @@ use alloc::string::String;
 
 use alloc::string::FromUtf16Error;
 
-use crate::{path::*, Clock, Codepage, FSResult, FileSystem, Sfn, SFN_EXT_LEN, SFN_NAME_LEN};
+use crate::{path::Path, Clock, Codepage, FSResult, FileSystem, Sfn, SFN_EXT_LEN, SFN_NAME_LEN};
 
 use crate::fat::BlockWrite;
 
