@@ -28,6 +28,10 @@ mod noop_macros {
 }
 
 mod macros {
+    #[allow(
+        clippy::wildcard_imports,
+        reason = "features combinations may cause this lint to be unfulfilled"
+    )]
     use super::*;
 
     #[cfg(feature = "defmt")]

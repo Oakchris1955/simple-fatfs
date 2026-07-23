@@ -11,11 +11,11 @@ use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::num;
 
-use crate::BloomFloat;
-
 use siphasher::sip::SipHasher13;
 
 const LARGEST_U64_PRIME: u64 = 0xFFFF_FFFF_FFFF_FFC5u64;
+
+pub(crate) type BloomFloat = f64;
 
 /// Bloom filter structure
 #[derive(Clone)]
@@ -80,7 +80,7 @@ impl<T: ?Sized> Bloom<T> {
         items_count: num::NonZeroUsize,
         fp_p: BloomFloat,
     ) -> num::NonZeroUsize {
-        crate::bloom::compute_bitmap_size(items_count, fp_p)
+        crate::options::bloom::compute_bitmap_size(items_count, fp_p)
     }
 
     #[expect(unused)]
@@ -174,7 +174,7 @@ impl<T: ?Sized> Bloom<T> {
         bitmap_size: num::NonZeroU64,
         items_count: num::NonZeroUsize,
     ) -> num::NonZeroU32 {
-        crate::bloom::compute_hash_count(bitmap_size, items_count)
+        crate::options::bloom::compute_hash_count(bitmap_size, items_count)
     }
 
     fn bloom_hash(&self, hashes: &mut [u64; 2], item: &T, k_i: u32) -> u64

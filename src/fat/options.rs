@@ -1,7 +1,8 @@
 #[cfg(feature = "bloom")]
 use core::num;
 
-use crate::{Clock, Codepage, DefaultClock};
+use crate::time::{Clock, DefaultClock};
+use crate::Codepage;
 
 #[derive(Debug)]
 /// FileSystem mount options
@@ -11,7 +12,7 @@ pub struct FSOptions<C: Clock> {
     pub(crate) update_file_fields: bool,
     pub(crate) check_boot_signature: bool,
     #[cfg(feature = "bloom")]
-    pub(crate) filter_size: core::num::NonZeroUsize,
+    pub(crate) filter_size: num::NonZeroUsize,
 }
 
 impl FSOptions<DefaultClock> {
@@ -115,7 +116,7 @@ pub mod bloom {
     use core::f64::consts::LN_2;
     use core::{cmp, num};
 
-    use crate::BloomFloat;
+    use crate::utils::bloom::BloomFloat;
 
     type FloatMethod = fn(BloomFloat) -> BloomFloat;
 
@@ -207,7 +208,7 @@ mod bloom_compute_tests {
     use alloc::{boxed::Box, format, vec};
 
     #[cfg(feature = "bloom")]
-    use crate::BloomFloat;
+    use crate::utils::bloom::BloomFloat;
 
     struct Params {
         items_count: NonZeroUsize,

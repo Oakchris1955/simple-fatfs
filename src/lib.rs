@@ -218,12 +218,15 @@ compile_error!("The log and defmt logging frameworks can't both be used at the s
 
 extern crate alloc;
 
+pub mod block_io;
+pub(crate) mod block_translator;
 pub(crate) mod codepage;
 pub(crate) mod error;
 pub(crate) mod fat;
 pub(crate) mod log;
 mod path;
-pub(crate) mod time;
+pub(crate) mod storage;
+pub mod time;
 pub(crate) mod utils;
 
 #[cfg(test)]
@@ -231,7 +234,8 @@ mod test_commons;
 
 pub use codepage::Codepage;
 pub use embedded_io as io;
-pub use error::*;
+pub use error::{FSError, FSResult, InternalFSError, RWFileError};
+pub use fat::options;
+pub use fat::FileSystem;
 pub use fat::*;
-pub use path::*;
-pub use time::*;
+pub use path::{Path, PathBuf};

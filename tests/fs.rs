@@ -1,6 +1,12 @@
 mod common;
 use common::*;
 
+#[cfg(feature = "bloom")]
+use simple_fatfs::options::bloom;
+use simple_fatfs::options::FSOptions;
+use simple_fatfs::time::{Clock, DefaultClock};
+
+use ::time;
 use embedded_io::*;
 
 use test_log::test as test_log;

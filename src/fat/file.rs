@@ -1,18 +1,18 @@
 use core::{cmp, num, ops};
 
+use embedded_io::{ErrorType, Read, ReadExactError, Seek, SeekFrom, Write};
 use time::{Date, PrimitiveDateTime};
 
+use super::serde::lfn::calc_lfn_entries_needed;
+use super::serde::{FATDirEntry, MinProperties};
 use crate::block_io::prelude::*;
 use crate::error::RWFileError;
 use crate::log::{global_log, local_log};
-use crate::serde::lfn::calc_lfn_entries_needed;
-use crate::serde::props::{FATDirEntry, MinProperties};
+use crate::time::Clock;
 use crate::{
-    Clock, ClusterIndex, EntryCount, FATEntry, FSError, FSResult, FileSize, FileSystem,
-    InternalFSError, Properties, SectorCount,
+    ClusterIndex, EntryCount, FATEntry, FSError, FSResult, FileSize, FileSystem, InternalFSError,
+    Properties, SectorCount,
 };
-
-use embedded_io::{ErrorType, Read, ReadExactError, Seek, SeekFrom, Write};
 
 #[derive(Debug)]
 pub(crate) struct FileProps {

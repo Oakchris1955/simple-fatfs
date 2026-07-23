@@ -1,12 +1,15 @@
-use crate::block_io::{BlockBase, BlockRead, BlockWrite};
-pub use crate::fat::types::BlockIndex;
-use crate::{BlockCount, BlockSize};
-use alloc::boxed::Box;
 use core::array;
 use core::fmt::{Debug, Display, Formatter};
 use core::iter;
 use core::ops::{Deref, DerefMut};
+
+use alloc::boxed::Box;
+
 use embedded_io::{ErrorKind, ErrorType};
+
+use crate::block_io::{BlockBase, BlockRead, BlockWrite};
+pub use crate::fat::types::BlockIndex;
+use crate::{BlockCount, BlockSize};
 
 /// Translate between different hardware and software "virtual" block sizes.
 ///

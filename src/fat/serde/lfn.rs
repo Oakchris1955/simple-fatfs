@@ -3,9 +3,10 @@ use core::num;
 
 #[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
+
 use zerocopy::{little_endian::U16, FromBytes, FromZeros, Immutable, IntoBytes};
 
-use super::props::RawAttributes;
+use super::attributes::RawAttributes;
 use crate::EntryCount;
 
 const LAST_LFN_ENTRY_MASK: u8 = 0x40;

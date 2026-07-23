@@ -4,7 +4,8 @@ use zerocopy::{
     FromBytes, Immutable, IntoBytes, KnownLayout,
 };
 
-use crate::{ClusterCount, FATType, SectorCount, SectorIndex, DIRENTRY_SIZE};
+use super::direntry::DIRENTRY_SIZE;
+use crate::{ClusterCount, FATType, SectorCount, SectorIndex};
 
 #[derive(Debug)]
 #[expect(clippy::large_enum_variant)]
@@ -42,8 +43,8 @@ impl BootRecord {
     }
 }
 
-pub(crate) const BOOT_SIGNATURE: u8 = 0x29;
-pub(crate) const FAT_SIGNATURE: u16 = 0x55AA;
+const BOOT_SIGNATURE: u8 = 0x29;
+const FAT_SIGNATURE: u16 = 0x55AA;
 
 #[derive(Debug, Clone)]
 pub(crate) struct BootRecordFAT {

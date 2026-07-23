@@ -2,8 +2,10 @@ use core::num;
 
 use super::boot_sector::BootRecord;
 use super::entry_composer::{LAST_AND_UNUSED_ENTRY, UNUSED_ENTRY};
+use super::DIRENTRY_SIZE;
 use crate::block_io::prelude::*;
-use crate::{Clock, ClusterIndex, EntryIndex, FileSystem, SectorCount, SectorIndex, DIRENTRY_SIZE};
+use crate::time::Clock;
+use crate::{ClusterIndex, EntryIndex, FileSystem, SectorCount, SectorIndex};
 
 /// The root directory sector or data cluster a [`FATDirEntry`] belongs too
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

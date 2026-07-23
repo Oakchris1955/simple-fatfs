@@ -1,10 +1,10 @@
 use core::num;
 
-use crate::time::EPOCH;
-
 use bitfield_struct::bitfield;
 use time::{Date, PrimitiveDateTime, Time};
 use zerocopy::{byteorder::little_endian::U16, FromBytes, Immutable, IntoBytes};
+
+use crate::time::EPOCH;
 
 #[bitfield(u16, repr = U16, from = U16::new, into = U16::get)]
 #[derive(Immutable, FromBytes, IntoBytes)]

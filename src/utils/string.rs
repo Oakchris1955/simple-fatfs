@@ -5,7 +5,9 @@ use alloc::string::FromUtf16Error;
 
 use crate::block_io::prelude::*;
 use crate::path::Path;
-use crate::{Clock, Codepage, FSResult, FileSystem, Sfn, SFN_EXT_LEN, SFN_NAME_LEN};
+use crate::serde::sfn::{Sfn, SFN_EXT_LEN, SFN_NAME_LEN};
+use crate::time::Clock;
+use crate::{Codepage, FSResult, FileSystem};
 
 /// variation of <https://stackoverflow.com/a/42067321/19247098> for processing LFNs
 pub(crate) fn string_from_lfn(utf16_src: &[u16]) -> Result<String, FromUtf16Error> {
@@ -232,6 +234,7 @@ mod tests {
     use test_log::test;
 
     use crate::test_commons::*;
+    use crate::time::DefaultClock;
 
     #[test]
     fn test_sfn_generator_long() {
@@ -277,7 +280,7 @@ mod tests {
 
     #[test]
     #[apply(fs)]
-    fn test_gen_sfn_match(fs: FileSystem<MemoryDevice, crate::DefaultClock>) {
+    fn test_gen_sfn_match(fs: FileSystem<MemoryDevice, DefaultClock>) {
         assert_eq!(
             run_gen_sfn_root("TEST.TXT", &fs),
             Some(Sfn::new(*b"TEST    ", *b"TXT"))
@@ -286,7 +289,7 @@ mod tests {
 
     #[test]
     #[apply(fs)]
-    fn test_gen_sfn_mismatch(fs: FileSystem<MemoryDevice, crate::DefaultClock>) {
+    fn test_gen_sfn_mismatch(fs: FileSystem<MemoryDevice, DefaultClock>) {
         assert_eq!(
             run_gen_sfn_root("test.txt", &fs),
             Some(Sfn::new(*b"TEST~1  ", *b"TXT"))

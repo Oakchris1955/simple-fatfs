@@ -1,6 +1,8 @@
 use embedded_io::Read;
 
+use self::time::{Clock, DefaultClock};
 use crate::block_io::prelude::*;
+use crate::options::FSOptions;
 
 pub fn device(storage: &[u8]) -> MemoryDevice {
     MemoryDevice::from(storage)

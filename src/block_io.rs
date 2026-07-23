@@ -4,10 +4,10 @@
 //! which will hereby after be referred as blocks. This library assumes that
 //! both for read and write operations the block size will be the same.
 
-pub use crate::fat::block_translator::{BlockTranslator, BlockTranslatorError};
-pub use crate::fat::types::{BlockCount, BlockIndex, BlockSize};
-
 use embedded_io::ErrorType;
+
+pub use crate::block_translator::{BlockTranslator, BlockTranslatorError};
+pub use crate::fat::types::{BlockCount, BlockIndex, BlockSize};
 
 /// The base trait for all block devices. Used to query information like
 /// block size and block count
@@ -75,8 +75,8 @@ pub mod prelude {
 
 #[cfg(feature = "std")]
 pub(crate) mod from_std {
+    use super::super::consts::MIN_SECTOR_SIZE;
     use super::{BlockBase, BlockCount, BlockIndex, BlockRead, BlockSize, BlockWrite};
-    use crate::MIN_SECTOR_SIZE;
     use std::io::{Error, Read, Seek, SeekFrom, Write};
 
     /// Determine the block count of a storage medium

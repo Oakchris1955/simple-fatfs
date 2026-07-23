@@ -3,14 +3,16 @@ use core::iter::FusedIterator;
 #[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
 
+use super::attributes::RawAttributes;
 use super::entry_composer::{LAST_AND_UNUSED_ENTRY, UNUSED_ENTRY, USED_KANJI};
 use super::lfn::{LFNEntry, CHARS_PER_LFN_ENTRY, LFN_MAX_ENTRIES};
 use super::location::{DirEntryChain, EntryLocation, EntryLocationUnit};
-use super::props::{FATDirEntry, MinProperties, RawAttributes, RawProperties};
+use super::{DirEntry, FATDirEntry, MinProperties, RawProperties};
 use crate::block_io::prelude::*;
 use crate::path::{path_consts, Path};
+use crate::time::Clock;
 use crate::utils;
-use crate::{Clock, ClusterIndex, DirEntry, FileSystem};
+use crate::{ClusterIndex, FileSystem};
 
 #[derive(Debug)]
 pub(crate) struct ReadDirInt<'a, S, C>

@@ -1,28 +1,3 @@
-use crate::block_io::prelude::*;
-use crate::log::{global_log, local_log};
-use crate::path::{
-    find_common_path_prefix, keep_path_normals, path_consts, Path, PathBuf, WindowsComponent,
-};
-use crate::serde::boot_sector::{
-    BootRecord, BootRecordFAT, BpbFat, Ebr, FSInfoFAT32, BPBFAT_SIZE, EBRFAT32, VOLUME_LABEL_BYTES,
-};
-use crate::serde::entry_composer::EntryComposer;
-use crate::serde::lfn::calc_lfn_entries_needed;
-use crate::serde::location::{DirEntryChain, EntryLocation, EntryLocationUnit, EntryStatus};
-use crate::serde::props::{
-    FATDirEntry, MinProperties, RawAttributes, RawProperties, NONROOT_MIN_DIRENTRIES,
-};
-use crate::serde::readir::{ReadDir, ReadDirInt};
-use crate::storage::SectorBuffer;
-use crate::{
-    error::{FSError, FSResult, InternalFSError},
-    BlockSize, ClusterCount, ClusterIndex, EntryCount, FATEntryCount, FATEntryIndex, FATEntryValue,
-    FSOptions, FileProps, Properties, ROFile, RWFile, SectorCount, SectorIndex, Sfn,
-    CURRENT_DIR_SFN, DIRENTRY_LIMIT, DIRENTRY_SIZE, EMPTY_VOLUME_LABEL, MAX_SECTOR_SIZE,
-    PARENT_DIR_SFN,
-};
-use crate::{utils, Clock};
-
 use core::{
     cell::{Ref, RefCell, RefMut},
     cmp, num, ops,
@@ -40,6 +15,35 @@ use embedded_io::ErrorType;
 use time::PrimitiveDateTime;
 use typed_path::Utf8Component;
 use zerocopy::{FromBytes, IntoBytes};
+
+use super::consts::{EMPTY_VOLUME_LABEL, MAX_SECTOR_SIZE};
+use super::file::FileProps;
+use super::serde::attributes::RawAttributes;
+use super::serde::boot_sector::{
+    BootRecord, BootRecordFAT, BpbFat, Ebr, FSInfoFAT32, BPBFAT_SIZE, EBRFAT32, VOLUME_LABEL_BYTES,
+};
+use super::serde::entry_composer::EntryComposer;
+use super::serde::lfn::calc_lfn_entries_needed;
+use super::serde::location::{DirEntryChain, EntryLocation, EntryLocationUnit, EntryStatus};
+use super::serde::readir::{ReadDir, ReadDirInt};
+use super::serde::{
+    FATDirEntry, MinProperties, RawProperties, Sfn, CURRENT_DIR_SFN, DIRENTRY_LIMIT, DIRENTRY_SIZE,
+    NONROOT_MIN_DIRENTRIES, PARENT_DIR_SFN,
+};
+use crate::block_io::prelude::*;
+use crate::log::{global_log, local_log};
+use crate::options::FSOptions;
+use crate::path::{
+    find_common_path_prefix, keep_path_normals, path_consts, Path, PathBuf, WindowsComponent,
+};
+use crate::storage::SectorBuffer;
+use crate::time::Clock;
+use crate::utils;
+use crate::{
+    error::{FSError, FSResult, InternalFSError},
+    BlockSize, ClusterCount, ClusterIndex, EntryCount, FATEntryCount, FATEntryIndex, FATEntryValue,
+    Properties, ROFile, RWFile, SectorCount, SectorIndex,
+};
 
 /// An enum representing different variants of the FAT filesystem
 ///
@@ -1850,7 +1854,7 @@ where
     }
 }
 
-/// Public [`Read`]-related functions
+/// Public [`Read`](crate::io::Read)-related functions
 impl<S, C> FileSystem<S, C>
 where
     S: BlockRead,
@@ -2033,7 +2037,7 @@ where
     }
 }
 
-/// [`Write`]-related functions
+/// [`Write`](crate::io::Write)-related functions
 impl<S, C> FileSystem<S, C>
 where
     S: BlockWrite,
@@ -2605,7 +2609,7 @@ mod tests {
     use super::*;
 
     use crate::test_commons::*;
-    use crate::DefaultClock;
+    use crate::time::DefaultClock;
 
     use embedded_io::*;
 
