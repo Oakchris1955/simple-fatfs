@@ -61,7 +61,7 @@ impl LFNEntry {
 
 /// Estimate how many entries a file with the provided file name would take
 ///
-/// This only takes into account the [`DirEntries`](DirEntry) needed,
+/// This only takes into account the [`DirEntries`](crate::DirEntry) needed,
 /// not the contents of the file
 pub(crate) fn calc_lfn_entries_needed<S>(file_name: S) -> num::NonZero<EntryCount>
 where

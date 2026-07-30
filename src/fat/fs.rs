@@ -17,6 +17,7 @@ use typed_path::Utf8Component;
 use zerocopy::{FromBytes, IntoBytes};
 
 use super::consts::{EMPTY_VOLUME_LABEL, MAX_SECTOR_SIZE};
+use super::fatentry::{FATEntry, FATEntryProps, FATType, RESERVED_FAT_ENTRIES};
 use super::file::FileProps;
 use super::serde::attributes::RawAttributes;
 use super::serde::boot_sector::{
@@ -25,157 +26,23 @@ use super::serde::boot_sector::{
 use super::serde::entry_composer::EntryComposer;
 use super::serde::lfn::calc_lfn_entries_needed;
 use super::serde::location::{DirEntryChain, EntryLocation, EntryLocationUnit, EntryStatus};
-use super::serde::readir::{ReadDir, ReadDirInt};
+use super::serde::readir::{ReadDir, ReadDirRaw};
 use super::serde::{
     FATDirEntry, MinProperties, RawProperties, Sfn, CURRENT_DIR_SFN, DIRENTRY_LIMIT, DIRENTRY_SIZE,
     NONROOT_MIN_DIRENTRIES, PARENT_DIR_SFN,
 };
-use crate::block_io::prelude::*;
 use crate::log::{global_log, local_log};
 use crate::options::FSOptions;
-use crate::path::{
-    find_common_path_prefix, keep_path_normals, path_consts, Path, PathBuf, WindowsComponent,
-};
+use crate::path::{find_common_path_prefix, keep_path_normals, path_consts, Path, PathBuf};
 use crate::storage::SectorBuffer;
 use crate::time::Clock;
 use crate::utils;
+use crate::{block_io::prelude::*, serde::boot_sector::EBRFAT12_16};
 use crate::{
     error::{FSError, FSResult, InternalFSError},
-    BlockSize, ClusterCount, ClusterIndex, EntryCount, FATEntryCount, FATEntryIndex, FATEntryValue,
-    Properties, ROFile, RWFile, SectorCount, SectorIndex,
+    BlockSize, ClusterCount, ClusterIndex, EntryCount, FATEntryIndex, FATEntryValue, Properties,
+    ROFile, RWFile, SectorCount, SectorIndex,
 };
-
-/// An enum representing different variants of the FAT filesystem
-///
-/// The logic is essentially the same in all of them, the only thing that
-/// changes is the size in bytes of FAT entries, and thus the maximum volume size
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-// no need for enum variant documentation here
-pub enum FATType {
-    /// One of the earliest versions, originally used all the way back to 1980.
-    /// This probably won't be encountered anywhere outside ancient MS-DOS versions
-    /// or pretty low-size volumes, like microcontrollers
-    ///
-    /// Max volume size: 8 MB
-    FAT12,
-    /// Used in many low-size volumes
-    ///
-    /// Min volume size: 8 MB,
-    /// Max volume size: 16 GB
-    FAT16,
-    /// The most commonly-used variant.
-    ///
-    /// Min volume size: 256 MB,
-    /// Max volume size: 16 TB
-    FAT32,
-    /// An ex-proprietory filesystem that allows for even larger storage sizes
-    /// and its use is currently on the rise
-    ///
-    /// Not currently supported
-    ExFAT,
-}
-
-impl FATType {
-    #[inline]
-    /// How many bits this [`FATType`] uses to address clusters in the disk
-    fn bits_per_entry(&self) -> u8 {
-        match self {
-            FATType::FAT12 => 12,
-            FATType::FAT16 => 16,
-            // the high 4 bits are reserved, but are still part of the entry
-            FATType::FAT32 => 32,
-            FATType::ExFAT => 32,
-        }
-    }
-
-    #[inline]
-    // this is currently used only in a test case, but it might be useful in the future
-    #[cfg_attr(not(test), expect(dead_code))]
-    /// How many bits this [`FATType`] uses to address clusters in the disk,
-    /// minus those reserved
-    fn actual_bits_per_entry(&self) -> u8 {
-        match self {
-            FATType::FAT12 => 12,
-            FATType::FAT16 => 16,
-            // the high 4 bits are reserved
-            FATType::FAT32 => 28,
-            FATType::ExFAT => 32,
-        }
-    }
-
-    #[inline]
-    /// How many bytes this [`FATType`] spans across
-    fn entry_size(&self) -> u8 {
-        self.bits_per_entry().next_power_of_two() / 8
-    }
-}
-
-// the first 2 entries are reserved
-const RESERVED_FAT_ENTRIES: FATEntryCount = 2;
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum FATEntry {
-    /// This cluster is free
-    Free,
-    /// This cluster is allocated and the next cluster is the contained value
-    Allocated(ClusterIndex),
-    /// This cluster is reserved
-    Reserved,
-    /// This is a bad (defective) cluster
-    Bad,
-    /// This cluster is allocated and is the final cluster of the file
-    Eof,
-}
-
-impl From<FATEntry> for FATEntryValue {
-    fn from(value: FATEntry) -> Self {
-        Self::from(&value)
-    }
-}
-
-impl From<&FATEntry> for FATEntryValue {
-    fn from(value: &FATEntry) -> Self {
-        match value {
-            FATEntry::Free => FATEntryValue::MIN,
-            FATEntry::Allocated(cluster) => *cluster,
-            FATEntry::Reserved => 0xFFFFFF6,
-            FATEntry::Bad => 0xFFFFFF7,
-            FATEntry::Eof => FATEntryValue::MAX,
-        }
-    }
-}
-
-/// Properties about the position of a [`FATEntry`] inside the FAT region
-struct FATEntryProps {
-    /// Each `n`th element of the vector points at the corrensponding sector at the (first) active FAT table
-    fat_sector: SectorIndex,
-    sector_offset: usize,
-}
-
-impl FATEntryProps {
-    /// Get the [`FATEntryProps`] of the `n`-th [`FATEntry`] of a [`FileSystem`]
-    pub fn new<S, C>(n: FATEntryIndex, fs: &FileSystem<S, C>) -> Self
-    where
-        S: BlockRead,
-        C: Clock,
-    {
-        let fat_byte_offset: u64 = u64::from(n) * u64::from(fs.fat_type.bits_per_entry()) / 8;
-        let fat_sector = SectorIndex::try_from(
-            u64::from(fs.props.first_fat_sector())
-                + fat_byte_offset / u64::from(fs.props.sector_size()),
-        )
-        .expect("this should fit into a u32");
-        let sector_offset: usize =
-            usize::try_from(fat_byte_offset % u64::from(fs.props.sector_size()))
-                .expect("this should fit into a usize");
-
-        FATEntryProps {
-            fat_sector,
-            sector_offset,
-        }
-    }
-}
 
 /// the BPB_NumFATs field is 1 byte wide (u8)
 pub(crate) type FATOffset = u8;
@@ -203,7 +70,7 @@ impl FATSectorProps {
         let sector_offset_from_first_fat = sector - SectorIndex::from(fs.props.first_fat_sector());
         let fat_offset =
             FATOffset::try_from(sector_offset_from_first_fat / fs.props.fat_sector_size())
-                .expect("this should fit in a u89");
+                .expect("this should fit in a u8");
         let sector_offset = sector_offset_from_first_fat % fs.props.fat_sector_size();
 
         Some(FATSectorProps {
@@ -236,12 +103,10 @@ impl FATSectorProps {
 pub(crate) struct DirInfo {
     pub(crate) path: PathBuf,
     pub(crate) chain_start: EntryLocationUnit,
-    /// Indicates the [`EntryLocation`] of the last known allocated or removed [`DirEntry`]
+    /// Indicates the [`EntryLocation`] of the last known allocated or removed [`DirEntry`](crate::fat::DirEntry)
     ///
     /// [`None`] if it is not known
     pub(crate) chain_end: Option<EntryLocation>,
-    // we box that to save space if it is None (as of writing this,
-    // the Bloom struct occupies 184 bytes in-memory)
     #[cfg(feature = "bloom")]
     pub(crate) filter: Option<utils::bloom::Bloom<str>>,
 }
@@ -286,6 +151,7 @@ mod fsprops {
         fat_sector_size: u32,
         first_fat_sector: u16,
         first_root_dir_sector: SectorIndex,
+        root_dir_sectors: u16,
         first_data_sector: SectorIndex,
     }
 
@@ -310,28 +176,39 @@ mod fsprops {
             self.sec_per_clus
         }
 
+        #[inline]
         pub(crate) fn total_sectors(&self) -> SectorCount {
             self.total_sectors
         }
 
+        #[inline]
         pub(crate) fn total_clusters(&self) -> ClusterCount {
             self.total_clusters
         }
 
+        #[inline]
         pub(crate) fn fat_table_count(&self) -> u8 {
             self.fat_table_count
         }
 
+        #[inline]
         pub(crate) fn fat_sector_size(&self) -> u32 {
             self.fat_sector_size
         }
 
+        #[inline]
         pub(crate) fn first_fat_sector(&self) -> u16 {
             self.first_fat_sector
         }
 
+        #[inline]
         pub(crate) fn first_root_dir_sector(&self) -> SectorIndex {
             self.first_root_dir_sector
+        }
+
+        #[inline]
+        pub(crate) fn root_dir_sectors(&self) -> u16 {
+            self.root_dir_sectors
         }
 
         #[inline]
@@ -348,6 +225,7 @@ mod fsprops {
         }
 
         #[inline]
+        #[expect(dead_code, reason = "This might prove useful again in the future")]
         pub(crate) fn partition_sector_to_data_cluster(&self, sector: SectorIndex) -> ClusterIndex {
             (sector - self.first_data_sector()) / ClusterIndex::from(self.sectors_per_cluster())
                 + RESERVED_FAT_ENTRIES
@@ -396,6 +274,10 @@ mod fsprops {
                 BootRecord::Fat(boot_record_fat) => boot_record_fat.first_root_dir_sector(),
                 BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
             };
+            let root_dir_sectors = match value {
+                BootRecord::Fat(boot_record_fat) => boot_record_fat.root_dir_sectors(),
+                BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
+            };
             let first_data_sector = match value {
                 BootRecord::Fat(boot_record_fat) => boot_record_fat.first_data_sector(),
                 BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT is not yet implemented"),
@@ -411,6 +293,7 @@ mod fsprops {
                 total_sectors,
                 total_clusters,
                 first_root_dir_sector,
+                root_dir_sectors,
                 first_data_sector,
             }
         }
@@ -453,7 +336,18 @@ type UnmountFn<S, C> = fn(&FileSystem<S, C>) -> FSResult<(), <S as ErrorType>::E
 
 /// Determine the sector size of a FAT filesystem without fully constructing it.
 // This is essentially a copy of the beginning of `FileSystem::new`
-pub fn determine_fs_sector_size<S>(mut storage: S) -> FSResult<u16, S::Error>
+pub fn determine_fs_sector_size<S>(storage: S) -> FSResult<u16, S::Error>
+where
+    S: BlockRead,
+{
+    let (_, _, bpb) = read_block_size_buffer_and_bpb(storage)?;
+
+    Ok(bpb.bytes_per_sector.into())
+}
+
+fn read_block_size_buffer_and_bpb<S>(
+    mut storage: S,
+) -> FSResult<(BlockSize, SectorBuffer<false>, BpbFat), S::Error>
 where
     S: BlockRead,
 {
@@ -478,9 +372,9 @@ where
 
     storage.read(0, &mut buffer)?;
 
-    let (bpb, _) = BpbFat::ref_from_prefix(&buffer).unwrap();
+    let (bpb, _) = BpbFat::read_from_prefix(&buffer).unwrap();
 
-    Ok(bpb.bytes_per_sector.into())
+    Ok((block_size, buffer, bpb))
 }
 
 /// An API to process a FAT filesystem
@@ -506,7 +400,7 @@ where
     pub(crate) options: FSOptions<C>,
 
     pub(crate) boot_record: RefCell<BootRecord>,
-    // since `self.boot_record.fat_type()` calls like 5 nested functions, we keep this cached and expose it with a public getter function
+    // since `self.boot_record.fat_type()` calls like 5 nested methods, we keep this cached and expose it with a public getter method
     fat_type: FATType,
     pub(crate) props: FSProperties,
     // this doesn't mean that this is the first free cluster, it just means
@@ -516,7 +410,7 @@ where
     pub(crate) filter: RefCell<FileFilter>,
 }
 
-/// Getter functions
+/// Getter methods
 impl<S, C> FileSystem<S, C>
 where
     S: BlockRead,
@@ -528,7 +422,7 @@ where
     }
 }
 
-/// Setter functions
+/// Setter methods
 impl<S, C> FileSystem<S, C>
 where
     S: BlockRead,
@@ -562,27 +456,7 @@ where
     /// Fails if the storage is way too small to support a FAT filesystem.
     /// For most use cases, that shouldn't be an issue, you can just call [`.unwrap()`](Result::unwrap)
     pub fn new(mut storage: S, options: FSOptions<C>) -> FSResult<Self, S::Error> {
-        let block_size = storage.block_size();
-
-        if !block_size.is_power_of_two() {
-            global_log::error!("block size ({}) is 0 or not a power of 2", block_size);
-            return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
-        }
-        #[expect(clippy::cast_possible_truncation)]
-        if block_size > MAX_SECTOR_SIZE as BlockSize {
-            global_log::error!(
-                "block size ({}) is larger than MAX_SECTOR_SIZE ({})",
-                block_size,
-                MAX_SECTOR_SIZE
-            );
-            return Err(FSError::InternalFSError(InternalFSError::BlockSizeError));
-        }
-
-        // Begin by reading the boot record
-        // We don't know the sector size yet, so we just go with the biggest possible one for now
-        let buffer = SectorBuffer::new(&mut storage)?;
-
-        let (bpb, _) = BpbFat::read_from_prefix(&buffer).unwrap();
+        let (block_size, buffer, bpb) = read_block_size_buffer_and_bpb(&mut storage)?;
 
         if block_size > BlockSize::from(bpb.bytes_per_sector) {
             global_log::error!(
@@ -603,7 +477,7 @@ where
 
             buffer.read(&storage, ebr_fat32.fat_info.into())?;
 
-            let fsinfo = FSInfoFAT32::read_from_bytes(&buffer).unwrap();
+            let (fsinfo, _) = FSInfoFAT32::read_from_prefix(&buffer).unwrap();
 
             if !fsinfo.verify_signature() {
                 global_log::error!("FAT32 FSInfo has invalid signature(s)");
@@ -613,7 +487,7 @@ where
             Ebr::FAT32(ebr_fat32, fsinfo)
         } else {
             Ebr::FAT12_16(
-                FromBytes::read_from_prefix(&buffer[BPBFAT_SIZE..])
+                EBRFAT12_16::read_from_prefix(&buffer[BPBFAT_SIZE..])
                     .unwrap()
                     .0,
             )
@@ -679,20 +553,25 @@ where
     }
 }
 
-/// Internal [`Read`]-related low-level functions
+/// Internal `Read`-related low-level methods
+///
+/// This impl block contains directory-related methods
 impl<S, C> FileSystem<S, C>
 where
     S: BlockRead,
     C: Clock,
 {
-    pub(crate) fn process_current_dir<'a>(&'a self) -> ReadDirInt<'a, S, C> {
-        ReadDirInt::new(self, &self.dir_info.borrow().chain_start)
+    pub(crate) fn process_current_dir<'a>(&'a self) -> ReadDirRaw<'a, S, C> {
+        ReadDirRaw::new(self, &self.dir_info.borrow().chain_start)
     }
 
-    /// Goes to the parent directory.
+    /// Change the internal directory cache so that it points to the parent directory.
     ///
     /// If this is the root directory, it does nothing
-    fn _go_to_parent_dir(&self) -> FSResult<(), S::Error> {
+    ///
+    /// This method is intended to be used internally mainly by the [`go_to_dir`](Self::go_to_dir)
+    /// method. Consider using that instead
+    fn go_to_parent_dir(&self) -> FSResult<(), S::Error> {
         if let Some(parent_path) = self.dir_info.borrow().path.parent() {
             let parent_pathbuf = parent_path.to_path_buf();
 
@@ -708,21 +587,23 @@ where
                     InternalFSError::MalformedEntryChain,
                 ))?;
 
-            self.dir_info.borrow_mut().path = parent_pathbuf;
-            self.dir_info.borrow_mut().chain_start =
-                EntryLocationUnit::DataCluster(parent_entry.data_cluster);
-            self.dir_info.borrow_mut().chain_end = None;
+            let mut dir_info = self.dir_info.borrow_mut();
+
+            dir_info.path = parent_pathbuf;
+            dir_info.chain_start = EntryLocationUnit::DataCluster(parent_entry.data_cluster);
+            dir_info.chain_end = None;
         } else {
-            self._go_to_root_directory();
+            self.go_to_root_directory();
         }
 
         Ok(())
     }
 
-    /// Goes to the given child directory
+    /// Change the internal directory cache so that it points to the given child directory
     ///
-    /// If it doesn't exist, the encapsulated [`Option`] will be `None`
-    fn _go_to_child_dir(&self, name: &str) -> FSResult<(), S::Error> {
+    /// This method is intended to be used internally mainly by the [`go_to_dir`](Self::go_to_dir)
+    /// method. Consider using that instead
+    fn go_to_child_dir(&self, name: &str) -> FSResult<(), S::Error> {
         let mut entries = self.process_current_dir();
 
         let child_entry = loop {
@@ -737,38 +618,45 @@ where
             return Err(FSError::NotADirectory);
         }
 
-        self.dir_info
-            .borrow_mut()
-            .path
-            .push(child_entry.name(self.options.codepage));
-        self.dir_info.borrow_mut().chain_start =
-            EntryLocationUnit::DataCluster(child_entry.data_cluster);
-        self.dir_info.borrow_mut().chain_end = None;
+        let mut dir_info = self.dir_info.borrow_mut();
+
+        dir_info.path.push(child_entry.name(self.options.codepage));
+        dir_info.chain_start = EntryLocationUnit::DataCluster(child_entry.data_cluster);
+        dir_info.chain_end = None;
 
         Ok(())
     }
 
-    fn _go_to_root_directory(&self) {
+    /// Change the internal directory cache so that it points to the root directory
+    fn go_to_root_directory(&self) {
         self.dir_info
             .replace(DirInfo::at_root_dir(&self.boot_record.borrow()));
     }
 
-    // This is a helper function for `go_to_dir`
-    fn _go_up_till_target<P>(&self, target: P) -> FSResult<(), S::Error>
+    /// Backtrack to each parent directory until the internal directory cache points
+    /// to the target directory
+    ///
+    /// This method is intended to be used internally mainly by the [`go_to_dir`](Self::go_to_dir)
+    /// method. Consider using that instead
+    fn go_up_till_target<P>(&self, target: P) -> FSResult<(), S::Error>
     where
         P: AsRef<Path>,
     {
         let target = target.as_ref();
 
         while self.dir_info.borrow().path != target {
-            self._go_to_parent_dir()?;
+            self.go_to_parent_dir()?;
         }
 
         Ok(())
     }
 
-    // This is a helper function for `go_to_dir`
-    fn _go_down_till_target<P>(&self, target: P) -> FSResult<(), S::Error>
+    /// Navigate down child directories until the internal directory cache points
+    /// to the target directory
+    ///
+    /// This method is intended to be used internally mainly by the [`go_to_dir`](Self::go_to_dir)
+    /// method. Consider using that instead
+    fn go_down_till_target<P>(&self, target: P) -> FSResult<(), S::Error>
     where
         P: AsRef<Path>,
     {
@@ -786,15 +674,14 @@ where
             .filter(keep_path_normals)
             .skip(common_components)
         {
-            self._go_to_child_dir(dir_name.as_str())?;
+            self.go_to_child_dir(dir_name.as_str())?;
         }
 
         Ok(())
     }
 
-    /// Make sure that the sector stored in the sector buffer is the same as
-    /// the first sector of cached directory chain
-    fn _go_to_cached_dir(&self) -> FSResult<(), S::Error> {
+    /// Load into the sector buffer the first sector of the internal directory cache chain
+    fn go_to_cached_dir(&self) -> FSResult<(), S::Error> {
         let dir_chain = self.dir_info.borrow().chain_start;
         let target_sector = dir_chain.get_entry_sector(self);
 
@@ -805,7 +692,15 @@ where
         Ok(())
     }
 
-    fn _read_dir<P: AsRef<Path>>(
+    /// Low-level method to obtain a [`ReadDir`] struct of the provided `path` directory.
+    ///
+    /// Use the `internal` parameter to configure whether the returned [`ReadDir`]
+    /// is intended for internal or public use and whether the `.` and `..` entries
+    /// should be filtered or not (only filtered if `internal` is false)
+    ///
+    /// This method is intended to be used internally by the [`read_dir_raw`](Self::read_dir_raw)
+    /// and [`read_dir`](Self::read_dir) methods, use them instead
+    fn read_dir_internal<P: AsRef<Path>>(
         &self,
         path: P,
         internal: bool,
@@ -823,10 +718,12 @@ where
 
         self.go_to_dir(&path)?;
 
+        let dir_info = self.dir_info.borrow();
+
         Ok(ReadDir::new(
             self,
-            &self.dir_info.borrow().chain_start,
-            &self.dir_info.borrow().path,
+            &dir_info.chain_start,
+            &dir_info.path,
             internal,
         ))
     }
@@ -836,8 +733,9 @@ where
     ///
     /// Can come in handy if you don't want to skip hidden or system files, for
     /// example during a directory deletion.
-    fn read_dir_internal<P: AsRef<Path>>(&self, path: P) -> FSResult<ReadDir<'_, S, C>, S::Error> {
-        self._read_dir(path, true)
+    #[inline]
+    fn read_dir_raw<P: AsRef<Path>>(&self, path: P) -> FSResult<ReadDir<'_, S, C>, S::Error> {
+        self.read_dir_internal(path, true)
     }
 
     // There are many ways this can be achieved. That's how we'll do it:
@@ -846,7 +744,7 @@ where
     // and get down to the target or whether we should start from where we are
     // now, go up till we find the common prefix path and then go down to the `target`
 
-    /// Navigates to the `target` [`Path`]
+    /// Change the internal directory cache so that is points to the provided `target`
     pub(crate) fn go_to_dir<P>(&self, target: P) -> FSResult<(), S::Error>
     where
         P: AsRef<Path>,
@@ -857,32 +755,37 @@ where
             return Err(FSError::MalformedPath);
         }
 
-        if self.dir_info.borrow().path == target {
+        let dir_info = self.dir_info.borrow();
+
+        if dir_info.path == target {
             // there's a chance that the current loaded sector doesn't belong
             // to the directory we have cached, so we must also navigate to the correct sector
-            self._go_to_cached_dir()?;
+            self.go_to_cached_dir()?;
 
             return Ok(());
         }
 
-        let common_path_prefix = find_common_path_prefix(&self.dir_info.borrow().path, target);
+        let common_path_prefix = find_common_path_prefix(&dir_info.path, target);
 
         // Note: these are the distances to the common prefix, not the target path
         let distance_from_root = common_path_prefix.ancestors().count() - 1;
         let distance_from_current_path =
-            (self.dir_info.borrow().path.ancestors().count() - 1) - distance_from_root;
+            (dir_info.path.ancestors().count() - 1) - distance_from_root;
+
+        // drop early so that the dir_info refcell can be used by other methods
+        drop(dir_info);
 
         if distance_from_root <= distance_from_current_path {
-            self._go_to_root_directory();
+            self.go_to_root_directory();
 
-            self._go_down_till_target(target)?;
+            self.go_down_till_target(target)?;
         } else {
-            self._go_up_till_target(common_path_prefix)?;
+            self.go_up_till_target(common_path_prefix)?;
 
-            self._go_down_till_target(target)?;
+            self.go_down_till_target(target)?;
         }
 
-        // this should be covered by all the other functions above, but it probably doesn't hurt
+        // this should be covered by all the other methods above, but it probably doesn't hurt
         // (if this was the same directory (which could be cached), we would have return long ago)
         #[cfg(feature = "bloom")]
         {
@@ -891,9 +794,17 @@ where
 
         Ok(())
     }
+}
 
-    /// Gets the next free cluster. Returns an IO [`Result`]
-    /// If the [`Result`] returns [`Ok`] that contains a [`None`], the drive is full
+/// Internal `Read`-related low-level methods
+impl<S, C> FileSystem<S, C>
+where
+    S: BlockRead,
+    C: Clock,
+{
+    /// Obtain the index of the next free cluster
+    ///
+    /// If the method [succeeds](Ok) and returns [`None`], the drive is full and there aren't any free clusters
     pub(crate) fn next_free_cluster(&self) -> Result<Option<ClusterIndex>, S::Error> {
         let start_cluster = match *self.boot_record.borrow() {
             BootRecord::Fat(ref boot_record_fat) => {
@@ -942,7 +853,12 @@ where
         Ok(None)
     }
 
-    /// Get the next cluster in a cluster chain, otherwise return [`None`]
+    /// Obtain the index of the next cluster in a cluster chain
+    ///
+    /// If the method [succeeds](Ok) and returns [`None`],
+    /// the [`FATEntry`] for the provided cluster doesn't point to another cluster
+    /// (whether that is because the corresponding [`FATEntry`] is free, reserved, has
+    /// been marked as bad or because we have reached the end of a cluster chain)
     pub(crate) fn get_next_cluster(
         &self,
         cluster: ClusterIndex,
@@ -954,18 +870,19 @@ where
         })
     }
 
-    #[expect(non_snake_case)]
     /// Check whether or not the all the FAT tables of the storage medium are identical to each other
+    // FIXME: highly inefficient (especially regarding memory usage)
+    #[expect(non_snake_case)]
     pub(crate) fn FAT_tables_are_identical(&self) -> Result<bool, S::Error> {
         // we could make it work, but we are only testing regular FAT filesystems (for now)
         assert_ne!(
             self.fat_type,
             FATType::ExFAT,
-            "this function doesn't work with ExFAT"
+            "this method doesn't work with ExFAT"
         );
 
         /// How many bytes to probe at max for each FAT per iteration (must be a multiple of [`MAX_SECTOR_SIZE`])
-        const MAX_PROBE_SIZE: u32 = 1 << 20;
+        const MAX_PROBE_SIZE: u32 = 2_u32.pow(20);
         let max_probe_size_in_sectors: u32 = MAX_PROBE_SIZE / u32::from(self.props.sector_size());
 
         let fat_byte_size = match &*self.boot_record.borrow() {
@@ -1009,22 +926,18 @@ where
         Ok(true)
     }
 
+    /// Check whether the `sector` with the provided index belongs to the File Allocation Table
     #[expect(non_snake_case)]
     pub(crate) fn sector_belongs_to_FAT(&self, sector: SectorIndex) -> bool {
-        match &*self.boot_record.borrow() {
-            BootRecord::Fat(boot_record_fat) => (boot_record_fat.first_fat_sector().into()
-                ..boot_record_fat.first_root_dir_sector())
-                .contains(&sector),
-            BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
-        }
+        (self.props.first_fat_sector().into()..self.props.first_root_dir_sector()).contains(&sector)
     }
 
-    /// Read the nth sector from the partition's beginning and store it in [`self.sector_buffer`](Self::sector_buffer)
+    /// Read the `n`th sector from the partition's beginning and store it in [`self.sector_buffer`](Self::sector_buffer)
     ///
-    /// This function also returns an immutable reference to [`self.sector_buffer`](Self::sector_buffer)
+    /// This method also returns an immutable [`Ref`] to [`self.sector_buffer`](Self::sector_buffer)
     pub(crate) fn load_nth_sector(&self, n: SectorIndex) -> Result<Ref<'_, [u8]>, S::Error> {
         if n >= self.props.total_sectors() {
-            panic!(concat!(
+            unreachable!(concat!(
                 "seeked past end of device medium. ",
                 "This is most likely an internal error, please report it: ",
                 "https://github.com/Oakchris1955/simple-fatfs/issues"
@@ -1050,6 +963,10 @@ where
         Ok(Ref::map(self.sector_buffer.borrow(), |s| &**s))
     }
 
+    /// Read the raw value of the `n`th [`FATEntry`]
+    ///
+    /// This method is intended to be used internally mainly by the [`read_nth_FAT_entry`](Self::read_nth_FAT_entry)
+    /// method. Consider using that instead
     #[expect(non_snake_case)]
     fn read_nth_FAT_entry_value(&self, n: FATEntryIndex) -> Result<FATEntryValue, S::Error> {
         // the size of an entry rounded up to bytes
@@ -1081,7 +998,7 @@ where
         match self.fat_type {
             // FAT12 entries are split between different bytes
             FATType::FAT12 => {
-                if n & 1 != 0 {
+                if !n.is_multiple_of(2) {
                     value >>= 4
                 } else {
                     value &= 0xFFF
@@ -1095,68 +1012,26 @@ where
         Ok(value)
     }
 
+    /// Read the `n`th [`FATEntry`]
     #[expect(non_snake_case)]
     pub(crate) fn read_nth_FAT_entry(&self, n: FATEntryIndex) -> Result<FATEntry, S::Error> {
         let value = self.read_nth_FAT_entry_value(n)?;
 
-        /*
-        // pad unused bytes with 1s
-        let padding: u32 = u32::MAX.to_be() << self.fat_type.bits_per_entry();
-        value |= padding.to_le();
-        */
-
-        // TODO: perhaps byte padding can replace some redundant code here?
-        Ok(match self.fat_type {
-            FATType::FAT12 => match value {
-                0x000 => FATEntry::Free,
-                0xFF7 => FATEntry::Bad,
-                #[expect(clippy::manual_range_patterns)]
-                0xFF8..=0xFFE | 0xFFF => FATEntry::Eof,
-                _ => {
-                    if (0x002..(self.props.total_clusters() + 1)).contains(&value) {
-                        FATEntry::Allocated(value)
-                    } else {
-                        FATEntry::Reserved
-                    }
-                }
-            },
-            FATType::FAT16 => match value {
-                0x0000 => FATEntry::Free,
-                0xFFF7 => FATEntry::Bad,
-                #[expect(clippy::manual_range_patterns)]
-                0xFFF8..=0xFFFE | 0xFFFF => FATEntry::Eof,
-                _ => {
-                    if (0x0002..(self.props.total_clusters() + 1)).contains(&value) {
-                        FATEntry::Allocated(value)
-                    } else {
-                        FATEntry::Reserved
-                    }
-                }
-            },
-            FATType::FAT32 => match value & 0x0FFFFFFF {
-                0x00000000 => FATEntry::Free,
-                0x0FFFFFF7 => FATEntry::Bad,
-                #[expect(clippy::manual_range_patterns)]
-                0x0FFFFFF8..=0xFFFFFFE | 0x0FFFFFFF => FATEntry::Eof,
-                _ => {
-                    if (0x00000002..(self.props.total_clusters() + 1)).contains(&value) {
-                        FATEntry::Allocated(value)
-                    } else {
-                        FATEntry::Reserved
-                    }
-                }
-            },
-            FATType::ExFAT => todo!("ExFAT not yet implemented"),
-        })
+        Ok(FATEntry::from_value(
+            value,
+            &self.fat_type,
+            self.props.total_clusters(),
+        ))
     }
 }
 
-/// Internal [`Write`]-related low-level functions
+/// Internal `Write`-related low-level methods
 impl<S, C> FileSystem<S, C>
 where
     S: BlockWrite,
     C: Clock,
 {
+    /// Change the `n`th [`FATEntry`] to the provided `entry`
     #[expect(non_snake_case)]
     pub(crate) fn write_nth_FAT_entry(
         &self,
@@ -1168,17 +1043,17 @@ where
         let entry_props = FATEntryProps::new(n, self);
 
         // the previous solution would overflow, here's a correct implementation
-        let mask = utils::bits::setbits_u32(self.fat_type.bits_per_entry());
-        let mut value: FATEntryValue = FATEntryValue::from(entry.clone()) & mask;
-
+        let mut mask = utils::bits::setbits_u32(self.fat_type.bits_per_entry());
         if self.fat_type == FATType::FAT32 {
             // in FAT32, the high 4 bits are unused
-            value &= 0x0FFFFFFF;
+            mask &= 0x0FFFFFFF;
         }
+
+        let mut value: FATEntryValue = FATEntryValue::from(entry.clone()) & mask;
 
         match self.fat_type {
             FATType::FAT12 => {
-                let should_shift = n & 1 != 0;
+                let should_shift = !n.is_multiple_of(2);
                 if should_shift {
                     // FAT12 entries are split between different bytes
                     value <<= 4;
@@ -1222,8 +1097,8 @@ where
                     second_byte |= old_byte;
                 }
 
-                self.sector_buffer.borrow_mut()[second_byte_index] = second_byte; // this shouldn't panic
-                self.set_modified();
+                // this shouldn't panic
+                self.sector_buffer.borrow_mut()[second_byte_index] = second_byte;
             }
             FATType::FAT16 | FATType::FAT32 => {
                 self.load_nth_sector(entry_props.fat_sector)?;
@@ -1237,19 +1112,21 @@ where
                     value_bytes[3] |= original_high_byte & 0xF0;
                 }
 
+                // this shouldn't panic
                 self.sector_buffer.borrow_mut()[entry_props.sector_offset
                     ..entry_props.sector_offset + usize::from(entry_size)]
-                    .copy_from_slice(&value_bytes[..usize::from(entry_size)]); // this shouldn't panic
-                self.set_modified();
+                    .copy_from_slice(&value_bytes[..usize::from(entry_size)]);
             }
             FATType::ExFAT => todo!("ExFAT not yet implemented"),
         };
+
+        self.set_modified();
 
         if entry == FATEntry::Free && n < *self.first_free_cluster.borrow() {
             self.first_free_cluster.replace(n);
         }
 
-        // lastly, update the FSInfoFAT32 structure is it is available
+        // lastly, update the FSInfoFAT32 structure if it is available
         if let BootRecord::Fat(boot_record_fat) = &mut *self.boot_record.borrow_mut() {
             if let Ebr::FAT32(_, fsinfo) = &mut boot_record_fat.ebr {
                 match entry {
@@ -1269,38 +1146,42 @@ where
     }
 
     /// Allocate room for at least `n` contiguous [`FATDirEntries`](FATDirEntry)
-    /// in the current directory entry chain
+    /// in the currently-cached directory entry chain
     ///
-    /// This may or may not allocate new clusters.
+    /// This method will first check if there are at least `n`th contiguous unused
+    /// entries and use them if there are. Otherwise, it defragments the entry chain
+    /// just in case it can create a contiguous space at the end of it large enough
+    /// and tries again. If that fails too, only then does it allocate new clusters.
     pub(crate) fn allocate_nth_entries(
         &self,
         n: num::NonZero<EntryCount>,
     ) -> FSResult<EntryLocation, S::Error> {
         // navigate to the cached directory, if we aren't already there
-        self._go_to_cached_dir()?;
+        self.go_to_cached_dir()?;
 
         // we may not even need to allocate new entries.
         // let's check if there is a chain of unused entries big enough to be used
-        let mut first_entry = self.dir_info.borrow().chain_end.unwrap_or_else(|| {
-            let stored_sector = self.sector_buffer.borrow().stored_sector();
-            EntryLocation::from_partition_sector(stored_sector, self)
-        });
+        let mut first_chain_entry = self
+            .dir_info
+            .borrow()
+            .chain_end
+            .unwrap_or(self.dir_info.borrow().chain_start.into());
 
-        let mut last_entry = first_entry;
+        let mut last_explored_entry = first_chain_entry;
 
-        let mut chain_len = 0;
-        let mut entry_count: EntryCount = 0;
+        let mut unused_chain_len = 0;
+        let mut explored_entries_count: EntryCount = 0;
 
         loop {
-            let entry_status = last_entry.entry_status(self)?;
-            entry_count += 1;
+            let entry_status = last_explored_entry.entry_status(self)?;
+            explored_entries_count += 1;
             match entry_status {
-                EntryStatus::Unused | EntryStatus::LastUnused => chain_len += 1,
-                EntryStatus::Used => chain_len = 0,
+                EntryStatus::Unused | EntryStatus::LastUnused => unused_chain_len += 1,
+                EntryStatus::Used => unused_chain_len = 0,
             }
 
-            if chain_len >= n.get() {
-                return Ok(first_entry);
+            if unused_chain_len >= n.get() {
+                return Ok(first_chain_entry);
             }
 
             if entry_status == EntryStatus::LastUnused {
@@ -1309,15 +1190,15 @@ where
 
             // we also break if we have reached the end of the cluster chain
             // or else the MalformedEntryChain below will kick in
-            if last_entry.unit.get_next_unit(self)?.is_none()
-                && last_entry.index + 1 >= last_entry.unit.get_max_offset(self)
+            if last_explored_entry.unit.get_next_unit(self)?.is_none()
+                && last_explored_entry.index + 1 >= last_explored_entry.unit.get_max_offset(self)
             {
                 break;
             }
 
             // what if for whatever reason the data types changes?
             #[expect(clippy::absurd_extreme_comparisons)]
-            if entry_count + n.get() >= DIRENTRY_LIMIT {
+            if explored_entries_count + n.get() >= DIRENTRY_LIMIT {
                 // defragment the cluster chain just in case
                 // this frees up any space for entries
                 let new_entry_count = self.defragment_entry_chain()?;
@@ -1331,49 +1212,45 @@ where
                 return self.allocate_nth_entries(n);
             }
 
-            last_entry = last_entry
-                .next_entry(self)?
-                .ok_or(FSError::InternalFSError(
-                    InternalFSError::MalformedEntryChain,
-                ))?;
+            last_explored_entry =
+                last_explored_entry
+                    .next_entry(self)?
+                    .ok_or(FSError::InternalFSError(
+                        InternalFSError::MalformedEntryChain,
+                    ))?;
 
             if entry_status == EntryStatus::Used {
-                first_entry = last_entry;
+                first_chain_entry = last_explored_entry;
             }
         }
 
         // let's set the last-known dir entry
-        self.dir_info.borrow_mut().chain_end = Some(last_entry);
+        self.dir_info.borrow_mut().chain_end = Some(last_explored_entry);
 
         // we have broken out of the loop, that means we reached the end of the chain
         // of the already-allocated entries
-        match last_entry.unit {
+        match last_explored_entry.unit {
             EntryLocationUnit::RootDirSector(_) => {
-                let remaining_sectors: SectorCount = match &*self.boot_record.borrow() {
-                    BootRecord::Fat(boot_record_fat) => {
-                        boot_record_fat.first_root_dir_sector()
-                            + SectorCount::from(boot_record_fat.root_dir_sectors())
-                            - last_entry.unit.get_entry_sector(self)
-                    }
-                    BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
-                };
+                let remaining_sectors: SectorCount = self.props.first_root_dir_sector()
+                    + SectorCount::from(self.props.root_dir_sectors())
+                    - last_explored_entry.unit.get_entry_sector(self);
 
                 let entries_per_sector = self.props.sector_size()
                     / u16::try_from(DIRENTRY_SIZE).expect("32 can fit in a u16");
                 let remaining_entries = EntryCount::try_from(
                     remaining_sectors * SectorCount::from(entries_per_sector)
                         + (SectorCount::from(entries_per_sector)
-                            - SectorCount::from(last_entry.index)
+                            - SectorCount::from(last_explored_entry.index)
                             + 1),
                 )
                 .unwrap();
 
-                if remaining_entries < n.get() - chain_len {
+                if remaining_entries < n.get() - unused_chain_len {
                     global_log::error!("Root directory is full, can't allocate any more entries");
                     Err(FSError::RootDirectoryFull)
                 } else {
                     local_log::trace!("Successful allocated {n} contiguous FAT directory entries on the root directory");
-                    Ok(first_entry)
+                    Ok(first_chain_entry)
                 }
             }
             EntryLocationUnit::DataCluster(cluster) => {
@@ -1384,8 +1261,9 @@ where
                 )
                 .expect("a cluster can have a max of ~16k entries");
 
-                let entries_left = n.get() - chain_len;
-                let free_entries_on_current_cluster = entries_per_cluster - (last_entry.index + 1);
+                let entries_left = n.get() - unused_chain_len;
+                let free_entries_on_current_cluster =
+                    entries_per_cluster - (last_explored_entry.index + 1);
 
                 // if we do in fact have to allocate some clusters, we allocate them
                 if free_entries_on_current_cluster < entries_left {
@@ -1399,9 +1277,9 @@ where
                     )?;
 
                     // the entry chain begins in the newly allocated clusters
-                    if chain_len == 0 {
-                        first_entry.unit = EntryLocationUnit::DataCluster(first_cluster);
-                        first_entry.index = 0;
+                    if unused_chain_len == 0 {
+                        first_chain_entry.unit = EntryLocationUnit::DataCluster(first_cluster);
+                        first_chain_entry.index = 0;
                     }
 
                     // before we return, we should zero those sectors according to the FAT spec
@@ -1422,20 +1300,20 @@ where
                 local_log::trace!(
                     "Successful allocated {n} contiguous FAT directory entries on the data region"
                 );
-                Ok(first_entry)
+                Ok(first_chain_entry)
             }
         }
     }
 
     /// Creates a new cluster chain with the `.` and `..` entries present,
-    // The datetime parameter is there so that we fully comply with the FAT32 spec:
-    // ". All date and time fields must be set to the same value as that for
+    /// Provide the current `datetime` so that we fully comply with the FAT32 spec:
+    // "All date and time fields must be set to the same value as that for
     // the containing directory"
-    pub(crate) fn create_entry_chain(
+    pub(crate) fn create_direntry_chain(
         &self,
         parent: EntryLocationUnit,
         datetime: PrimitiveDateTime,
-    ) -> FSResult<u32, S::Error> {
+    ) -> FSResult<ClusterIndex, S::Error> {
         // we need to allocate a cluster
         let dir_cluster = self.allocate_clusters(num::NonZero::new(1).unwrap(), None)?;
 
@@ -1475,10 +1353,7 @@ where
         // we zero the current sector
         self.sector_buffer.borrow_mut().fill(0);
 
-        let mut entry_location = EntryLocation {
-            unit: EntryLocationUnit::DataCluster(dir_cluster),
-            index: 0,
-        };
+        let mut entry_location = EntryLocation::from(EntryLocationUnit::DataCluster(dir_cluster));
 
         for (i, bytes) in entries_iter.enumerate() {
             entry_location.set_bytes(self, bytes)?;
@@ -1516,9 +1391,11 @@ where
         &self,
         entries: &[MinProperties],
     ) -> FSResult<DirEntryChain, S::Error> {
+        assert!(!entries.is_empty(), "The entries array shouldn't be empty");
+
         let mut entries_needed = 0;
 
-        self._go_to_cached_dir()?;
+        self.go_to_cached_dir()?;
 
         for entry in entries {
             // we need at least one entry for the short filename
@@ -1529,9 +1406,7 @@ where
             }
         }
 
-        let first_entry = self.allocate_nth_entries(
-            num::NonZero::new(entries_needed).expect("The entries array shouldn't be empty"),
-        )?;
+        let first_entry = self.allocate_nth_entries(num::NonZero::new(entries_needed).unwrap())?;
 
         let mut entries_iter = EntryComposer::new(entries);
 
@@ -1566,12 +1441,9 @@ where
 
     /// Defragment the entry chain of the current directory
     ///
-    /// Returns a [`FSResult`] containing the new number of entries
+    /// Returns the new number of entries
     pub(crate) fn defragment_entry_chain(&self) -> FSResult<EntryCount, S::Error> {
-        let mut current_entry_loc = EntryLocation {
-            unit: self.dir_info.borrow().chain_start,
-            index: 0,
-        };
+        let mut current_entry_loc = EntryLocation::from(self.dir_info.borrow().chain_start);
         let mut new_chain_end = current_entry_loc;
         let mut entry_count: EntryCount = 0;
 
@@ -1626,7 +1498,8 @@ where
 
     /// Mark the individual entries of a contiguous FAT entry chain as unused
     ///
-    /// Note: No validation is done to check whether or not the chain is valid
+    /// ## Warning
+    /// No validation is done to check whether or not the chain is valid
     pub(crate) fn remove_entry_chain(&self, chain: &DirEntryChain) -> Result<(), S::Error> {
         local_log::trace!("Removing entry chain starting at {chain:?}");
 
@@ -1654,7 +1527,7 @@ where
         Ok(())
     }
 
-    /// Frees all the cluster in a cluster chain starting with `first_cluster`
+    /// Frees all the clusters in a cluster chain starting, starting at `first_cluster`
     pub(crate) fn free_cluster_chain(&self, first_cluster: u32) -> Result<(), S::Error> {
         let mut current_cluster = first_cluster;
 
@@ -1676,8 +1549,8 @@ where
 
     /// Allocate `n` clusters and return the index of the first one allocated
     ///
-    /// Also has a second [`Option`] argument that if not [`None`] indicates
-    /// that this cluster should point to the newly allocated cluster chain
+    /// One can [optionally](Option) pass a `first_cluster` argument. The cluster
+    /// at that index will point to the beginning of the newly-allocated cluster chain
     pub(crate) fn allocate_clusters(
         &self,
         n: num::NonZero<ClusterCount>,
@@ -1726,13 +1599,19 @@ where
     }
 
     /// Syncs `self.sector_buffer` back to the storage
-    fn _sync_current_sector(&self) -> Result<(), S::Error> {
+    ///
+    /// This method is intended to be used internally mainly by the [`sync_sector_buffer`](Self::sync_sector_buffer)
+    /// method. Consider using that instead
+    fn sync_current_sector(&self) -> Result<(), S::Error> {
         self.sector_buffer.borrow().write(&self.storage)
     }
 
-    /// Syncs a FAT sector to ALL OTHER FAT COPIES on the device medium
+    /// Syncs a FAT sector to all other FAT copies on the device medium
+    ///
+    /// This method is intended to be used internally mainly by the [`sync_sector_buffer`](Self::sync_sector_buffer)
+    /// method. Consider using that instead
     #[expect(non_snake_case)]
-    fn _sync_FAT_sector(&self, fat_sector_props: &FATSectorProps) -> Result<(), S::Error> {
+    fn sync_FAT_sector(&self, fat_sector_props: &FATSectorProps) -> Result<(), S::Error> {
         for sector in fat_sector_props.get_corresponding_FAT_sectors(self) {
             self.sector_buffer
                 .borrow()
@@ -1743,11 +1622,17 @@ where
     }
 
     /// Marks that a modification has been made to the storage medium, setting the `sync_f` and `unmount_f` fields
+    ///
+    /// Use that method when you modify the `sector_buffer`
     pub(crate) fn set_modified(&self) {
         self.sync_f.replace(Some(Self::sync_sector_buffer));
         self.unmount_f.replace(Some(Self::unmount));
     }
 
+    /// Sync the sector buffer back to the storage medium.
+    ///
+    /// Extra care is taken for FAT sectors to ensure that, if FAT mirroring is enabled,
+    /// that they all synced back to all FAT copies
     pub(crate) fn sync_sector_buffer(&self) -> Result<(), S::Error> {
         // If this is called, we assume the sector buffer has been modified
         let stored_sector = self.sector_buffer.borrow().stored_sector();
@@ -1756,13 +1641,13 @@ where
             match &*self.boot_record.borrow() {
                 BootRecord::Fat(boot_record_fat) => match &boot_record_fat.ebr {
                     Ebr::FAT12_16(_) => {
-                        self._sync_FAT_sector(&fat_sector_props)?;
+                        self.sync_FAT_sector(&fat_sector_props)?;
                     }
                     Ebr::FAT32(ebr_fat32, _) => {
                         if ebr_fat32.extended_flags.mirroring_disabled() {
-                            self._sync_current_sector()?;
+                            self.sync_current_sector()?;
                         } else {
-                            self._sync_FAT_sector(&fat_sector_props)?;
+                            self.sync_FAT_sector(&fat_sector_props)?;
                         }
                     }
                 },
@@ -1773,7 +1658,7 @@ where
                 "syncing data sector {}",
                 self.sector_buffer.borrow().stored_sector()
             );
-            self._sync_current_sector()?;
+            self.sync_current_sector()?;
         }
 
         // we don't want to call this again for no reason
@@ -1783,11 +1668,12 @@ where
     }
 
     /// Sync the [`FSInfoFAT32`] back to the storage medium
-    /// if this is FAT32
+    ///
+    /// No-ops if this isn't FAT32 or [`FSInfoFAT32`] hasn't been modified
     pub(crate) fn sync_fsinfo(&self) -> FSResult<(), S::Error> {
-        local_log::trace!("Syncing FSInfo struct");
-
         if *self.fsinfo_modified.borrow() {
+            local_log::trace!("Syncing FSInfo struct");
+
             if let BootRecord::Fat(boot_record_fat) = &*self.boot_record.borrow() {
                 if let Ebr::FAT32(ebr_fat32, fsinfo) = &boot_record_fat.ebr {
                     self.load_nth_sector(ebr_fat32.fat_info.into())?;
@@ -1804,6 +1690,9 @@ where
         Ok(())
     }
 
+    /// Sync the [boot sector](BootRecord) back to the storage medium
+    ///
+    /// No-ops if the boot sector hasn't been modified
     pub(crate) fn sync_boot_sector(&self) -> FSResult<(), S::Error> {
         local_log::trace!("Syncing boot sector struct");
 
@@ -1843,7 +1732,7 @@ where
 
     /// Like [`Self::get_rw_file`], but will ignore the read-only flag (if it is present)
     ///
-    /// This is a private function for obvious reasons
+    /// This is a private method for obvious reasons
     fn get_rw_file_unchecked<P: AsRef<Path>>(
         &self,
         path: P,
@@ -1854,17 +1743,20 @@ where
     }
 }
 
-/// Public [`Read`](crate::io::Read)-related functions
+/// `Read`-related methods
 impl<S, C> FileSystem<S, C>
 where
     S: BlockRead,
     C: Clock,
 {
-    /// Read all the entries of a directory ([`Path`]) into [`ReadDir`]
+    /// Return a [`ReadDir`] iterator of all the entries of the provided directory
+    ///
+    /// # Errors
     ///
     /// Fails if `path` doesn't represent a directory, or if that directory doesn't exist
+    #[inline]
     pub fn read_dir<P: AsRef<Path>>(&self, path: P) -> FSResult<ReadDir<'_, S, C>, S::Error> {
-        self._read_dir(path, false)
+        self.read_dir_internal(path, false)
     }
 
     /// Reads the volume label from the BIOS parameter block
@@ -1892,7 +1784,7 @@ where
     /// Reads the first volume label entry from the root directory that is found
     pub fn volume_label_root_dir(&self) -> Result<Option<String>, S::Error> {
         let volume_label = 'search: {
-            self._go_to_root_directory();
+            self.go_to_root_directory();
 
             for entry in self.process_current_dir() {
                 let entry = entry?;
@@ -1916,6 +1808,8 @@ where
     }
 
     /// Get a corresponding [`ROFile`] object from a [`Path`]
+    ///
+    /// # Errors
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
     pub fn get_ro_file<P: AsRef<Path>>(&self, path: P) -> FSResult<ROFile<'_, S, C>, S::Error> {
@@ -2037,7 +1931,7 @@ where
     }
 }
 
-/// [`Write`](crate::io::Write)-related functions
+/// `Write`-related methods
 impl<S, C> FileSystem<S, C>
 where
     S: BlockWrite,
@@ -2166,7 +2060,7 @@ where
 
         let now = self.options.clock.now();
 
-        let dir_cluster = self.create_entry_chain(self.dir_info.borrow().chain_start, now)?;
+        let dir_cluster = self.create_direntry_chain(self.dir_info.borrow().chain_start, now)?;
 
         // The cluster chain of the directory has been created,
         // we now need to add it as an entry to the current directory
@@ -2194,7 +2088,7 @@ where
         Ok(())
     }
 
-    /// Rename a file or directory to a new name
+    /// Rename a file or directory
     pub fn rename<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> FSResult<(), S::Error> {
         let from = from.as_ref();
         let to = to.as_ref();
@@ -2220,7 +2114,7 @@ where
         let entry_from = {
             let mut entry_from = None;
 
-            for entry in self.read_dir_internal(parent_from)? {
+            for entry in self.read_dir_raw(parent_from)? {
                 let entry = entry?;
 
                 if *entry.path() == from {
@@ -2236,7 +2130,7 @@ where
             }
         };
 
-        for entry in self.read_dir_internal(parent_to)? {
+        for entry in self.read_dir_raw(parent_to)? {
             let entry = entry?;
 
             if *entry.path() == to {
@@ -2282,7 +2176,7 @@ where
                 index: 1,
             };
 
-            self._go_to_cached_dir()?;
+            self.go_to_cached_dir()?;
             let bytes: [u8; DIRENTRY_SIZE] = zerocopy::transmute!(FATDirEntry::from(parent_entry));
 
             entry_location.set_bytes(self, bytes)?;
@@ -2321,8 +2215,6 @@ where
     }
 
     /// Remove a file from the filesystem, even if it is read-only
-    ///
-    /// **USE WITH EXTREME CAUTION!**
     #[inline]
     pub fn remove_file_unchecked<P: AsRef<Path>>(&self, path: P) -> FSResult<(), S::Error> {
         self.get_rw_file_unchecked(path)?.remove()?;
@@ -2332,7 +2224,9 @@ where
 
     /// Remove an empty directory from the filesystem
     ///
-    /// Errors if the path provided points to the root directory
+    /// # Errors
+    ///
+    /// Fails if the path provided points to the root directory
     pub fn remove_empty_dir<P: AsRef<Path>>(&self, path: P) -> FSResult<(), S::Error> {
         let path = path.as_ref();
 
@@ -2344,13 +2238,13 @@ where
             .components()
             .next_back()
             .expect("this iterator will always yield at least the root directory")
-            == WindowsComponent::root()
+            .is_root()
         {
             // we are in the root directory, we can't remove it
             return Err(FSError::InvalidInput);
         }
 
-        if self.read_dir_internal(path)?.next().is_some() {
+        if self.read_dir_raw(path)?.next().is_some() {
             return Err(FSError::DirectoryNotEmpty);
         }
 
@@ -2358,7 +2252,7 @@ where
             .parent()
             .expect("we aren't in the root directory, this shouldn't panic");
 
-        let parent_dir_entries = self.read_dir_internal(parent_path)?;
+        let parent_dir_entries = self.read_dir_raw(parent_path)?;
 
         let entry = {
             let mut entry = None;
@@ -2387,7 +2281,9 @@ where
 
     /// Removes a directory at this path, after removing all its contents.
     ///
-    /// Use with caution!
+    /// # Errors
+    ///
+    /// Fails if the path provided points to the root directory
     ///
     /// This will fail if there is at least 1 (one) read-only file
     /// in this directory or in any subdirectory. To avoid this behavior,
@@ -2410,7 +2306,9 @@ where
     /// Like [`remove_dir_all()`](FileSystem::remove_dir_all),
     /// but also removes read-only files.
     ///
-    /// **USE WITH EXTREME CAUTION!**
+    /// # Errors
+    ///
+    /// Fails if the path provided points to the root directory
     pub fn remove_dir_all_unchecked<P: AsRef<Path>>(&self, path: P) -> FSResult<(), S::Error> {
         let path = path.as_ref();
 
@@ -2418,7 +2316,7 @@ where
             return Err(FSError::MalformedPath);
         }
 
-        let mut read_dir = self.read_dir_internal(path)?;
+        let mut read_dir = self.read_dir_raw(path)?;
         loop {
             let entry = match read_dir.next() {
                 Some(entry) => entry?,
@@ -2441,8 +2339,12 @@ where
 
     /// Check `path` recursively to see if there are any read-only files in it
     ///
-    /// If successful, the `bool` returned indicates
+    /// If successful, the returned `bool` returned indicates
     /// whether or not at least 1 (one) read-only file has been found
+    ///
+    /// # Errors
+    ///
+    /// Fails if the path provided points to the root directory
     pub fn check_for_readonly_files<P: AsRef<Path>>(&self, path: P) -> FSResult<bool, S::Error> {
         let path = path.as_ref();
 
@@ -2450,7 +2352,7 @@ where
             return Err(FSError::MalformedPath);
         }
 
-        let mut read_dir = self.read_dir_internal(path)?;
+        let mut read_dir = self.read_dir_raw(path)?;
 
         loop {
             let entry = match read_dir.next() {
@@ -2477,6 +2379,8 @@ where
     }
 
     /// Get a corresponding [`RWFile`] object from a [`Path`]
+    ///
+    /// # Errors
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
     pub fn get_rw_file<P: AsRef<Path>>(&self, path: P) -> FSResult<RWFile<'_, S, C>, S::Error> {
@@ -2541,7 +2445,7 @@ where
         ))?;
 
         // remove already-existing label if such one is found
-        self._go_to_root_directory();
+        self.go_to_root_directory();
 
         for entry in self.process_current_dir() {
             let entry = entry?;
@@ -2665,7 +2569,7 @@ mod tests {
             concat!(
                 "this should pass. ",
                 "if it doesn't, either the corresponding .img file's FAT tables aren't identical",
-                "or the tables_are_identical function doesn't work correctly"
+                "or the tables_are_identical method doesn't work correctly"
             )
         );
 
@@ -2704,7 +2608,7 @@ mod tests {
             concat!(
                 "this should pass. ",
                 "if it doesn't, either the corresponding .img file's FAT tables aren't identical",
-                "or the tables_are_identical function doesn't work correctly"
+                "or the tables_are_identical method doesn't work correctly"
             )
         );
 
@@ -2764,10 +2668,7 @@ mod tests {
 
             fs.go_to_dir("/").unwrap();
 
-            let mut current_entry = EntryLocation {
-                unit: fs.dir_info.borrow().chain_start,
-                index: 0,
-            };
+            let mut current_entry = EntryLocation::from(fs.dir_info.borrow().chain_start);
 
             while let Some(next_entry) = current_entry
                 .next_entry(&fs)

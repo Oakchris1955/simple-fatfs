@@ -15,7 +15,7 @@ use crate::utils;
 use crate::{ClusterIndex, FileSystem};
 
 #[derive(Debug)]
-pub(crate) struct ReadDirInt<'a, S, C>
+pub(crate) struct ReadDirRaw<'a, S, C>
 where
     S: BlockRead,
     C: Clock,
@@ -31,7 +31,7 @@ where
     pub(crate) fs: &'a FileSystem<S, C>,
 }
 
-impl<'a, S, C> ReadDirInt<'a, S, C>
+impl<'a, S, C> ReadDirRaw<'a, S, C>
 where
     S: BlockRead,
     C: Clock,
@@ -43,10 +43,7 @@ where
             lfn_checksum: None,
             current_chain: None,
 
-            entry_location: Some(EntryLocation {
-                unit: *chain_start,
-                index: 0,
-            }),
+            entry_location: Some(EntryLocation::from(*chain_start)),
 
             fs,
         }
@@ -179,7 +176,7 @@ where
     }
 }
 
-impl<S, C> Iterator for ReadDirInt<'_, S, C>
+impl<S, C> Iterator for ReadDirRaw<'_, S, C>
 where
     S: BlockRead,
     C: Clock,
@@ -203,7 +200,7 @@ where
     }
 }
 
-impl<S, C> FusedIterator for ReadDirInt<'_, S, C>
+impl<S, C> FusedIterator for ReadDirRaw<'_, S, C>
 where
     S: BlockRead,
     C: Clock,
@@ -220,7 +217,7 @@ where
     S: BlockRead,
     C: Clock,
 {
-    inner: ReadDirInt<'a, S, C>,
+    inner: ReadDirRaw<'a, S, C>,
     parent: Box<Path>,
     /// Whether this iterator is intended for internal or public use
     internal: bool,
@@ -241,7 +238,7 @@ where
         P: AsRef<Path>,
     {
         Self {
-            inner: ReadDirInt::new(fs, chain_start),
+            inner: ReadDirRaw::new(fs, chain_start),
             parent: parent.as_ref().into(),
             internal,
         }

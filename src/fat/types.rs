@@ -4,7 +4,7 @@
 //! (e.g. [`ClusterIndex`] and [`ClusterCount`]).
 //! These are both under the hood aliased to the same data type.
 //! The only reason to keep the separated is too make the code more readable:
-//! for example, if a function returns a [`ClusterIndex`], we know that it
+//! for example, if a function/method returns a [`ClusterIndex`], we know that it
 //! returns the index of a particular cluster, whereas if it were to return
 //! [`ClusterCount`], it could return how many clusters are needed for
 //! a particular action or belong to an object.

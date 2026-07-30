@@ -170,16 +170,22 @@
 //!   locations: in the boot sector and as a special volume label entry
 //!   in the root directory. Windows read the FAT label only from the root
 //!   directory (and only update that). Keep that in mind when using the
-//!   various volume label functions
+//!   various volume label methods
 //!
 //!   For more info, please check <https://man7.org/linux/man-pages/man8/fatlabel.8.html>
+//!
+//!   Furthermore, the volume label field of the boot record has a size of 11 bytes.
+//!   That being said, how many bytes each character will occupy depends on
+//!   the currently-used codepage. To ensure a 1:1 char-to-byte conversions,
+//!   use ASCII characters, since there are guaranteed to be 1-byte long
+//!   no matter the codepage.
 //!
 //! [`Read`]: io::Read
 //! [`Seek`]: io::Seek
 //! [`Write`]: io::Write
 
 #![cfg_attr(not(feature = "std"), no_std)]
-// Even inside unsafe functions, we must acknowlegde the usage of unsafe code
+// Even inside unsafe functions/methods, we must acknowlegde the usage of unsafe code
 #![deny(deprecated)]
 #![deny(macro_use_extern_crate)]
 #![deny(private_bounds)]

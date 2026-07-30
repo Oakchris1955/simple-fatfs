@@ -7,7 +7,7 @@ use crate::block_io::prelude::*;
 use crate::time::Clock;
 use crate::{ClusterIndex, EntryIndex, FileSystem, SectorCount, SectorIndex};
 
-/// The root directory sector or data cluster a [`FATDirEntry`] belongs too
+/// The root directory sector or data cluster a [`FATDirEntry`](crate::fat::serde::FATDirEntry) belongs too
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntryLocationUnit {
     /// Sector offset from the start of the root directory region (FAT12/16)
@@ -17,21 +17,6 @@ pub(crate) enum EntryLocationUnit {
 }
 
 impl EntryLocationUnit {
-    pub(crate) fn from_partition_sector<S, C>(sector: SectorIndex, fs: &FileSystem<S, C>) -> Self
-    where
-        S: BlockRead,
-        C: Clock,
-    {
-        if sector < fs.props.first_data_sector() {
-            EntryLocationUnit::RootDirSector(
-                u16::try_from(sector - fs.props.first_root_dir_sector())
-                    .expect("this should be a valid root dir sector"),
-            )
-        } else {
-            EntryLocationUnit::DataCluster(fs.props.partition_sector_to_data_cluster(sector))
-        }
-    }
-
     pub(crate) fn get_max_offset<S, C>(&self, fs: &FileSystem<S, C>) -> u16
     where
         S: BlockRead,
@@ -103,7 +88,7 @@ pub(crate) enum EntryStatus {
     Used,
 }
 
-/// The location of a [`FATDirEntry`]
+/// The location of a [`FATDirEntry`](crate::fat::serde::FATDirEntry)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EntryLocation {
     /// the location of the first corresponding entry's data unit
@@ -113,16 +98,6 @@ pub(crate) struct EntryLocation {
 }
 
 impl EntryLocation {
-    pub(crate) fn from_partition_sector<S, C>(sector: SectorIndex, fs: &FileSystem<S, C>) -> Self
-    where
-        S: BlockRead,
-        C: Clock,
-    {
-        let unit = EntryLocationUnit::from_partition_sector(sector, fs);
-
-        Self { unit, index: 0 }
-    }
-
     pub(crate) fn entry_status<S, C>(&self, fs: &FileSystem<S, C>) -> Result<EntryStatus, S::Error>
     where
         S: BlockRead,
@@ -270,7 +245,13 @@ impl EntryLocation {
     }
 }
 
-/// The location of a chain of [`FATDirEntry`]
+impl From<EntryLocationUnit> for EntryLocation {
+    fn from(unit: EntryLocationUnit) -> Self {
+        Self { unit, index: 0 }
+    }
+}
+
+/// The location of a chain of [`FATDirEntry`](crate::fat::serde::FATDirEntry)
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DirEntryChain {
     /// the location of the first corresponding entry

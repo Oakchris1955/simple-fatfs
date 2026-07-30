@@ -32,7 +32,7 @@ impl From<RawAttributes> for Attributes {
 
 /// A list of the various (raw) attributes specified for a file/directory
 ///
-/// To check whether a given [`Attributes`] struct contains a flag, use the [`contains()`](Attributes::contains()) method
+/// To check whether a given [`RawAttributes`] struct contains a flag, use the [`contains()`](RawAttributes::contains()) method
 ///
 /// Generated using [bitflags](https://docs.rs/bitflags/2.6.0/bitflags/)
 #[derive(Immutable, FromBytes, IntoBytes, Debug, Clone, Copy, PartialEq)]

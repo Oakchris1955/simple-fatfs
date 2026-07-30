@@ -3,6 +3,7 @@ use core::{cmp, num, ops};
 use embedded_io::{ErrorType, Read, ReadExactError, Seek, SeekFrom, Write};
 use time::{Date, PrimitiveDateTime};
 
+use super::fatentry::FATEntry;
 use super::serde::lfn::calc_lfn_entries_needed;
 use super::serde::{FATDirEntry, MinProperties};
 use crate::block_io::prelude::*;
@@ -10,8 +11,8 @@ use crate::error::RWFileError;
 use crate::log::{global_log, local_log};
 use crate::time::Clock;
 use crate::{
-    ClusterIndex, EntryCount, FATEntry, FSError, FSResult, FileSize, FileSystem, InternalFSError,
-    Properties, SectorCount,
+    ClusterIndex, EntryCount, FSError, FSResult, FileSize, FileSystem, InternalFSError, Properties,
+    SectorCount,
 };
 
 #[derive(Debug)]
@@ -92,7 +93,7 @@ where
     }
 }
 
-// Internal functions
+// Internal methods
 impl<S, C> ROFile<'_, S, C>
 where
     S: BlockRead,
@@ -354,7 +355,7 @@ where
     }
 }
 
-// Public functions
+// Public methods
 impl<S, C> RWFile<'_, S, C>
 where
     S: BlockWrite,
@@ -458,7 +459,7 @@ where
     }
 }
 
-// Private functions
+// Private methods
 impl<S, C> RWFile<'_, S, C>
 where
     S: BlockWrite,
