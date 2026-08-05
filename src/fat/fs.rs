@@ -2403,8 +2403,8 @@ where
 
     /// Sets the volume label of the BIOS parameter block
     ///
-    /// If [`None`] is returned, the label was too big to fit to the volume label field
-    /// or the decoded text is `"NO NAME    "`
+    /// If [`None`] is returned, the label was too big to fit to the volume label
+    /// field and nothing was written or the decoded text is `"NO NAME    "`
     pub fn set_volume_label_bpb<L>(&self, label: L) -> Option<()>
     where
         L: AsRef<str>,
@@ -2439,18 +2439,19 @@ where
 
     /// Sets the volume label of the root directory, removing an already-existing label if one is found
     ///
-    /// If [`None`] is returned, the label was too big to fit to the volume label field
+    /// If [`None`] is returned, the label was too big to fit to the volume label
+    /// field and nothing was written
     pub fn set_volume_label_root_dir<L>(&self, label: L) -> FSResult<Option<()>, S::Error>
     where
         L: AsRef<str>,
     {
         let mut label_bytes = [b' '; VOLUME_LABEL_BYTES];
 
-        Ok::<_, S::Error>(utils::string::copy_cp_chars(
-            &mut label_bytes,
-            label.as_ref(),
-            self.options.codepage,
-        ))?;
+        if utils::string::copy_cp_chars(&mut label_bytes, label.as_ref(), self.options.codepage)
+            .is_none()
+        {
+            return Ok(None);
+        };
 
         // remove already-existing label if such one is found
         self.go_to_root_directory();
