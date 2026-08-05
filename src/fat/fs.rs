@@ -80,22 +80,23 @@ impl FATSectorProps {
     }
 
     #[expect(non_snake_case)]
-    pub fn get_corresponding_FAT_sectors<S, C>(&self, fs: &FileSystem<S, C>) -> Box<[SectorIndex]>
+    pub fn get_corresponding_FAT_sectors<S, C>(
+        this: &Self,
+        fs: &FileSystem<S, C>,
+    ) -> Box<[SectorIndex]>
     where
         S: BlockRead,
         C: Clock,
     {
-        let mut vec = Vec::with_capacity(fs.props.fat_table_count().into());
+        let mut r#box = vec![0; fs.props.fat_table_count().into()].into_boxed_slice();
 
         for i in 0..fs.props.fat_table_count() {
-            vec.push(
-                SectorIndex::from(fs.props.first_fat_sector())
-                    + SectorCount::from(i) * fs.props.fat_sector_size()
-                    + self.sector_offset,
-            )
+            r#box[usize::from(i)] = SectorIndex::from(fs.props.first_fat_sector())
+                + SectorCount::from(i) * fs.props.fat_sector_size()
+                + this.sector_offset;
         }
 
-        vec.into_boxed_slice()
+        r#box
     }
 }
 
@@ -1606,8 +1607,8 @@ where
     /// This method is intended to be used internally mainly by the [`sync_sector_buffer`](Self::sync_sector_buffer)
     /// method. Consider using that instead
     #[expect(non_snake_case)]
-    fn sync_FAT_sector(&self, fat_sector_props: &FATSectorProps) -> Result<(), S::Error> {
-        for sector in fat_sector_props.get_corresponding_FAT_sectors(self) {
+    fn sync_FAT_sector(&self, props: &FATSectorProps) -> Result<(), S::Error> {
+        for sector in FATSectorProps::get_corresponding_FAT_sectors(props, self) {
             self.sector_buffer
                 .borrow()
                 .write_copy(&self.storage, sector)?;
