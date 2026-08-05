@@ -1281,7 +1281,7 @@ where
                     let clusters_to_allocate = (entries_left - free_entries_on_current_cluster)
                         .div_ceil(entries_per_cluster);
 
-                    let first_cluster = self.allocate_clusters(
+                    let first_cluster = self.allocate_and_zeroize_clusters(
                         num::NonZero::new(clusters_to_allocate.into())
                             .expect("this should be at least 1"),
                         Some(cluster),
@@ -1291,21 +1291,6 @@ where
                     if unused_chain_len == 0 {
                         first_chain_entry.unit = EntryLocationUnit::DataCluster(first_cluster);
                         first_chain_entry.index = 0;
-                    }
-
-                    // before we return, we should zero those sectors according to the FAT spec
-                    for cluster in
-                        first_cluster..(first_cluster + ClusterCount::from(clusters_to_allocate))
-                    {
-                        let first_sector = self.props.data_cluster_to_partition_sector(cluster);
-
-                        for sector in first_sector
-                            ..(first_sector + SectorCount::from(self.props.sectors_per_cluster()))
-                        {
-                            self.load_nth_sector(sector)?;
-                            self.sector_buffer.borrow_mut().fill(0);
-                            self.set_modified();
-                        }
                     }
                 }
                 local_log::trace!(
@@ -1326,7 +1311,8 @@ where
         datetime: PrimitiveDateTime,
     ) -> FSResult<ClusterIndex, S::Error> {
         // we need to allocate a cluster
-        let dir_cluster = self.allocate_clusters(num::NonZero::new(1).unwrap(), None)?;
+        let dir_cluster =
+            self.allocate_and_zeroize_clusters(num::NonZero::new(1).unwrap(), None)?;
 
         let entries = [
             MinProperties {
@@ -1361,9 +1347,6 @@ where
 
         self.load_nth_sector(self.props.data_cluster_to_partition_sector(dir_cluster))?;
 
-        // we zero the current sector
-        self.sector_buffer.borrow_mut().fill(0);
-
         let mut entry_location = EntryLocation::from(EntryLocationUnit::DataCluster(dir_cluster));
 
         for (i, bytes) in entries_iter.enumerate() {
@@ -1373,18 +1356,6 @@ where
                 entry_location = EntryLocation::next_entry(entry_location, self)?
                     .expect("this will only be called once");
             }
-        }
-
-        self.set_modified();
-
-        // we also zero everything else in the cluster
-        let stored_sector = self.sector_buffer.borrow().stored_sector();
-        for sector in (stored_sector + 1)
-            ..(stored_sector + SectorCount::from(self.props.sectors_per_cluster()))
-        {
-            self.load_nth_sector(sector)?;
-            self.sector_buffer.borrow_mut().fill(0);
-            self.set_modified();
         }
 
         local_log::trace!("Successful created a new cluster chain with parent {parent:?}");
@@ -1604,6 +1575,40 @@ where
         }
 
         Ok(first_allocated_cluster.expect("This should have Some value by now"))
+    }
+
+    /// [`Allocate`](Self::allocate_clusters) clusters and [`zeroize`](Self::zeroize_clusters) them
+    pub(crate) fn allocate_and_zeroize_clusters(
+        &self,
+        n: num::NonZero<ClusterCount>,
+        first_cluster: Option<ClusterIndex>,
+    ) -> FSResult<ClusterIndex, S::Error> {
+        let first_allocated_cluster = self.allocate_clusters(n, first_cluster)?;
+
+        self.zeroize_clusters(n, first_allocated_cluster)?;
+
+        Ok(first_allocated_cluster)
+    }
+
+    /// Zeroize `n` clusters, starting at `first_cluster`
+    pub(crate) fn zeroize_clusters(
+        &self,
+        n: num::NonZero<ClusterCount>,
+        first_cluster: ClusterIndex,
+    ) -> FSResult<(), S::Error> {
+        for cluster in first_cluster..(first_cluster + ClusterCount::from(n)) {
+            let first_sector = self.props.data_cluster_to_partition_sector(cluster);
+
+            for sector in
+                first_sector..(first_sector + SectorCount::from(self.props.sectors_per_cluster()))
+            {
+                self.load_nth_sector(sector)?;
+                self.sector_buffer.borrow_mut().fill(0);
+                self.set_modified();
+            }
+        }
+
+        Ok(())
     }
 
     /// Syncs `self.sector_buffer` back to the storage
