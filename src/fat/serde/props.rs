@@ -144,6 +144,12 @@ impl Properties {
 // at least the `.` and `..` entries
 // TODO: actually check this on runtime
 pub(crate) const NONROOT_MIN_DIRENTRIES: usize = 2;
+// the PARENT DIR entry is always first on a directory
+// other than the root directory
+pub(crate) const CURRENT_DIR_ENTRY_INDEX: usize = 0;
+// the PARENT DIR entry is always second on a directory
+// other than the root directory
+pub(crate) const PARENT_DIR_ENTRY_INDEX: usize = 1;
 
 /// A less-detailed version of [`RawProperties`]
 #[derive(Debug, Clone)]

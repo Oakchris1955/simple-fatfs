@@ -7,12 +7,15 @@ use super::attributes::RawAttributes;
 use super::entry_composer::{LAST_AND_UNUSED_ENTRY, UNUSED_ENTRY, USED_KANJI};
 use super::lfn::{LFNEntry, CHARS_PER_LFN_ENTRY, LFN_MAX_ENTRIES};
 use super::location::{DirEntryChain, EntryLocation, EntryLocationUnit};
-use super::{DirEntry, FATDirEntry, MinProperties, RawProperties};
+use super::{
+    DirEntry, FATDirEntry, MinProperties, RawProperties, CURRENT_DIR_ENTRY_INDEX, CURRENT_DIR_SFN,
+    PARENT_DIR_ENTRY_INDEX, PARENT_DIR_SFN,
+};
 use crate::block_io::prelude::*;
 use crate::path::{path_consts, Path};
 use crate::time::Clock;
 use crate::utils;
-use crate::{ClusterIndex, FileSystem};
+use crate::{ClusterIndex, FSError, FSResult, FileSystem, InternalFSError};
 
 #[derive(Debug)]
 pub(crate) struct ReadDirRaw<'a, S, C>
@@ -47,6 +50,47 @@ where
 
             fs,
         }
+    }
+
+    /// Attempt to find the `.` entry of the directory this [`ReadDirRaw`] corresponds to
+    ///
+    /// # Errors
+    ///
+    /// Apart from iterator-related [`FSError`]'s, this method will also return
+    /// an [`InternalFSError::MalformedEntryChain`] if the `.` entry cannot be found.
+    ///
+    /// This may occur if this [`ReadDirRaw`] corresponds to the root directory,
+    /// the directory's entrie are malformed, or if the `.` wasn't found in the
+    /// expected position (according to the FAT specification, it must be first
+    /// within the entry chain, so if it isn't found there, it is fair on our side to error)
+    #[expect(dead_code, reason = "might come in handy later")]
+    pub(crate) fn get_current_dir_entry(mut self) -> FSResult<RawProperties, S::Error> {
+        self.nth(CURRENT_DIR_ENTRY_INDEX)
+            .transpose()?
+            .filter(|entry| entry.is_dir && entry.sfn == CURRENT_DIR_SFN)
+            .ok_or(FSError::InternalFSError(
+                InternalFSError::MalformedEntryChain,
+            ))
+    }
+
+    /// Attempt to find the `..` entry of the directory this [`ReadDirRaw`] corresponds to
+    ///
+    /// # Errors
+    ///
+    /// Apart from iterator-related [`FSError`]'s, this method will also return
+    /// an [`InternalFSError::MalformedEntryChain`] if the `..` entry cannot be found.
+    ///
+    /// This may occur if this [`ReadDirRaw`] corresponds to the root directory,
+    /// the directory's entrie are malformed, or if the `..` wasn't found in the
+    /// expected position (according to the FAT specification, it must be second
+    /// within the entry chain, so if it isn't found there, it is fair on our side to error)
+    pub(crate) fn get_parent_dir_entry(mut self) -> FSResult<RawProperties, S::Error> {
+        self.nth(PARENT_DIR_ENTRY_INDEX)
+            .transpose()?
+            .filter(|entry| entry.is_dir && entry.sfn == PARENT_DIR_SFN)
+            .ok_or(FSError::InternalFSError(
+                InternalFSError::MalformedEntryChain,
+            ))
     }
 
     fn next_inner(&mut self) -> Result<Option<RawProperties>, S::Error> {

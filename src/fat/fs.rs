@@ -29,7 +29,7 @@ use super::serde::location::{DirEntryChain, EntryLocation, EntryLocationUnit, En
 use super::serde::readir::{ReadDir, ReadDirRaw};
 use super::serde::{
     FATDirEntry, MinProperties, RawProperties, DIRENTRY_LIMIT, DIRENTRY_SIZE,
-    NONROOT_MIN_DIRENTRIES, PARENT_DIR_SFN,
+    NONROOT_MIN_DIRENTRIES,
 };
 use crate::log::{global_log, local_log};
 use crate::options::FSOptions;
@@ -588,17 +588,9 @@ where
         if let Some(parent_path) = self.dir_info.borrow().path.parent() {
             let parent_pathbuf = parent_path.to_path_buf();
 
-            let mut entries = self.process_current_dir();
+            let entries = self.process_current_dir();
 
-            // the PARENT DIR entry is always second on a directory
-            // other than the root directory
-            let parent_entry = entries
-                .nth(NONROOT_MIN_DIRENTRIES - 1)
-                .transpose()?
-                .filter(|entry| entry.is_dir && entry.sfn == PARENT_DIR_SFN)
-                .ok_or(FSError::InternalFSError(
-                    InternalFSError::MalformedEntryChain,
-                ))?;
+            let parent_entry = entries.get_parent_dir_entry()?;
 
             let mut dir_info = self.dir_info.borrow_mut();
 
