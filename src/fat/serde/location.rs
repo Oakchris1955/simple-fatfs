@@ -7,6 +7,15 @@ use crate::block_io::prelude::*;
 use crate::time::Clock;
 use crate::{ClusterIndex, EntryIndex, FileSystem, SectorCount, SectorIndex};
 
+/*
+ * I have opted for using associated functions instead of methods for
+ * `EntryLocation` and `EntryLocationUnit`, since they aren't strictly
+ * tied to most of them and each function call requires a corresponding
+ * `FileSystem` object, otherwise data corruption may happen
+ * (this won't happen in practice, since each FileSystem only handles
+ * `EntryLocation`s and `EntryLocationUnit`s it generates)
+ */
+
 /// The root directory sector or data cluster a [`FATDirEntry`](crate::fat::serde::FATDirEntry) belongs too
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntryLocationUnit {
@@ -17,12 +26,12 @@ pub(crate) enum EntryLocationUnit {
 }
 
 impl EntryLocationUnit {
-    pub(crate) fn get_max_offset<S, C>(&self, fs: &FileSystem<S, C>) -> u16
+    pub(crate) fn get_max_offset<S, C>(this: &Self, fs: &FileSystem<S, C>) -> u16
     where
         S: BlockRead,
         C: Clock,
     {
-        let unit_size = match self {
+        let unit_size = match this {
             EntryLocationUnit::DataCluster(_) => fs.props.cluster_size(),
             EntryLocationUnit::RootDirSector(_) => fs.props.sector_size().into(),
         };
@@ -31,12 +40,12 @@ impl EntryLocationUnit {
             .expect("a cluster can have a max of ~16k entries")
     }
 
-    pub(crate) fn get_entry_sector<S, C>(&self, fs: &FileSystem<S, C>) -> SectorIndex
+    pub(crate) fn get_entry_sector<S, C>(this: &Self, fs: &FileSystem<S, C>) -> SectorIndex
     where
         S: BlockRead,
         C: Clock,
     {
-        match self {
+        match this {
             EntryLocationUnit::RootDirSector(root_dir_sector) => {
                 SectorCount::from(*root_dir_sector) + fs.props.first_root_dir_sector()
             }
@@ -47,14 +56,14 @@ impl EntryLocationUnit {
     }
 
     pub(crate) fn get_next_unit<S, C>(
-        &self,
+        this: &Self,
         fs: &FileSystem<S, C>,
     ) -> Result<Option<EntryLocationUnit>, S::Error>
     where
         S: BlockRead,
         C: Clock,
     {
-        match self {
+        match this {
             EntryLocationUnit::RootDirSector(sector) => match &*fs.boot_record.borrow() {
                 BootRecord::Fat(boot_record_fat) => {
                     if boot_record_fat.root_dir_sectors() == 0 {
@@ -98,15 +107,18 @@ pub(crate) struct EntryLocation {
 }
 
 impl EntryLocation {
-    pub(crate) fn entry_status<S, C>(&self, fs: &FileSystem<S, C>) -> Result<EntryStatus, S::Error>
+    pub(crate) fn entry_status<S, C>(
+        this: &Self,
+        fs: &FileSystem<S, C>,
+    ) -> Result<EntryStatus, S::Error>
     where
         S: BlockRead,
         C: Clock,
     {
-        let entry_sector = self.get_entry_sector(fs);
+        let entry_sector = Self::get_entry_sector(this, fs);
         fs.load_nth_sector(entry_sector)?;
 
-        let byte_offset = self.get_sector_byte_offset(fs);
+        let byte_offset = Self::get_sector_byte_offset(this, fs);
         Ok(match fs.sector_buffer.borrow()[byte_offset] {
             UNUSED_ENTRY => EntryStatus::Unused,
             LAST_AND_UNUSED_ENTRY => EntryStatus::LastUnused,
@@ -115,39 +127,39 @@ impl EntryLocation {
     }
 
     #[inline]
-    pub(crate) fn get_entry_sector<S, C>(&self, fs: &FileSystem<S, C>) -> SectorIndex
+    pub(crate) fn get_entry_sector<S, C>(this: &Self, fs: &FileSystem<S, C>) -> SectorIndex
     where
         S: BlockRead,
         C: Clock,
     {
-        let sector_offset: SectorCount = SectorCount::from(self.index)
+        let sector_offset: SectorCount = SectorCount::from(this.index)
             * SectorCount::try_from(DIRENTRY_SIZE).expect("32 can fit into a u32")
             / SectorCount::from(fs.props.sector_size());
 
-        self.unit.get_entry_sector(fs) + sector_offset
+        EntryLocationUnit::get_entry_sector(&this.unit, fs) + sector_offset
     }
 
     #[inline]
-    pub(crate) fn get_sector_byte_offset<S, C>(&self, fs: &FileSystem<S, C>) -> usize
+    pub(crate) fn get_sector_byte_offset<S, C>(this: &Self, fs: &FileSystem<S, C>) -> usize
     where
         S: BlockRead,
         C: Clock,
     {
-        (usize::from(self.index) * DIRENTRY_SIZE) % usize::from(fs.props.sector_size())
+        (usize::from(this.index) * DIRENTRY_SIZE) % usize::from(fs.props.sector_size())
     }
 
     // Note: this could also return a borrowed subslice from fs.sector_buffer,
     // but since it is only 32 bytes, I don't think it is worth the hastle
     pub(crate) fn get_bytes<S, C>(
-        &self,
+        this: &Self,
         fs: &FileSystem<S, C>,
     ) -> Result<[u8; DIRENTRY_SIZE], S::Error>
     where
         S: BlockRead,
         C: Clock,
     {
-        let entry_sector = self.get_entry_sector(fs);
-        let entry_offset = self.get_sector_byte_offset(fs);
+        let entry_sector = Self::get_entry_sector(this, fs);
+        let entry_offset = Self::get_sector_byte_offset(this, fs);
         let mut bytes = [0u8; DIRENTRY_SIZE];
         bytes.copy_from_slice(
             &fs.load_nth_sector(entry_sector)?[entry_offset..entry_offset + DIRENTRY_SIZE],
@@ -157,7 +169,7 @@ impl EntryLocation {
     }
 
     pub(crate) fn set_bytes<S, C>(
-        &self,
+        this: &Self,
         fs: &FileSystem<S, C>,
         bytes: [u8; DIRENTRY_SIZE],
     ) -> Result<(), S::Error>
@@ -165,8 +177,8 @@ impl EntryLocation {
         S: BlockWrite,
         C: Clock,
     {
-        let entry_sector = self.get_entry_sector(fs);
-        let entry_offset = self.get_sector_byte_offset(fs);
+        let entry_sector = Self::get_entry_sector(this, fs);
+        let entry_offset = Self::get_sector_byte_offset(this, fs);
         fs.load_nth_sector(entry_sector)?;
         fs.sector_buffer.borrow_mut()[entry_offset..entry_offset + DIRENTRY_SIZE]
             .copy_from_slice(&bytes);
@@ -176,7 +188,7 @@ impl EntryLocation {
     }
 
     pub(crate) fn free_entry<S, C>(
-        &self,
+        this: &Self,
         fs: &FileSystem<S, C>,
         is_last: bool,
     ) -> Result<(), S::Error>
@@ -184,10 +196,10 @@ impl EntryLocation {
         S: BlockWrite,
         C: Clock,
     {
-        let entry_sector = self.unit.get_entry_sector(fs);
+        let entry_sector = EntryLocationUnit::get_entry_sector(&this.unit, fs);
         fs.load_nth_sector(entry_sector)?;
 
-        let byte_offset = self.get_sector_byte_offset(fs);
+        let byte_offset = Self::get_sector_byte_offset(this, fs);
         fs.sector_buffer.borrow_mut()[byte_offset] = if is_last {
             LAST_AND_UNUSED_ENTRY
         } else {
@@ -199,32 +211,34 @@ impl EntryLocation {
     }
 
     pub(crate) fn next_entry<S, C>(
-        mut self,
+        mut this: Self,
         fs: &FileSystem<S, C>,
     ) -> Result<Option<EntryLocation>, S::Error>
     where
         S: BlockRead,
         C: Clock,
     {
-        self.index += 1;
+        this.index += 1;
 
         // we haven't advanced to a new unit, we return immediately
-        if self.index < self.unit.get_max_offset(fs) {
-            return Ok(Some(self));
+        if this.index < EntryLocationUnit::get_max_offset(&this.unit, fs) {
+            return Ok(Some(this));
         }
 
         // we try to advance to the next entry unit (if it exists)
-        Ok(self.unit.get_next_unit(fs)?.map(|unit| {
-            self.unit = unit;
-            self.index = 0;
+        Ok(
+            EntryLocationUnit::get_next_unit(&this.unit, fs)?.map(|unit| {
+                this.unit = unit;
+                this.index = 0;
 
-            self
-        }))
+                this
+            }),
+        )
     }
 
     // The NonZero here is to ensure that the `0..n` doesn't panic
     pub(crate) fn nth_entry<S, C>(
-        self,
+        this: Self,
         fs: &FileSystem<S, C>,
         n: num::NonZero<EntryIndex>,
     ) -> Result<Option<EntryLocation>, S::Error>
@@ -232,10 +246,10 @@ impl EntryLocation {
         S: BlockRead,
         C: Clock,
     {
-        let mut current_entry = self;
+        let mut current_entry = this;
 
         for _ in 0..n.into() {
-            match current_entry.next_entry(fs)? {
+            match Self::next_entry(current_entry, fs)? {
                 Some(next_entry) => current_entry = next_entry,
                 None => return Ok(None),
             }

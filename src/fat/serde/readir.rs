@@ -51,13 +51,13 @@ where
 
     fn next_inner(&mut self) -> Result<Option<RawProperties>, S::Error> {
         // if this is `None`, the iterator has been exhausted
-        let entry_location = match &mut self.entry_location {
+        let entry_location = match self.entry_location {
             Some(entry_location) => entry_location,
             None => return Ok(None),
         };
 
         // load the sector of the current entry
-        let mut chunk = entry_location.get_bytes(self.fs)?;
+        let mut chunk = EntryLocation::get_bytes(&entry_location, self.fs)?;
 
         match chunk[0] {
             LAST_AND_UNUSED_ENTRY => {
@@ -66,7 +66,7 @@ where
                 return Ok(None);
             }
             UNUSED_ENTRY => {
-                self.entry_location = entry_location.next_entry(self.fs)?;
+                self.entry_location = EntryLocation::next_entry(entry_location, self.fs)?;
                 return Ok(None);
             }
             USED_KANJI => chunk[0] = UNUSED_ENTRY,
@@ -80,7 +80,7 @@ where
             Some(current_chain) => current_chain.len += 1,
             None => {
                 self.current_chain = Some(DirEntryChain {
-                    location: *entry_location,
+                    location: entry_location,
                     len: 1,
                 })
             }
@@ -145,7 +145,7 @@ where
                     entry.modified.try_into(),
                     entry.accessed.try_into(),
                 ) {
-                    self.entry_location = entry_location.next_entry(self.fs)?;
+                    self.entry_location = EntryLocation::next_entry(entry_location, self.fs)?;
 
                     return Ok(Some(RawProperties {
                         props: MinProperties {
@@ -170,7 +170,7 @@ where
             }
         }
 
-        self.entry_location = entry_location.next_entry(self.fs)?;
+        self.entry_location = EntryLocation::next_entry(entry_location, self.fs)?;
 
         Ok(None)
     }

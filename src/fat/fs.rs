@@ -683,7 +683,7 @@ where
     /// Load into the sector buffer the first sector of the internal directory cache chain
     fn go_to_cached_dir(&self) -> FSResult<(), S::Error> {
         let dir_chain = self.dir_info.borrow().chain_start;
-        let target_sector = dir_chain.get_entry_sector(self);
+        let target_sector = EntryLocationUnit::get_entry_sector(&dir_chain, self);
 
         if target_sector != self.sector_buffer.borrow().stored_sector() {
             self.load_nth_sector(target_sector)?;
@@ -1173,7 +1173,7 @@ where
         let mut explored_entries_count: EntryCount = 0;
 
         loop {
-            let entry_status = last_explored_entry.entry_status(self)?;
+            let entry_status = EntryLocation::entry_status(&last_explored_entry, self)?;
             explored_entries_count += 1;
             match entry_status {
                 EntryStatus::Unused | EntryStatus::LastUnused => unused_chain_len += 1,
@@ -1190,8 +1190,9 @@ where
 
             // we also break if we have reached the end of the cluster chain
             // or else the MalformedEntryChain below will kick in
-            if last_explored_entry.unit.get_next_unit(self)?.is_none()
-                && last_explored_entry.index + 1 >= last_explored_entry.unit.get_max_offset(self)
+            if EntryLocationUnit::get_next_unit(&last_explored_entry.unit, self)?.is_none()
+                && last_explored_entry.index + 1
+                    >= EntryLocationUnit::get_max_offset(&last_explored_entry.unit, self)
             {
                 break;
             }
@@ -1212,12 +1213,9 @@ where
                 return self.allocate_nth_entries(n);
             }
 
-            last_explored_entry =
-                last_explored_entry
-                    .next_entry(self)?
-                    .ok_or(FSError::InternalFSError(
-                        InternalFSError::MalformedEntryChain,
-                    ))?;
+            last_explored_entry = EntryLocation::next_entry(last_explored_entry, self)?.ok_or(
+                FSError::InternalFSError(InternalFSError::MalformedEntryChain),
+            )?;
 
             if entry_status == EntryStatus::Used {
                 first_chain_entry = last_explored_entry;
@@ -1233,7 +1231,7 @@ where
             EntryLocationUnit::RootDirSector(_) => {
                 let remaining_sectors: SectorCount = self.props.first_root_dir_sector()
                     + SectorCount::from(self.props.root_dir_sectors())
-                    - last_explored_entry.unit.get_entry_sector(self);
+                    - EntryLocationUnit::get_entry_sector(&last_explored_entry.unit, self);
 
                 let entries_per_sector = self.props.sector_size()
                     / u16::try_from(DIRENTRY_SIZE).expect("32 can fit in a u16");
@@ -1356,11 +1354,10 @@ where
         let mut entry_location = EntryLocation::from(EntryLocationUnit::DataCluster(dir_cluster));
 
         for (i, bytes) in entries_iter.enumerate() {
-            entry_location.set_bytes(self, bytes)?;
+            EntryLocation::set_bytes(&entry_location, self, bytes)?;
 
             if i < NONROOT_MIN_DIRENTRIES {
-                entry_location = entry_location
-                    .next_entry(self)?
+                entry_location = EntryLocation::next_entry(entry_location, self)?
                     .expect("this will only be called once");
             }
         }
@@ -1416,15 +1413,14 @@ where
             .expect("this iterator is guaranteed to return at least once");
 
         loop {
-            current_entry.set_bytes(self, entry_bytes)?;
+            EntryLocation::set_bytes(&current_entry, self, entry_bytes)?;
 
             match entries_iter.next() {
                 Some(bytes) => entry_bytes = bytes,
                 None => break,
             };
 
-            current_entry = current_entry
-                .next_entry(self)?
+            current_entry = EntryLocation::next_entry(current_entry, self)?
                 .expect("This entry chain should be valid, we just generated it");
         }
 
@@ -1450,14 +1446,14 @@ where
         local_log::trace!("Defragmenting current entry chain starting at {current_entry_loc:?}");
 
         loop {
-            match current_entry_loc.entry_status(self)? {
+            match EntryLocation::entry_status(&current_entry_loc, self)? {
                 EntryStatus::Used => {
                     // no reason to copy the bytes if both locations are the same
                     if current_entry_loc != new_chain_end {
                         // copy the bytes where they belong
-                        let bytes = current_entry_loc.get_bytes(self)?;
+                        let bytes = EntryLocation::get_bytes(&current_entry_loc, self)?;
 
-                        new_chain_end.set_bytes(self, bytes)?;
+                        EntryLocation::set_bytes(&new_chain_end, self, bytes)?;
 
                         // what if for whatever reason the data types changes?
                         #[expect(clippy::absurd_extreme_comparisons)]
@@ -1466,28 +1462,27 @@ where
                         }
 
                         // don't forget to free the entry
-                        current_entry_loc.free_entry(self, false)?;
+                        EntryLocation::free_entry(&current_entry_loc, self, false)?;
                     }
 
                     entry_count += 1;
 
                     // advance the new entry chain
-                    new_chain_end = new_chain_end
-                        .next_entry(self)?
+                    new_chain_end = EntryLocation::next_entry(new_chain_end, self)?
                         .expect("we just pushed an entry to this chain")
                 }
                 EntryStatus::LastUnused => break,
                 _ => (),
             }
 
-            current_entry_loc = match current_entry_loc.next_entry(self)? {
+            current_entry_loc = match EntryLocation::next_entry(current_entry_loc, self)? {
                 Some(entry) => entry,
                 None => break,
             }
         }
 
         // we should also probably mark the entry after the last used one as last and unused
-        new_chain_end.free_entry(self, true)?;
+        EntryLocation::free_entry(&new_chain_end, self, true)?;
 
         self.dir_info.borrow_mut().chain_end = Some(new_chain_end);
 
@@ -1507,7 +1502,7 @@ where
         let mut current_entry = chain.location;
 
         loop {
-            current_entry.free_entry(self, false)?;
+            EntryLocation::free_entry(&current_entry, self, false)?;
 
             entries_freed += 1;
 
@@ -1515,7 +1510,7 @@ where
                 break;
             }
 
-            current_entry = match current_entry.next_entry(self)? {
+            current_entry = match EntryLocation::next_entry(current_entry, self)? {
                 Some(current_entry) => current_entry,
                 None => unreachable!(
                     concat!("It is guaranteed that at least as many entries ",
@@ -2179,7 +2174,7 @@ where
             self.go_to_cached_dir()?;
             let bytes: [u8; DIRENTRY_SIZE] = zerocopy::transmute!(FATDirEntry::from(parent_entry));
 
-            entry_location.set_bytes(self, bytes)?;
+            EntryLocation::set_bytes(&entry_location, self, bytes)?;
         }
 
         let old_chain = entry_from.chain;
@@ -2670,10 +2665,11 @@ mod tests {
 
             let mut current_entry = EntryLocation::from(fs.dir_info.borrow().chain_start);
 
-            while let Some(next_entry) = current_entry
-                .next_entry(&fs)
+            while let Some(next_entry) = EntryLocation::next_entry(current_entry, &fs)
                 .unwrap()
-                .filter(|entry| entry.entry_status(&fs).unwrap() != EntryStatus::LastUnused)
+                .filter(|entry| {
+                    EntryLocation::entry_status(entry, &fs).unwrap() != EntryStatus::LastUnused
+                })
             {
                 current_entry = next_entry;
                 i += 1
