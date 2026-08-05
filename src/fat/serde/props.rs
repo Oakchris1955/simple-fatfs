@@ -9,12 +9,16 @@ use alloc::{
 use time::{Date, PrimitiveDateTime};
 
 use super::attributes::{Attributes, RawAttributes};
+use super::boot_sector::VOLUME_LABEL_BYTES;
 use super::location::DirEntryChain;
+use super::location::EntryLocationUnit;
 use super::{DirEntry, Sfn};
+use super::{CURRENT_DIR_SFN, PARENT_DIR_SFN};
 use crate::block_io::prelude::*;
 use crate::path::Path;
 use crate::time::Clock;
-use crate::{ClusterIndex, Codepage, FileSize, FileSystem};
+use crate::utils;
+use crate::{ClusterIndex, Codepage, FSResult, FileSize, FileSystem};
 
 /// A container for file/directory properties
 #[derive(Clone, Debug)]
@@ -153,6 +157,108 @@ pub(crate) struct MinProperties {
     pub(crate) accessed: Option<Date>,
     pub(crate) file_size: FileSize,
     pub(crate) data_cluster: ClusterIndex,
+}
+
+impl MinProperties {
+    pub(crate) fn new(
+        name: Option<Box<str>>,
+        sfn: Sfn,
+        attributes: RawAttributes,
+        datetime: PrimitiveDateTime,
+        data_cluster: ClusterIndex,
+    ) -> Self {
+        Self {
+            name,
+            sfn,
+            attributes,
+            created: Some(datetime),
+            modified: datetime,
+            accessed: Some(datetime.date()),
+            file_size: 0,
+            data_cluster,
+        }
+    }
+
+    pub(crate) fn new_current_dir(datetime: PrimitiveDateTime, dir_cluster: ClusterIndex) -> Self {
+        Self::new(
+            None,
+            CURRENT_DIR_SFN,
+            RawAttributes::DIRECTORY,
+            datetime,
+            dir_cluster,
+        )
+    }
+
+    pub(crate) fn new_parent_dir(datetime: PrimitiveDateTime, parent: EntryLocationUnit) -> Self {
+        Self::new(
+            None,
+            PARENT_DIR_SFN,
+            RawAttributes::DIRECTORY,
+            datetime,
+            match parent {
+                EntryLocationUnit::DataCluster(cluster) => cluster,
+                EntryLocationUnit::RootDirSector(_) => 0,
+            },
+        )
+    }
+
+    pub(crate) fn new_file<S, C>(
+        datetime: PrimitiveDateTime,
+        file_name: &str,
+        fs: &FileSystem<S, C>,
+        parent_dir: impl AsRef<Path>,
+        file_cluster: ClusterIndex,
+    ) -> FSResult<Self, S::Error>
+    where
+        S: BlockWrite,
+        C: Clock,
+    {
+        let sfn = utils::string::gen_sfn(file_name, fs, parent_dir)?;
+
+        Ok(MinProperties::new(
+            Some(file_name.into()),
+            sfn,
+            // this needs to be set when creating a file
+            RawAttributes::ARCHIVE,
+            datetime,
+            file_cluster,
+        ))
+    }
+
+    pub(crate) fn new_dir<S, C>(
+        datetime: PrimitiveDateTime,
+        dir_name: &str,
+        fs: &FileSystem<S, C>,
+        parent_dir: impl AsRef<Path>,
+        dir_cluster: ClusterIndex,
+    ) -> FSResult<Self, S::Error>
+    where
+        S: BlockWrite,
+        C: Clock,
+    {
+        let sfn = utils::string::gen_sfn(dir_name, fs, parent_dir)?;
+
+        Ok(MinProperties::new(
+            Some(dir_name.into()),
+            sfn,
+            RawAttributes::DIRECTORY,
+            datetime,
+            dir_cluster,
+        ))
+    }
+
+    pub(crate) fn new_volume_label(
+        datetime: PrimitiveDateTime,
+        label_bytes: [u8; VOLUME_LABEL_BYTES],
+    ) -> Self {
+        Self::new(
+            None,
+            Sfn::new_from_slice(label_bytes),
+            RawAttributes::VOLUME_ID,
+            datetime,
+            0,
+        )
+    }
 }
 
 impl From<RawProperties> for MinProperties {

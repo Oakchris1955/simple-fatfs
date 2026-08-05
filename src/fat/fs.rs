@@ -28,7 +28,7 @@ use super::serde::lfn::calc_lfn_entries_needed;
 use super::serde::location::{DirEntryChain, EntryLocation, EntryLocationUnit, EntryStatus};
 use super::serde::readir::{ReadDir, ReadDirRaw};
 use super::serde::{
-    FATDirEntry, MinProperties, RawProperties, Sfn, CURRENT_DIR_SFN, DIRENTRY_LIMIT, DIRENTRY_SIZE,
+    FATDirEntry, MinProperties, RawProperties, DIRENTRY_LIMIT, DIRENTRY_SIZE,
     NONROOT_MIN_DIRENTRIES, PARENT_DIR_SFN,
 };
 use crate::log::{global_log, local_log};
@@ -1315,31 +1315,8 @@ where
             self.allocate_and_zeroize_clusters(num::NonZero::new(1).unwrap(), None)?;
 
         let entries = [
-            MinProperties {
-                name: None,
-                sfn: CURRENT_DIR_SFN,
-                // this needs to be set when creating a file
-                attributes: RawAttributes::DIRECTORY,
-                created: Some(datetime),
-                modified: datetime,
-                accessed: Some(datetime.date()),
-                file_size: 0,
-                data_cluster: dir_cluster,
-            },
-            MinProperties {
-                name: None,
-                sfn: PARENT_DIR_SFN,
-                // this needs to be set when creating a file
-                attributes: RawAttributes::DIRECTORY,
-                created: Some(datetime),
-                modified: datetime,
-                accessed: Some(datetime.date()),
-                file_size: 0,
-                data_cluster: match parent {
-                    EntryLocationUnit::DataCluster(cluster) => cluster,
-                    EntryLocationUnit::RootDirSector(_) => 0,
-                },
-            },
+            MinProperties::new_current_dir(datetime, dir_cluster),
+            MinProperties::new_parent_dir(datetime, parent),
         ];
 
         // this composer will ALWAYS generate 2 entries
@@ -1997,22 +1974,11 @@ where
 
         let file_cluster = self.allocate_clusters(num::NonZero::new(1).expect("1 != 0"), None)?;
 
-        let sfn = utils::string::gen_sfn(file_name, self, parent_dir)?;
-
         let now = self.options.clock.now();
 
         // we got everything to create our first (and only) RawProperties struct
-        let raw_properties = MinProperties {
-            name: Some(file_name.into()),
-            sfn,
-            // this needs to be set when creating a file
-            attributes: RawAttributes::ARCHIVE,
-            created: Some(now),
-            modified: now,
-            accessed: Some(now.date()),
-            file_size: 0,
-            data_cluster: file_cluster,
-        };
+        let raw_properties =
+            MinProperties::new_file(now, file_name, self, parent_dir, file_cluster)?;
 
         let entries = [raw_properties.clone()];
 
@@ -2058,7 +2024,7 @@ where
             None => return Err(FSError::AlreadyExists),
         };
 
-        let file_name = target
+        let dir_name = target
             .file_name()
             .expect("the path is normalized and it isn't the root directory either");
 
@@ -2066,7 +2032,7 @@ where
         for entry in self.process_current_dir() {
             let entry = entry?;
 
-            if entry.name(self.options.codepage) == file_name {
+            if entry.name(self.options.codepage) == dir_name {
                 return Err(FSError::AlreadyExists);
             }
         }
@@ -2078,19 +2044,8 @@ where
         // The cluster chain of the directory has been created,
         // we now need to add it as an entry to the current directory
 
-        let sfn = utils::string::gen_sfn(file_name, self, parent_dir)?;
-
         // we got everything to create our first (and only) RawProperties struct
-        let raw_properties = MinProperties {
-            name: Some(file_name.into()),
-            sfn,
-            attributes: RawAttributes::DIRECTORY,
-            created: Some(now),
-            modified: now,
-            accessed: Some(now.date()),
-            file_size: 0,
-            data_cluster: dir_cluster,
-        };
+        let raw_properties = MinProperties::new_dir(now, dir_name, self, parent_dir, dir_cluster)?;
 
         let entries = [raw_properties];
 
@@ -2168,20 +2123,8 @@ where
             // the process with directories is the same, expect we must modify the ".." entry
             // so that it points to the new parent directory
             // the ".." entry is always the second entry, so we will do something a bit hacky here
-            let parent_entry = MinProperties {
-                name: None,
-                sfn: PARENT_DIR_SFN,
-                // this needs to be set when creating a file
-                attributes: RawAttributes::DIRECTORY,
-                created: Some(now),
-                modified: now,
-                accessed: Some(now.date()),
-                file_size: 0,
-                data_cluster: match self.dir_info.borrow().chain_start {
-                    EntryLocationUnit::DataCluster(cluster) => cluster,
-                    EntryLocationUnit::RootDirSector(_) => 0,
-                },
-            };
+            let parent_entry =
+                MinProperties::new_parent_dir(now, self.dir_info.borrow().chain_start);
 
             // we are modifying the 2nd entry
             let entry_location = EntryLocation {
@@ -2198,18 +2141,14 @@ where
         let old_chain = entry_from.chain;
         let old_props: MinProperties = entry_from.into();
         let to_filename = to.file_name().expect("this path is normalized");
-        let sfn = utils::string::gen_sfn(to_filename, self, parent_to)?;
 
         let props = MinProperties {
-            name: Some(Box::from(to_filename)),
-            sfn,
+            // retain file size and attributes from old entry
             attributes: old_props.attributes,
-            created: Some(now),
-            modified: now,
-            accessed: Some(now.date()),
             file_size: old_props.file_size,
-            data_cluster: old_props.data_cluster,
+            ..MinProperties::new_file(now, to_filename, self, parent_to, old_props.data_cluster)?
         };
+
         self.insert_to_entry_chain(&[props])?;
 
         self.remove_entry_chain(&old_chain)?;
@@ -2474,16 +2413,7 @@ where
 
         let now = self.options.clock.now();
 
-        let raw_properties = MinProperties {
-            name: None,
-            sfn: Sfn::new_from_slice(label_bytes),
-            attributes: RawAttributes::VOLUME_ID,
-            created: Some(now),
-            modified: now,
-            accessed: Some(now.date()),
-            file_size: 0,
-            data_cluster: 0,
-        };
+        let raw_properties = MinProperties::new_volume_label(now, label_bytes);
 
         let entries = [raw_properties];
 
