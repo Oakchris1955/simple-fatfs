@@ -132,6 +132,18 @@ impl DirInfo {
             filter: None,
         }
     }
+
+    /// Reset `chain_end` and `filter` fields
+    ///
+    /// Use this when internally changing directories so that e.g. the `filter`
+    /// field will also be set to [`None`] when the `bloom` feature is enabled
+    pub(crate) fn reset(&mut self) {
+        self.chain_end = None;
+        #[cfg(feature = "bloom")]
+        {
+            self.filter = None
+        }
+    }
 }
 
 mod fsprops {
@@ -592,7 +604,7 @@ where
 
             dir_info.path = parent_pathbuf;
             dir_info.chain_start = EntryLocationUnit::DataCluster(parent_entry.data_cluster);
-            dir_info.chain_end = None;
+            dir_info.reset();
         } else {
             self.go_to_root_directory();
         }
@@ -623,7 +635,7 @@ where
 
         dir_info.path.push(child_entry.name(self.options.codepage));
         dir_info.chain_start = EntryLocationUnit::DataCluster(child_entry.data_cluster);
-        dir_info.chain_end = None;
+        dir_info.reset();
 
         Ok(())
     }
