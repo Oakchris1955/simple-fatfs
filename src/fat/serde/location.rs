@@ -7,6 +7,15 @@ use crate::block_io::prelude::*;
 use crate::time::Clock;
 use crate::{ClusterIndex, EntryIndex, FileSystem, SectorCount, SectorIndex};
 
+/// The location of a chain of [`FATDirEntry`](crate::fat::serde::FATDirEntry)
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DirEntryChain {
+    /// the location of the first corresponding entry
+    pub(crate) location: EntryLocation,
+    /// how many (contiguous) entries this entry chain has
+    pub(crate) len: u16,
+}
+
 /*
  * I have opted for using associated functions instead of methods for
  * `EntryLocation` and `EntryLocationUnit`, since they aren't strictly
@@ -15,87 +24,6 @@ use crate::{ClusterIndex, EntryIndex, FileSystem, SectorCount, SectorIndex};
  * (this won't happen in practice, since each FileSystem only handles
  * `EntryLocation`s and `EntryLocationUnit`s it generates)
  */
-
-/// The root directory sector or data cluster a [`FATDirEntry`](crate::fat::serde::FATDirEntry) belongs too
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EntryLocationUnit {
-    /// Sector offset from the start of the root directory region (FAT12/16)
-    RootDirSector(u16),
-    /// Cluster offset from the start of the data region
-    DataCluster(ClusterIndex),
-}
-
-impl EntryLocationUnit {
-    pub(crate) fn get_max_offset<S, C>(this: &Self, fs: &FileSystem<S, C>) -> u16
-    where
-        S: BlockRead,
-        C: Clock,
-    {
-        let unit_size = match this {
-            EntryLocationUnit::DataCluster(_) => fs.props.cluster_size(),
-            EntryLocationUnit::RootDirSector(_) => fs.props.sector_size().into(),
-        };
-
-        u16::try_from(unit_size / u32::try_from(DIRENTRY_SIZE).expect("32 can fit to u32"))
-            .expect("a cluster can have a max of ~16k entries")
-    }
-
-    pub(crate) fn get_entry_sector<S, C>(this: &Self, fs: &FileSystem<S, C>) -> SectorIndex
-    where
-        S: BlockRead,
-        C: Clock,
-    {
-        match this {
-            EntryLocationUnit::RootDirSector(root_dir_sector) => {
-                SectorCount::from(*root_dir_sector) + fs.props.first_root_dir_sector()
-            }
-            EntryLocationUnit::DataCluster(data_cluster) => {
-                fs.props.data_cluster_to_partition_sector(*data_cluster)
-            }
-        }
-    }
-
-    pub(crate) fn get_next_unit<S, C>(
-        this: &Self,
-        fs: &FileSystem<S, C>,
-    ) -> Result<Option<EntryLocationUnit>, S::Error>
-    where
-        S: BlockRead,
-        C: Clock,
-    {
-        match this {
-            EntryLocationUnit::RootDirSector(sector) => match &*fs.boot_record.borrow() {
-                BootRecord::Fat(boot_record_fat) => {
-                    if boot_record_fat.root_dir_sectors() == 0 {
-                        unreachable!(concat!("This should be zero iff the FAT type if FAT32, ",
-                    "in which case we won't even be reading root directory sectors, since it doesn't exist"))
-                    }
-
-                    if SectorIndex::from(*sector)
-                        >= fs.props.first_root_dir_sector()
-                            + SectorCount::from(boot_record_fat.root_dir_sectors())
-                    {
-                        Ok(None)
-                    } else {
-                        Ok(Some(EntryLocationUnit::RootDirSector(sector + 1)))
-                    }
-                }
-                BootRecord::ExFAT(_) => todo!("ExFAT is not implemented yet"),
-            },
-            EntryLocationUnit::DataCluster(cluster) => Ok(fs
-                .get_next_cluster(*cluster)?
-                .filter(|cluster| *cluster < fs.props.total_clusters())
-                .map(EntryLocationUnit::DataCluster)),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EntryStatus {
-    Unused,
-    LastUnused,
-    Used,
-}
 
 /// The location of a [`FATDirEntry`](crate::fat::serde::FATDirEntry)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -265,11 +193,83 @@ impl From<EntryLocationUnit> for EntryLocation {
     }
 }
 
-/// The location of a chain of [`FATDirEntry`](crate::fat::serde::FATDirEntry)
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct DirEntryChain {
-    /// the location of the first corresponding entry
-    pub(crate) location: EntryLocation,
-    /// how many (contiguous) entries this entry chain has
-    pub(crate) len: u16,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EntryStatus {
+    Unused,
+    LastUnused,
+    Used,
+}
+
+/// The root directory sector or data cluster a [`FATDirEntry`](crate::fat::serde::FATDirEntry) belongs too
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EntryLocationUnit {
+    /// Sector offset from the start of the root directory region (FAT12/16)
+    RootDirSector(u16),
+    /// Cluster offset from the start of the data region
+    DataCluster(ClusterIndex),
+}
+
+impl EntryLocationUnit {
+    pub(crate) fn get_max_offset<S, C>(this: &Self, fs: &FileSystem<S, C>) -> u16
+    where
+        S: BlockRead,
+        C: Clock,
+    {
+        let unit_size = match this {
+            EntryLocationUnit::DataCluster(_) => fs.props.cluster_size(),
+            EntryLocationUnit::RootDirSector(_) => fs.props.sector_size().into(),
+        };
+
+        u16::try_from(unit_size / u32::try_from(DIRENTRY_SIZE).expect("32 can fit to u32"))
+            .expect("a cluster can have a max of ~16k entries")
+    }
+
+    pub(crate) fn get_entry_sector<S, C>(this: &Self, fs: &FileSystem<S, C>) -> SectorIndex
+    where
+        S: BlockRead,
+        C: Clock,
+    {
+        match this {
+            EntryLocationUnit::RootDirSector(root_dir_sector) => {
+                SectorCount::from(*root_dir_sector) + fs.props.first_root_dir_sector()
+            }
+            EntryLocationUnit::DataCluster(data_cluster) => {
+                fs.props.data_cluster_to_partition_sector(*data_cluster)
+            }
+        }
+    }
+
+    pub(crate) fn get_next_unit<S, C>(
+        this: &Self,
+        fs: &FileSystem<S, C>,
+    ) -> Result<Option<EntryLocationUnit>, S::Error>
+    where
+        S: BlockRead,
+        C: Clock,
+    {
+        match this {
+            EntryLocationUnit::RootDirSector(sector) => match &*fs.boot_record.borrow() {
+                BootRecord::Fat(boot_record_fat) => {
+                    if boot_record_fat.root_dir_sectors() == 0 {
+                        unreachable!(concat!("This should be zero iff the FAT type if FAT32, ",
+                    "in which case we won't even be reading root directory sectors, since it doesn't exist"))
+                    }
+
+                    if SectorIndex::from(*sector)
+                        >= fs.props.first_root_dir_sector()
+                            + SectorCount::from(boot_record_fat.root_dir_sectors())
+                    {
+                        Ok(None)
+                    } else {
+                        Ok(Some(EntryLocationUnit::RootDirSector(sector + 1)))
+                    }
+                }
+                BootRecord::ExFAT(_) => todo!("ExFAT is not implemented yet"),
+            },
+            EntryLocationUnit::DataCluster(cluster) => Ok(fs
+                .get_next_cluster(*cluster)?
+                .filter(|cluster| *cluster < fs.props.total_clusters())
+                .map(EntryLocationUnit::DataCluster)),
+        }
+    }
 }
