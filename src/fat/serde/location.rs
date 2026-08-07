@@ -255,14 +255,10 @@ impl EntryLocationUnit {
                     "in which case we won't even be reading root directory sectors, since it doesn't exist"))
                     }
 
-                    if SectorIndex::from(*sector)
-                        >= fs.props.first_root_dir_sector()
-                            + SectorCount::from(boot_record_fat.root_dir_sectors())
-                    {
-                        Ok(None)
-                    } else {
-                        Ok(Some(EntryLocationUnit::RootDirSector(sector + 1)))
-                    }
+                    Ok((SectorIndex::from(*sector)
+                        < fs.props.first_root_dir_sector()
+                            + SectorCount::from(boot_record_fat.root_dir_sectors()))
+                    .then_some(EntryLocationUnit::RootDirSector(sector + 1)))
                 }
                 BootRecord::ExFAT(_) => todo!("ExFAT is not implemented yet"),
             },

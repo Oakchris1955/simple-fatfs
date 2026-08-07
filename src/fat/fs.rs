@@ -941,13 +941,14 @@ where
     ///
     /// This method also returns an immutable [`Ref`] to [`self.sector_buffer`](Self::sector_buffer)
     pub(crate) fn load_nth_sector(&self, n: SectorIndex) -> Result<Ref<'_, [u8]>, S::Error> {
-        if n >= self.props.total_sectors() {
-            unreachable!(concat!(
+        assert!(
+            n < self.props.total_sectors(),
+            concat!(
                 "seeked past end of device medium. ",
                 "This is most likely an internal error, please report it: ",
                 "https://github.com/Oakchris1955/simple-fatfs/issues"
-            ));
-        }
+            )
+        );
 
         // nothing to do if the sector we wanna read is already cached
         let stored_sector = self.sector_buffer.borrow().stored_sector();
@@ -1463,13 +1464,10 @@ where
                 break;
             }
 
-            current_entry = match EntryLocation::next_entry(current_entry, self)? {
-                Some(current_entry) => current_entry,
-                None => unreachable!(
-                    concat!("It is guaranteed that at least as many entries ",
-                    "as there are in chain exist, since we counted them when initializing the struct")
-                ),
-            };
+            current_entry = EntryLocation::next_entry(current_entry, self)?.expect(concat!(
+                "It is guaranteed that at least as many entries ",
+                "as there are in chain exist, since we counted them when initializing the struct"
+            ));
         }
 
         Ok(())

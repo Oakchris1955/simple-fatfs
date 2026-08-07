@@ -170,19 +170,17 @@ where
                         .unwrap(),
                 );
             } else {
-                let filename = if !self.lfn_buf.is_empty()
+                let filename = (!self.lfn_buf.is_empty()
                     && self
                         .lfn_checksum
-                        .is_some_and(|checksum| checksum == entry.sfn.gen_checksum())
-                {
+                        .is_some_and(|checksum| checksum == entry.sfn.gen_checksum()))
+                .then(|| {
                     let parsed_str =
                         utils::string::string_from_lfn(&self.lfn_buf[self.lfn_buf_pos..]);
                     self.lfn_buf_pos = CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES;
                     self.lfn_checksum = None;
-                    Some(parsed_str.unwrap_or(entry.sfn.decode(self.fs.options.codepage)))
-                } else {
-                    None
-                };
+                    parsed_str.unwrap_or(entry.sfn.decode(self.fs.options.codepage))
+                });
 
                 if let (Ok(created), Ok(modified), Ok(accessed)) = (
                     entry.created.try_into(),
