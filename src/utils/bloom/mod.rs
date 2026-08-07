@@ -1,5 +1,3 @@
-// Code obtained from https://github.com/jedisct1/rust-bloom-filter/blob/6b93b922be474998514b696dc84333d6c04ed991/src/lib.rs
-
 // (C)opyleft 2013-2024 Frank Denis
 // Licensed under the ICS license (https://opensource.org/licenses/ISC)
 
