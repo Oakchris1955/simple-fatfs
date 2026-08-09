@@ -63,7 +63,7 @@ impl FATSectorProps {
         S: BlockRead,
         C: Clock,
     {
-        if !fs.sector_belongs_to_FAT(sector) {
+        if !fs.sector_belongs_to_fat(sector) {
             return None;
         }
 
@@ -79,8 +79,7 @@ impl FATSectorProps {
         })
     }
 
-    #[expect(non_snake_case)]
-    pub fn get_corresponding_FAT_sectors<S, C>(
+    pub fn get_corresponding_fat_sectors<S, C>(
         this: &Self,
         fs: &FileSystem<S, C>,
     ) -> Box<[SectorIndex]>
@@ -348,7 +347,6 @@ type SyncSectorBufferFn<S, C> = fn(&FileSystem<S, C>) -> Result<(), <S as ErrorT
 type UnmountFn<S, C> = fn(&FileSystem<S, C>) -> FSResult<(), <S as ErrorType>::Error>;
 
 /// Determine the sector size of a FAT filesystem without fully constructing it.
-// This is essentially a copy of the beginning of `FileSystem::new`
 pub fn determine_fs_sector_size<S>(storage: S) -> FSResult<u16, S::Error>
 where
     S: BlockRead,
@@ -555,7 +553,7 @@ where
             filter: FileFilter::default().into(),
         };
 
-        if !fs.FAT_tables_are_identical()? {
+        if !fs.fat_tables_are_identical()? {
             global_log::error!("The FAT and it's copies do not match");
             return Err(FSError::InternalFSError(
                 InternalFSError::MismatchingFATTables,
@@ -835,7 +833,7 @@ where
         let mut current_cluster = start_cluster;
 
         while current_cluster < self.props.total_clusters() {
-            if self.read_nth_FAT_entry(current_cluster)? == FATEntry::Free {
+            if self.read_nth_fat_entry(current_cluster)? == FATEntry::Free {
                 self.first_free_cluster.replace(current_cluster);
 
                 match *self.boot_record.borrow_mut() {
@@ -868,7 +866,7 @@ where
         &self,
         cluster: ClusterIndex,
     ) -> Result<Option<ClusterIndex>, S::Error> {
-        Ok(match self.read_nth_FAT_entry(cluster)? {
+        Ok(match self.read_nth_fat_entry(cluster)? {
             FATEntry::Allocated(next_cluster) => Some(next_cluster),
             // when a `ROFile` is created, `cluster_chain_is_healthy` is called, if it fails, that ROFile is dropped
             _ => None,
@@ -877,8 +875,7 @@ where
 
     /// Check whether or not the all the FAT tables of the storage medium are identical to each other
     // FIXME: highly inefficient (especially regarding memory usage)
-    #[expect(non_snake_case)]
-    pub(crate) fn FAT_tables_are_identical(&self) -> Result<bool, S::Error> {
+    pub(crate) fn fat_tables_are_identical(&self) -> Result<bool, S::Error> {
         // we could make it work, but we are only testing regular FAT filesystems (for now)
         assert_ne!(
             self.fat_type,
@@ -899,7 +896,7 @@ where
             let mut tables: Vec<Vec<u8>> = Vec::new();
 
             for i in 0..self.props.fat_table_count() {
-                let current_offset = self.boot_record.borrow().nth_FAT_table_sector(i)
+                let current_offset = self.boot_record.borrow().nth_fat_table_sector(i)
                     + nth_iteration * max_probe_size_in_sectors;
                 let bytes_left = fat_byte_size - nth_iteration * max_probe_size_in_sectors;
 
@@ -932,8 +929,7 @@ where
     }
 
     /// Check whether the `sector` with the provided index belongs to the File Allocation Table
-    #[expect(non_snake_case)]
-    pub(crate) fn sector_belongs_to_FAT(&self, sector: SectorIndex) -> bool {
+    pub(crate) fn sector_belongs_to_fat(&self, sector: SectorIndex) -> bool {
         (self.props.first_fat_sector().into()..self.props.first_root_dir_sector()).contains(&sector)
     }
 
@@ -971,10 +967,9 @@ where
 
     /// Read the raw value of the `n`th [`FATEntry`]
     ///
-    /// This method is intended to be used internally mainly by the [`read_nth_FAT_entry`](Self::read_nth_FAT_entry)
+    /// This method is intended to be used internally mainly by the [`read_nth_fat_entry`](Self::read_nth_fat_entry)
     /// method. Consider using that instead
-    #[expect(non_snake_case)]
-    fn read_nth_FAT_entry_value(&self, n: FATEntryIndex) -> Result<FATEntryValue, S::Error> {
+    fn read_nth_fat_entry_value(&self, n: FATEntryIndex) -> Result<FATEntryValue, S::Error> {
         // the size of an entry rounded up to bytes
         let entry_size = self.fat_type.entry_size();
         let entry_props = FATEntryProps::new(n, self);
@@ -1019,9 +1014,8 @@ where
     }
 
     /// Read the `n`th [`FATEntry`]
-    #[expect(non_snake_case)]
-    pub(crate) fn read_nth_FAT_entry(&self, n: FATEntryIndex) -> Result<FATEntry, S::Error> {
-        let value = self.read_nth_FAT_entry_value(n)?;
+    pub(crate) fn read_nth_fat_entry(&self, n: FATEntryIndex) -> Result<FATEntry, S::Error> {
+        let value = self.read_nth_fat_entry_value(n)?;
 
         Ok(FATEntry::from_value(
             value,
@@ -1038,8 +1032,7 @@ where
     C: Clock,
 {
     /// Change the `n`th [`FATEntry`] to the provided `entry`
-    #[expect(non_snake_case)]
-    pub(crate) fn write_nth_FAT_entry(
+    pub(crate) fn write_nth_fat_entry(
         &self,
         n: FATEntryIndex,
         entry: FATEntry,
@@ -1481,7 +1474,7 @@ where
             let next_cluster_option = self.get_next_cluster(current_cluster)?;
 
             // free the current cluster
-            self.write_nth_FAT_entry(current_cluster, FATEntry::Free)?;
+            self.write_nth_fat_entry(current_cluster, FATEntry::Free)?;
 
             // proceed to the next one, otherwise break
             match next_cluster_option {
@@ -1521,13 +1514,13 @@ where
 
                     // we set the last allocated cluster to point to the next free one
                     if let Some(last_cluster_in_chain) = last_cluster_in_chain {
-                        self.write_nth_FAT_entry(
+                        self.write_nth_fat_entry(
                             last_cluster_in_chain,
                             FATEntry::Allocated(next_free_cluster),
                         )?;
                     }
                     // we also set the next free cluster to be EOF
-                    self.write_nth_FAT_entry(next_free_cluster, FATEntry::Eof)?;
+                    self.write_nth_fat_entry(next_free_cluster, FATEntry::Eof)?;
 
                     // now the next free cluster is the last allocated one
                     last_cluster_in_chain = Some(next_free_cluster);
@@ -1590,9 +1583,8 @@ where
     ///
     /// This method is intended to be used internally mainly by the [`sync_sector_buffer`](Self::sync_sector_buffer)
     /// method. Consider using that instead
-    #[expect(non_snake_case)]
-    fn sync_FAT_sector(&self, props: &FATSectorProps) -> Result<(), S::Error> {
-        for sector in FATSectorProps::get_corresponding_FAT_sectors(props, self) {
+    fn sync_fat_sector(&self, props: &FATSectorProps) -> Result<(), S::Error> {
+        for sector in FATSectorProps::get_corresponding_fat_sectors(props, self) {
             self.sector_buffer
                 .borrow()
                 .write_copy(&self.storage, sector)?;
@@ -1621,13 +1613,13 @@ where
             match &*self.boot_record.borrow() {
                 BootRecord::Fat(boot_record_fat) => match &boot_record_fat.ebr {
                     Ebr::FAT12_16(_) => {
-                        self.sync_FAT_sector(&fat_sector_props)?;
+                        self.sync_fat_sector(&fat_sector_props)?;
                     }
                     Ebr::FAT32(ebr_fat32, _) => {
                         if ebr_fat32.extended_flags.mirroring_disabled() {
                             self.sync_current_sector()?;
                         } else {
-                            self.sync_FAT_sector(&fat_sector_props)?;
+                            self.sync_fat_sector(&fat_sector_props)?;
                         }
                     }
                 },
@@ -2472,7 +2464,7 @@ mod tests {
         // we manually read the first and second entry of the FAT table
         fs.load_nth_sector(fat_offset.into()).unwrap();
 
-        let first_entry = fs.read_nth_FAT_entry_value(0).unwrap();
+        let first_entry = fs.read_nth_fat_entry_value(0).unwrap();
         let media_type = if let BootRecord::Fat(boot_record_fat) = &*fs.boot_record.borrow() {
             boot_record_fat.bpb._media_type
         } else {
@@ -2485,7 +2477,7 @@ mod tests {
 
         // apart from the high non-reserved 2 bits, everything is guaranteed to be set to 1
         // (these 2 high bits hold dirty volume flag, for which we don't care in this test)
-        let second_entry = fs.read_nth_FAT_entry_value(1).unwrap();
+        let second_entry = fs.read_nth_fat_entry_value(1).unwrap();
         let mask = crate::utils::bits::setbits_u32(fs.fat_type().actual_bits_per_entry() - 2);
         assert_eq!(mask, second_entry & mask);
     }
@@ -2499,7 +2491,7 @@ mod tests {
         #[case] fs: FileSystem<MemoryDevice, DefaultClock>,
     ) {
         assert!(
-            fs.FAT_tables_are_identical().unwrap(),
+            fs.fat_tables_are_identical().unwrap(),
             concat!(
                 "this should pass. ",
                 "if it doesn't, either the corresponding .img file's FAT tables aren't identical",
@@ -2511,10 +2503,10 @@ mod tests {
         let mut file = fs.get_rw_file("root.txt").unwrap();
 
         file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
-        assert!(file.fs.FAT_tables_are_identical().unwrap());
+        assert!(file.fs.fat_tables_are_identical().unwrap());
 
         file.seek(SeekFrom::Start(10_000)).unwrap();
-        assert!(file.fs.FAT_tables_are_identical().unwrap());
+        assert!(file.fs.fat_tables_are_identical().unwrap());
     }
 
     // separate case due to FAT32's extended flags
@@ -2538,7 +2530,7 @@ mod tests {
         }
 
         assert!(
-            fs.FAT_tables_are_identical().unwrap(),
+            fs.fat_tables_are_identical().unwrap(),
             concat!(
                 "this should pass. ",
                 "if it doesn't, either the corresponding .img file's FAT tables aren't identical",
@@ -2550,11 +2542,11 @@ mod tests {
         let mut file = fs.get_rw_file("hello 🗺️.txt").unwrap();
 
         file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
-        assert!(file.fs.FAT_tables_are_identical().unwrap());
+        assert!(file.fs.fat_tables_are_identical().unwrap());
 
         file.seek(SeekFrom::Start(10_000)).unwrap();
         file.truncate().unwrap();
-        assert!(file.fs.FAT_tables_are_identical().unwrap());
+        assert!(file.fs.fat_tables_are_identical().unwrap());
     }
 
     #[test]

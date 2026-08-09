@@ -25,8 +25,7 @@ impl BootRecord {
         }
     }
 
-    #[expect(non_snake_case)]
-    pub(crate) fn nth_FAT_table_sector(&self, n: u8) -> SectorIndex {
+    pub(crate) fn nth_fat_table_sector(&self, n: u8) -> SectorIndex {
         match self {
             BootRecord::Fat(boot_record_fat) => {
                 SectorIndex::from(boot_record_fat.first_fat_sector())
@@ -228,8 +227,7 @@ pub(crate) struct EBRFAT12_16 {
 #[derive(Immutable, FromBytes, IntoBytes)]
 pub(crate) struct FAT32ExtendedFlags {
     #[bits(4)]
-    #[expect(non_snake_case)]
-    pub(crate) active_FAT: u8,
+    pub(crate) active_fat: u8,
     #[bits(3)]
     reserved1: u8,
     #[bits(1)]

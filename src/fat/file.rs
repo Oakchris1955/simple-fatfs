@@ -121,7 +121,7 @@ where
         let mut current_cluster = self.props.current_cluster;
 
         loop {
-            match self.fs.read_nth_FAT_entry(current_cluster)? {
+            match self.fs.read_nth_fat_entry(current_cluster)? {
                 FATEntry::Allocated(next_cluster) => current_cluster = next_cluster,
                 FATEntry::Eof => break,
                 _ => unreachable!(),
@@ -143,7 +143,7 @@ where
                 break;
             }
 
-            match self.fs.read_nth_FAT_entry(current_cluster)? {
+            match self.fs.read_nth_fat_entry(current_cluster)? {
                 FATEntry::Allocated(next_cluster) => current_cluster = next_cluster,
                 _ => return Ok(false),
             };
@@ -412,13 +412,13 @@ where
         // we set the new last cluster in the chain to be EOF
         self.ro_file
             .fs
-            .write_nth_FAT_entry(self.ro_file.props.current_cluster, FATEntry::Eof)?;
+            .write_nth_fat_entry(self.ro_file.props.current_cluster, FATEntry::Eof)?;
 
         // then, we set each cluster after the current one to EOF
         while let Some(next_cluster) = next_cluster_option {
             next_cluster_option = self.fs.get_next_cluster(next_cluster)?;
 
-            self.fs.write_nth_FAT_entry(next_cluster, FATEntry::Free)?;
+            self.fs.write_nth_fat_entry(next_cluster, FATEntry::Free)?;
         }
 
         // don't forget to seek back to where we started
