@@ -612,7 +612,7 @@ where
         let child_entry = loop {
             let entry = entries.next().ok_or(FSError::NotFound)??;
 
-            if entry.name(self.options.codepage) == name {
+            if entry.name() == name {
                 break entry;
             }
         };
@@ -623,7 +623,7 @@ where
 
         let mut dir_info = self.dir_info.borrow_mut();
 
-        dir_info.path.push(child_entry.name(self.options.codepage));
+        dir_info.path.push(child_entry.name());
         dir_info.chain_start = EntryLocationUnit::DataCluster(child_entry.data_cluster);
         dir_info.reset();
 
@@ -1881,13 +1881,11 @@ where
             num::NonZeroUsize::new(DIRENTRY_LIMIT.into()).unwrap(),
         );
 
-        let codepage = self.options.codepage;
-
         for entry in self.process_current_dir() {
             let entry = entry?;
 
             let long_name = &entry.name;
-            let short_name = entry.sfn.decode(codepage);
+            let short_name = entry.short_name();
 
             filter.set(short_name.as_str());
             if let Some(long_filename) = long_name {
@@ -1947,7 +1945,7 @@ where
             for entry in self.process_current_dir() {
                 let entry = entry?;
 
-                if entry.name(self.options.codepage) == file_name {
+                if entry.name() == file_name {
                     global_log::error!("Couldn't create file as it already exists");
                     return Err(FSError::AlreadyExists);
                 }
@@ -1971,7 +1969,7 @@ where
             if let Some(long_filename) = &raw_properties.name {
                 filter.set(long_filename);
             }
-            filter.set(&Box::from(raw_properties.sfn.decode(self.options.codepage)));
+            filter.set(&Box::from(raw_properties.short_name()));
             local_log::trace!("Added newly-created file {} to the bloom filter", path);
         }
 
@@ -1981,7 +1979,6 @@ where
                 entry: Properties::from_raw(
                     RawProperties::from_chain(raw_properties, chain),
                     path.into(),
-                    self.options.codepage,
                 ),
                 offset: 0,
             },
@@ -2014,7 +2011,7 @@ where
         for entry in self.process_current_dir() {
             let entry = entry?;
 
-            if entry.name(self.options.codepage) == dir_name {
+            if entry.name() == dir_name {
                 return Err(FSError::AlreadyExists);
             }
         }
@@ -2395,7 +2392,8 @@ where
 
         let now = self.options.clock.now();
 
-        let raw_properties = MinProperties::new_volume_label(now, label_bytes);
+        let raw_properties =
+            MinProperties::new_volume_label(now, label_bytes, self.options.codepage);
 
         let entries = [raw_properties];
 

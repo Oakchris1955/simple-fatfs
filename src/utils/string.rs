@@ -210,7 +210,7 @@ where
         for entry in fs.read_dir(&target_dir)? {
             let entry = entry?;
 
-            if entry.sfn.0 == sfn {
+            if entry.sfn == sfn {
                 continue 'outer;
             }
         }

@@ -193,6 +193,7 @@ where
                         props: MinProperties {
                             name: filename.map(|string| string.into_boxed_str()),
                             sfn: entry.sfn,
+                            codepage: self.fs.options.codepage,
                             attributes: entry.attributes,
                             created,
                             modified,
@@ -303,7 +304,7 @@ where
                         || self.inner.fs.filter.borrow().filter(&value))
                         // we shouldn't expose the special entries to the user
                         && ![path_consts::CURRENT_DIR_STR, path_consts::PARENT_DIR_STR]
-                            .contains(&value.name(self.inner.fs.options.codepage).as_str())
+                            .contains(&value.name().as_str())
                     {
                         return Some(Ok(value.into_dir_entry(&self.parent, self.inner.fs)));
                     } else {

@@ -24,7 +24,8 @@ use crate::{ClusterIndex, Codepage, FSResult, FileSize, FileSystem};
 #[derive(Clone, Debug)]
 pub struct Properties {
     pub(crate) path: Box<Path>,
-    pub(crate) sfn: (Sfn, Codepage),
+    pub(crate) sfn: Sfn,
+    pub(crate) codepage: Codepage,
     pub(crate) is_dir: bool,
     pub(crate) attributes: Attributes,
     pub(crate) created: Option<PrimitiveDateTime>,
@@ -67,7 +68,7 @@ impl Properties {
     #[inline]
     /// Get the corresponding short filename for this entry
     pub fn sfn(&self) -> String {
-        self.sfn.0.decode(self.sfn.1)
+        self.sfn.decode(self.codepage)
     }
 
     #[inline]
@@ -124,10 +125,11 @@ impl Properties {
 }
 
 impl Properties {
-    pub(crate) fn from_raw(raw: RawProperties, path: Box<Path>, codepage: Codepage) -> Self {
+    pub(crate) fn from_raw(raw: RawProperties, path: Box<Path>) -> Self {
         Self {
             path,
-            sfn: (raw.sfn, codepage),
+            sfn: raw.sfn,
+            codepage: raw.codepage,
             is_dir: raw.is_dir,
             attributes: raw.attributes.into(),
             created: raw.created,
@@ -157,6 +159,7 @@ pub(crate) struct MinProperties {
     /// Set to [`None`] to not generate a long filename when encoding
     pub(crate) name: Option<Box<str>>,
     pub(crate) sfn: Sfn,
+    pub(crate) codepage: Codepage,
     pub(crate) attributes: RawAttributes,
     pub(crate) created: Option<PrimitiveDateTime>,
     pub(crate) modified: PrimitiveDateTime,
@@ -169,6 +172,7 @@ impl MinProperties {
     pub(crate) fn new(
         name: Option<Box<str>>,
         sfn: Sfn,
+        codepage: Codepage,
         attributes: RawAttributes,
         datetime: PrimitiveDateTime,
         data_cluster: ClusterIndex,
@@ -176,6 +180,7 @@ impl MinProperties {
         Self {
             name,
             sfn,
+            codepage,
             attributes,
             created: Some(datetime),
             modified: datetime,
@@ -189,6 +194,8 @@ impl MinProperties {
         Self::new(
             None,
             CURRENT_DIR_SFN,
+            // everything here is normal ASCII, we can just use the default codepage
+            Codepage::default(),
             RawAttributes::DIRECTORY,
             datetime,
             dir_cluster,
@@ -199,6 +206,8 @@ impl MinProperties {
         Self::new(
             None,
             PARENT_DIR_SFN,
+            // everything here is normal ASCII, we can just use the default codepage
+            Codepage::default(),
             RawAttributes::DIRECTORY,
             datetime,
             match parent {
@@ -224,6 +233,7 @@ impl MinProperties {
         Ok(MinProperties::new(
             Some(file_name.into()),
             sfn,
+            fs.options.codepage,
             // this needs to be set when creating a file
             RawAttributes::ARCHIVE,
             datetime,
@@ -247,6 +257,7 @@ impl MinProperties {
         Ok(MinProperties::new(
             Some(dir_name.into()),
             sfn,
+            fs.options.codepage,
             RawAttributes::DIRECTORY,
             datetime,
             dir_cluster,
@@ -256,14 +267,29 @@ impl MinProperties {
     pub(crate) fn new_volume_label(
         datetime: PrimitiveDateTime,
         label_bytes: [u8; VOLUME_LABEL_BYTES],
+        codepage: Codepage,
     ) -> Self {
         Self::new(
             None,
             Sfn::new_from_slice(label_bytes),
+            codepage,
             RawAttributes::VOLUME_ID,
             datetime,
             0,
         )
+    }
+}
+
+impl MinProperties {
+    pub(crate) fn name(&self) -> String {
+        self.name
+            .clone()
+            .map(|boxed_str| boxed_str.to_string())
+            .unwrap_or_else(|| self.short_name())
+    }
+
+    pub(crate) fn short_name(&self) -> String {
+        self.sfn.decode(self.codepage)
     }
 }
 
@@ -298,13 +324,6 @@ pub(crate) struct RawProperties {
 }
 
 impl RawProperties {
-    pub(crate) fn name(&self, codepage: Codepage) -> String {
-        self.name
-            .clone()
-            .map(|boxed_str| boxed_str.to_string())
-            .unwrap_or_else(|| self.sfn.decode(codepage))
-    }
-
     pub(crate) fn into_dir_entry<'a, P, S, C>(
         self,
         path: P,
@@ -315,10 +334,10 @@ impl RawProperties {
         S: BlockRead,
         C: Clock,
     {
-        let entry_path = path.as_ref().join(self.name(fs.options.codepage));
+        let entry_path = path.as_ref().join(self.name());
 
         DirEntry {
-            entry: Properties::from_raw(self, entry_path.into(), fs.options.codepage),
+            entry: Properties::from_raw(self, entry_path.into()),
             fs,
         }
     }
@@ -351,7 +370,8 @@ impl From<Properties> for RawProperties {
                         .expect("the path is normalized")
                         .into(),
                 ),
-                sfn: value.sfn.0,
+                sfn: value.sfn,
+                codepage: value.codepage,
                 attributes: RawAttributes::from_attributes(value.attributes, value.is_dir),
                 created: value.created,
                 modified: value.modified,
