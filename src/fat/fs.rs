@@ -887,10 +887,7 @@ where
         const MAX_PROBE_SIZE: u32 = 2_u32.pow(20);
         let max_probe_size_in_sectors: u32 = MAX_PROBE_SIZE / u32::from(self.props.sector_size());
 
-        let fat_byte_size = match &*self.boot_record.borrow() {
-            BootRecord::Fat(boot_record_fat) => boot_record_fat.fat_sector_size(),
-            BootRecord::ExFAT(_) => unreachable!(),
-        };
+        let fat_byte_size = self.props.fat_sector_size();
 
         for nth_iteration in 0..fat_byte_size.div_ceil(MAX_PROBE_SIZE) {
             let mut tables: Vec<Vec<u8>> = Vec::new();
@@ -1673,9 +1670,7 @@ where
 
             let mut bytes = self.sector_buffer.borrow_mut();
 
-            let boot_record = self.boot_record.borrow();
-
-            match &*boot_record {
+            match &*self.boot_record.borrow() {
                 BootRecord::Fat(boot_record_fat) => {
                     boot_record_fat.bpb.write_to_prefix(&mut bytes).unwrap();
 
@@ -2454,10 +2449,7 @@ mod tests {
     fn check_file_allocation_table_offset(fs: FileSystem<MemoryDevice, DefaultClock>) {
         use crate::serde::boot_sector::BootRecord;
 
-        let fat_offset = match &*fs.boot_record.borrow() {
-            BootRecord::Fat(boot_record_fat) => boot_record_fat.first_fat_sector(),
-            BootRecord::ExFAT(_boot_record_exfat) => unreachable!(),
-        };
+        let fat_offset = fs.props.first_fat_sector();
 
         // we manually read the first and second entry of the FAT table
         fs.load_nth_sector(fat_offset.into()).unwrap();

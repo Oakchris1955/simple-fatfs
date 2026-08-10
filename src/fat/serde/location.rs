@@ -1,11 +1,10 @@
 use core::num;
 
-use super::boot_sector::BootRecord;
 use super::entry_composer::{LAST_AND_UNUSED_ENTRY, UNUSED_ENTRY};
 use super::DIRENTRY_SIZE;
 use crate::block_io::prelude::*;
 use crate::time::Clock;
-use crate::{ClusterIndex, EntryIndex, FileSystem, SectorCount, SectorIndex};
+use crate::{ClusterIndex, EntryCount, EntryIndex, FileSystem, SectorCount, SectorIndex};
 
 /// The location of a chain of [`FATDirEntry`](crate::fat::serde::FATDirEntry)
 #[derive(Debug, Clone, Copy)]
@@ -13,7 +12,7 @@ pub(crate) struct DirEntryChain {
     /// the location of the first corresponding entry
     pub(crate) location: EntryLocation,
     /// how many (contiguous) entries this entry chain has
-    pub(crate) len: u16,
+    pub(crate) len: EntryCount,
 }
 
 /*
@@ -248,20 +247,17 @@ impl EntryLocationUnit {
         C: Clock,
     {
         match this {
-            EntryLocationUnit::RootDirSector(sector) => match &*fs.boot_record.borrow() {
-                BootRecord::Fat(boot_record_fat) => {
-                    if boot_record_fat.root_dir_sectors() == 0 {
-                        unreachable!(concat!("This should be zero iff the FAT type if FAT32, ",
+            EntryLocationUnit::RootDirSector(sector) => {
+                if fs.props.root_dir_sectors() == 0 {
+                    unreachable!(concat!("This should be zero iff the FAT type if FAT32, ",
                     "in which case we won't even be reading root directory sectors, since it doesn't exist"))
-                    }
-
-                    Ok((SectorIndex::from(*sector)
-                        < fs.props.first_root_dir_sector()
-                            + SectorCount::from(boot_record_fat.root_dir_sectors()))
-                    .then_some(EntryLocationUnit::RootDirSector(sector + 1)))
                 }
-                BootRecord::ExFAT(_) => todo!("ExFAT is not implemented yet"),
-            },
+
+                Ok((SectorIndex::from(*sector)
+                    < fs.props.first_root_dir_sector()
+                        + SectorCount::from(fs.props.root_dir_sectors()))
+                .then_some(EntryLocationUnit::RootDirSector(sector + 1)))
+            }
             EntryLocationUnit::DataCluster(cluster) => Ok(fs
                 .get_next_cluster(*cluster)?
                 .filter(|cluster| *cluster < fs.props.total_clusters())
