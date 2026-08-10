@@ -17,6 +17,7 @@ use typed_path::Utf8Component;
 use zerocopy::{FromBytes, IntoBytes};
 
 use super::consts::{EMPTY_VOLUME_LABEL, MAX_SECTOR_SIZE};
+use super::dirinfo::DirInfo;
 use super::fatentry::{FATEntry, FATEntryProps, FATType, RESERVED_FAT_ENTRIES};
 use super::file::FileProps;
 use super::serde::attributes::RawAttributes;
@@ -33,7 +34,7 @@ use super::serde::{
 };
 use crate::log::{global_log, local_log};
 use crate::options::FSOptions;
-use crate::path::{find_common_path_prefix, keep_path_normals, path_consts, Path, PathBuf};
+use crate::path::Path;
 use crate::storage::SectorBuffer;
 use crate::time::Clock;
 use crate::utils;
@@ -96,52 +97,6 @@ impl FATSectorProps {
         }
 
         r#box
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct DirInfo {
-    pub(crate) path: PathBuf,
-    pub(crate) chain_start: EntryLocationUnit,
-    /// Indicates the [`EntryLocation`] of the last known allocated or removed [`DirEntry`](crate::fat::DirEntry)
-    ///
-    /// [`None`] if it is not known
-    pub(crate) chain_end: Option<EntryLocation>,
-    #[cfg(feature = "bloom")]
-    pub(crate) filter: Option<utils::bloom::Bloom<str>>,
-}
-
-impl DirInfo {
-    pub(crate) fn at_root_dir(boot_record: &BootRecord) -> Self {
-        DirInfo {
-            // this is basically the root directory
-            path: PathBuf::from(path_consts::SEPARATOR_STR),
-            chain_start: match boot_record {
-                BootRecord::Fat(boot_record_fat) => match &boot_record_fat.ebr {
-                    // it doesn't really matter what value we put in here, since we won't be using it
-                    Ebr::FAT12_16(_ebr_fat12_16) => EntryLocationUnit::RootDirSector(0),
-                    Ebr::FAT32(ebr_fat32, _) => {
-                        EntryLocationUnit::DataCluster(ebr_fat32.root_cluster.get())
-                    }
-                },
-                BootRecord::ExFAT(_boot_record_exfat) => todo!(),
-            },
-            chain_end: None,
-            #[cfg(feature = "bloom")]
-            filter: None,
-        }
-    }
-
-    /// Reset `chain_end` and `filter` fields
-    ///
-    /// Use this when internally changing directories so that e.g. the `filter`
-    /// field will also be set to [`None`] when the `bloom` feature is enabled
-    pub(crate) fn reset(&mut self) {
-        self.chain_end = None;
-        #[cfg(feature = "bloom")]
-        {
-            self.filter = None
-        }
     }
 }
 
@@ -573,162 +528,17 @@ where
     C: Clock,
 {
     pub(crate) fn process_current_dir<'a>(&'a self) -> ReadDirRaw<'a, S, C> {
-        ReadDirRaw::new(self, &self.dir_info.borrow().chain_start)
-    }
-
-    /// Change the internal directory cache so that it points to the parent directory.
-    ///
-    /// If this is the root directory, it does nothing
-    ///
-    /// This method is intended to be used internally mainly by the [`go_to_dir`](Self::go_to_dir)
-    /// method. Consider using that instead
-    fn go_to_parent_dir(&self) -> FSResult<(), S::Error> {
-        if let Some(parent_path) = self.dir_info.borrow().path.parent() {
-            let parent_pathbuf = parent_path.to_path_buf();
-
-            let entries = self.process_current_dir();
-
-            let parent_entry = entries.get_parent_dir_entry()?;
-
-            let mut dir_info = self.dir_info.borrow_mut();
-
-            dir_info.path = parent_pathbuf;
-            dir_info.chain_start = EntryLocationUnit::DataCluster(parent_entry.data_cluster);
-            dir_info.reset();
-        } else {
-            self.go_to_root_directory();
-        }
-
-        Ok(())
-    }
-
-    /// Change the internal directory cache so that it points to the given child directory
-    ///
-    /// This method is intended to be used internally mainly by the [`go_to_dir`](Self::go_to_dir)
-    /// method. Consider using that instead
-    fn go_to_child_dir(&self, name: &str) -> FSResult<(), S::Error> {
-        let mut entries = self.process_current_dir();
-
-        let child_entry = loop {
-            let entry = entries.next().ok_or(FSError::NotFound)??;
-
-            if entry.name() == name {
-                break entry;
-            }
-        };
-
-        if !child_entry.is_dir {
-            return Err(FSError::NotADirectory);
-        }
-
-        let mut dir_info = self.dir_info.borrow_mut();
-
-        dir_info.path.push(child_entry.name());
-        dir_info.chain_start = EntryLocationUnit::DataCluster(child_entry.data_cluster);
-        dir_info.reset();
-
-        Ok(())
+        DirInfo::process_current_dir(&self.dir_info.borrow(), self)
     }
 
     /// Change the internal directory cache so that it points to the root directory
     fn go_to_root_directory(&self) {
-        self.dir_info
-            .replace(DirInfo::at_root_dir(&self.boot_record.borrow()));
-    }
-
-    /// Backtrack to each parent directory until the internal directory cache points
-    /// to the target directory
-    ///
-    /// This method is intended to be used internally mainly by the [`go_to_dir`](Self::go_to_dir)
-    /// method. Consider using that instead
-    fn go_up_till_target<P>(&self, target: P) -> FSResult<(), S::Error>
-    where
-        P: AsRef<Path>,
-    {
-        let target = target.as_ref();
-
-        while self.dir_info.borrow().path != target {
-            self.go_to_parent_dir()?;
-        }
-
-        Ok(())
-    }
-
-    /// Navigate down child directories until the internal directory cache points
-    /// to the target directory
-    ///
-    /// This method is intended to be used internally mainly by the [`go_to_dir`](Self::go_to_dir)
-    /// method. Consider using that instead
-    fn go_down_till_target<P>(&self, target: P) -> FSResult<(), S::Error>
-    where
-        P: AsRef<Path>,
-    {
-        let target = target.as_ref();
-
-        let common_path_prefix = find_common_path_prefix(&self.dir_info.borrow().path, target);
-        let common_components = common_path_prefix
-            .normalize()
-            .components()
-            .filter(keep_path_normals)
-            .count();
-
-        for dir_name in target
-            .components()
-            .filter(keep_path_normals)
-            .skip(common_components)
-        {
-            self.go_to_child_dir(dir_name.as_str())?;
-        }
-
-        Ok(())
+        DirInfo::go_to_root_directory(&mut self.dir_info.borrow_mut(), self)
     }
 
     /// Load into the sector buffer the first sector of the internal directory cache chain
     fn go_to_cached_dir(&self) -> FSResult<(), S::Error> {
-        let dir_chain = self.dir_info.borrow().chain_start;
-        let target_sector = EntryLocationUnit::get_entry_sector(&dir_chain, self);
-
-        if target_sector != self.sector_buffer.borrow().stored_sector() {
-            self.load_nth_sector(target_sector)?;
-        }
-
-        Ok(())
-    }
-
-    /// Low-level method to obtain a [`ReadDir`] struct of the provided `path` directory.
-    ///
-    /// Use the `internal` parameter to configure whether the returned [`ReadDir`]
-    /// is intended for internal or public use and whether the `.` and `..` entries
-    /// should be filtered or not (only filtered if `internal` is false)
-    ///
-    /// This method is intended to be used internally by the [`read_dir_raw`](Self::read_dir_raw)
-    /// and [`read_dir`](Self::read_dir) methods, use them instead
-    fn read_dir_internal<P: AsRef<Path>>(
-        &self,
-        path: P,
-        internal: bool,
-    ) -> FSResult<ReadDir<'_, S, C>, S::Error> {
-        // normalize the given path
-        let path = path.as_ref();
-
-        if !path.is_valid() {
-            return Err(FSError::MalformedPath);
-        }
-
-        let path = path.normalize();
-
-        local_log::debug!("Reading directory {path}");
-
-        self.go_to_dir(&path)?;
-
-        let dir_info = self.dir_info.borrow();
-
-        Ok(ReadDir::new(
-            self,
-            &dir_info.chain_start,
-            &dir_info.path,
-            internal,
-        ))
+        DirInfo::go_to_cached_dir(&self.dir_info.borrow(), self)
     }
 
     /// Like [`read_dir`](Self::read_dir), but doesn't filter files based on whether
@@ -738,64 +548,15 @@ where
     /// example during a directory deletion.
     #[inline]
     fn read_dir_raw<P: AsRef<Path>>(&self, path: P) -> FSResult<ReadDir<'_, S, C>, S::Error> {
-        self.read_dir_internal(path, true)
+        DirInfo::read_dir_raw(&mut self.dir_info.borrow_mut(), path, self)
     }
-
-    // There are many ways this can be achieved. That's how we'll do it:
-    // Firstly, we find the common path prefix of the `current_path` and the `target`
-    // Then, we check whether it is faster to start from the root directory
-    // and get down to the target or whether we should start from where we are
-    // now, go up till we find the common prefix path and then go down to the `target`
 
     /// Change the internal directory cache so that is points to the provided `target`
     pub(crate) fn go_to_dir<P>(&self, target: P) -> FSResult<(), S::Error>
     where
         P: AsRef<Path>,
     {
-        let target = target.as_ref();
-
-        if !target.is_valid() {
-            return Err(FSError::MalformedPath);
-        }
-
-        let dir_info = self.dir_info.borrow();
-
-        if dir_info.path == target {
-            // there's a chance that the current loaded sector doesn't belong
-            // to the directory we have cached, so we must also navigate to the correct sector
-            self.go_to_cached_dir()?;
-
-            return Ok(());
-        }
-
-        let common_path_prefix = find_common_path_prefix(&dir_info.path, target);
-
-        // Note: these are the distances to the common prefix, not the target path
-        let distance_from_root = common_path_prefix.ancestors().count() - 1;
-        let distance_from_current_path =
-            (dir_info.path.ancestors().count() - 1) - distance_from_root;
-
-        // drop early so that the dir_info refcell can be used by other methods
-        drop(dir_info);
-
-        if distance_from_root <= distance_from_current_path {
-            self.go_to_root_directory();
-
-            self.go_down_till_target(target)?;
-        } else {
-            self.go_up_till_target(common_path_prefix)?;
-
-            self.go_down_till_target(target)?;
-        }
-
-        // this should be covered by all the other methods above, but it probably doesn't hurt
-        // (if this was the same directory (which could be cached), we would have return long ago)
-        #[cfg(feature = "bloom")]
-        {
-            self.dir_info.borrow_mut().filter = None;
-        }
-
-        Ok(())
+        DirInfo::go_to_dir(&mut self.dir_info.borrow_mut(), target, self)
     }
 }
 
@@ -1723,7 +1484,7 @@ where
     /// Fails if `path` doesn't represent a directory, or if that directory doesn't exist
     #[inline]
     pub fn read_dir<P: AsRef<Path>>(&self, path: P) -> FSResult<ReadDir<'_, S, C>, S::Error> {
-        self.read_dir_internal(path, false)
+        DirInfo::read_dir(&mut self.dir_info.borrow_mut(), path, self)
     }
 
     /// Reads the volume label from the BIOS parameter block

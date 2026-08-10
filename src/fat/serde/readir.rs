@@ -39,14 +39,14 @@ where
     S: BlockRead,
     C: Clock,
 {
-    pub(crate) fn new(fs: &'a FileSystem<S, C>, chain_start: &EntryLocationUnit) -> Self {
+    pub(crate) fn new(fs: &'a FileSystem<S, C>, chain_start: EntryLocationUnit) -> Self {
         Self {
             lfn_buf: [0; CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES],
             lfn_buf_pos: CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES,
             lfn_checksum: None,
             current_chain: None,
 
-            entry_location: Some(EntryLocation::from(*chain_start)),
+            entry_location: Some(EntryLocation::from(chain_start)),
 
             fs,
         }
@@ -281,7 +281,7 @@ where
         P: AsRef<Path>,
     {
         Self {
-            inner: ReadDirRaw::new(fs, chain_start),
+            inner: ReadDirRaw::new(fs, *chain_start),
             parent: parent.as_ref().into(),
             internal,
         }

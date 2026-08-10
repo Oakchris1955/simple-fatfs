@@ -1,4 +1,5 @@
 pub(crate) mod consts;
+pub(crate) mod dirinfo;
 pub(crate) mod fatentry;
 pub(crate) mod file;
 pub(crate) mod fs;
