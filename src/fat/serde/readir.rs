@@ -6,7 +6,7 @@ use alloc::boxed::Box;
 use super::attributes::RawAttributes;
 use super::entry_composer::{LAST_AND_UNUSED_ENTRY, UNUSED_ENTRY, USED_KANJI};
 use super::lfn::{LFNEntry, CHARS_PER_LFN_ENTRY, LFN_MAX_ENTRIES};
-use super::location::{DirEntryChain, EntryLocation, EntryLocationUnit};
+use super::location::{DirEntryChain, EntryLocation, EntryLocationIter, EntryLocationUnit};
 use super::{
     DirEntry, FATDirEntry, MinProperties, RawProperties, CURRENT_DIR_ENTRY_INDEX, CURRENT_DIR_SFN,
     PARENT_DIR_ENTRY_INDEX, PARENT_DIR_SFN,
@@ -29,7 +29,7 @@ where
     current_chain: Option<DirEntryChain>,
 
     // if `None`, we have exhausted the iterator
-    entry_location: Option<EntryLocation>,
+    entry_location_iter: Option<EntryLocationIter<'a, S, C>>,
 
     pub(crate) fs: &'a FileSystem<S, C>,
 }
@@ -46,7 +46,7 @@ where
             lfn_checksum: None,
             current_chain: None,
 
-            entry_location: Some(EntryLocation::from(chain_start)),
+            entry_location_iter: Some(EntryLocationIter::new(EntryLocation::from(chain_start), fs)),
 
             fs,
         }
@@ -94,10 +94,17 @@ where
     }
 
     fn next_inner(&mut self) -> Result<Option<RawProperties>, S::Error> {
-        // if this is `None`, the iterator has been exhausted
-        let entry_location = match self.entry_location {
-            Some(entry_location) => entry_location,
-            None => return Ok(None),
+        let entry_location = match self
+            .entry_location_iter
+            .as_mut()
+            .and_then(|iter| iter.next())
+        {
+            Some(entry_location) => entry_location?,
+            // if this is `None`, the iterator has been exhausted
+            None => {
+                self.entry_location_iter = None;
+                return Ok(None);
+            }
         };
 
         // load the sector of the current entry
@@ -105,13 +112,13 @@ where
 
         match chunk[0] {
             LAST_AND_UNUSED_ENTRY => {
-                self.entry_location = None;
                 // we have exhausted this directory
+                self.entry_location_iter = None;
                 return Ok(None);
             }
             UNUSED_ENTRY => {
-                self.entry_location = EntryLocation::next_entry(entry_location, self.fs)?;
-                return Ok(None);
+                // this entry is unused, advance to the next one
+                return self.next_inner();
             }
             USED_KANJI => chunk[0] = UNUSED_ENTRY,
             _ => (),
@@ -187,8 +194,6 @@ where
                     entry.modified.try_into(),
                     entry.accessed.try_into(),
                 ) {
-                    self.entry_location = EntryLocation::next_entry(entry_location, self.fs)?;
-
                     return Ok(Some(RawProperties {
                         props: MinProperties {
                             name: filename.map(|string| string.into_boxed_str()),
@@ -213,9 +218,8 @@ where
             }
         }
 
-        self.entry_location = EntryLocation::next_entry(entry_location, self.fs)?;
-
-        Ok(None)
+        // we have nothing to return yet, advance to the next entry
+        self.next_inner()
     }
 }
 
@@ -227,19 +231,7 @@ where
     type Item = Result<RawProperties, S::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            // we want what we are doing here to be clear
-            #[expect(clippy::question_mark)]
-            if self.entry_location.is_none() {
-                return None;
-            }
-
-            match self.next_inner().transpose() {
-                Some(result) => return Some(result),
-
-                None => continue,
-            }
-        }
+        self.next_inner().transpose()
     }
 }
 

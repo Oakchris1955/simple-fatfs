@@ -1,4 +1,4 @@
-use core::num;
+use core::iter;
 
 use super::entry_composer::{LAST_AND_UNUSED_ENTRY, UNUSED_ENTRY};
 use super::DIRENTRY_SIZE;
@@ -13,6 +13,67 @@ pub(crate) struct DirEntryChain {
     pub(crate) location: EntryLocation,
     /// how many (contiguous) entries this entry chain has
     pub(crate) len: EntryCount,
+}
+
+/// An iterator of sequential [`EntryLocation`]s
+///
+/// # Note
+///
+/// It is guaranteed that the first element of this iterator will be [`Some`]\([`Ok`]\(`entry_loc`)\)
+#[derive(Debug)]
+pub(crate) struct EntryLocationIter<'a, S, C>
+where
+    S: BlockRead,
+    C: Clock,
+{
+    entry_loc: Option<EntryLocation>,
+    is_first_loc: bool,
+    fs: &'a FileSystem<S, C>,
+}
+
+impl<'a, S, C> EntryLocationIter<'a, S, C>
+where
+    S: BlockRead,
+    C: Clock,
+{
+    /// Construct a new iterator, starting at `first_loc`
+    pub(crate) fn new(first_loc: EntryLocation, fs: &'a FileSystem<S, C>) -> Self {
+        Self {
+            entry_loc: Some(first_loc),
+            is_first_loc: true,
+            fs,
+        }
+    }
+}
+
+impl<S, C> Iterator for EntryLocationIter<'_, S, C>
+where
+    S: BlockRead,
+    C: Clock,
+{
+    type Item = Result<EntryLocation, S::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        /* we could avoid the `is_first_loc` field by just using `mem::replace`
+         * on the current `entry_loc`, but this could result in unnecessary overhead
+         * if the last time we can `next` we need to navigate to a new sector
+         */
+        if self.is_first_loc {
+            self.is_first_loc = false;
+            return Ok(self.entry_loc).transpose();
+        }
+
+        EntryLocation::next_entry(self.entry_loc?, self.fs)
+            .inspect(|next| self.entry_loc = *next)
+            .transpose()
+    }
+}
+
+impl<S, C> iter::FusedIterator for EntryLocationIter<'_, S, C>
+where
+    S: BlockRead,
+    C: Clock,
+{
 }
 
 /*
@@ -137,7 +198,7 @@ impl EntryLocation {
         Ok(())
     }
 
-    pub(crate) fn next_entry<S, C>(
+    fn next_entry<S, C>(
         mut this: Self,
         fs: &FileSystem<S, C>,
     ) -> Result<Option<EntryLocation>, S::Error>
@@ -161,28 +222,6 @@ impl EntryLocation {
                 this
             }),
         )
-    }
-
-    // The NonZero here is to ensure that the `0..n` doesn't panic
-    pub(crate) fn nth_entry<S, C>(
-        this: Self,
-        fs: &FileSystem<S, C>,
-        n: num::NonZero<EntryIndex>,
-    ) -> Result<Option<EntryLocation>, S::Error>
-    where
-        S: BlockRead,
-        C: Clock,
-    {
-        let mut current_entry = this;
-
-        for _ in 0..n.into() {
-            match Self::next_entry(current_entry, fs)? {
-                Some(next_entry) => current_entry = next_entry,
-                None => return Ok(None),
-            }
-        }
-
-        Ok(Some(current_entry))
     }
 }
 

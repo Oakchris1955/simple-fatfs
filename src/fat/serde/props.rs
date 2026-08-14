@@ -145,6 +145,10 @@ impl Properties {
 // each directory other than the root directory must have
 // at least the `.` and `..` entries
 // TODO: actually check this on runtime
+#[expect(
+    dead_code,
+    reason = "this might be used later to check if a dir is corrupted etc."
+)]
 pub(crate) const NONROOT_MIN_DIRENTRIES: usize = 2;
 // the PARENT DIR entry is always first on a directory
 // other than the root directory

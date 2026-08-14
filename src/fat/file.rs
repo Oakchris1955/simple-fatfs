@@ -10,6 +10,7 @@ use super::serde::{FATDirEntry, MinProperties};
 use crate::block_io::prelude::*;
 use crate::error::RWFileError;
 use crate::log::{global_log, local_log};
+use crate::serde::location::EntryLocationIter;
 use crate::time::Clock;
 use crate::{
     ClusterIndex, EntryCount, FSError, FSResult, FileSize, FileSystem, InternalFSError, Properties,
@@ -479,10 +480,11 @@ where
             // the first entry of the dirchain could belong to a LFNEntry, so we must handle that
             let direntry_location =
                 match num::NonZero::new(EntryCount::from(calc_lfn_entries_needed(file_name))) {
-                    Some(nonzero) => EntryLocation::nth_entry(chain_start, self.fs, nonzero)?
+                    Some(nonzero) => EntryLocationIter::new(chain_start, self.fs)
+                        .nth(nonzero.get().into())
                         .ok_or(FSError::InternalFSError(
                             InternalFSError::MalformedEntryChain,
-                        ))?,
+                        ))??,
                     None => chain_start,
                 };
 
