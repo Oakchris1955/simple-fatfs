@@ -51,6 +51,8 @@ I'd like to thank [@alexkazik](https://github.com/alexkazik) for his contributio
 
 I'd also like to thank [@lukaslihotzki] for [migrating](https://github.com/Oakchris1955/simple-fatfs/pull/38) the library away from the now-abandonded bincode to [zerocopy] and [making](https://github.com/Oakchris1955/simple-fatfs/pull/39) simple-fatfs endian-agnostic.
 
+This project uses Frank Denis' ([@jedisct1]) bloom filter code to implement directory caching
+
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) (since commit `21c7d6b`, that is excluding the first two commits which don't actually contain any code). It also uses [git-cliff](https://github.com/orhun/git-cliff) to parse commit messages into a `CHANGELOG`
 
 ## License
@@ -61,3 +63,4 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 [rafalh's rust-fatfs]: https://github.com/rafalh/rust-fatfs
 [@lukaslihotzki]: https://github.com/@lukaslihotzki
 [zerocopy]: https://crates.io/crates/zerocopy
+[@jedisct1]: https://github.com/jedisct1
