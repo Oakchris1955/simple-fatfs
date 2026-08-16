@@ -47,11 +47,22 @@ It also aims to be able to do the following in the future:
 
 ## Acknowledgments
 
+### Contributions
+
 I'd like to thank [@alexkazik](https://github.com/alexkazik) for his contributions, most importantly his [short filename generation algorithm](https://github.com/Oakchris1955/simple-fatfs/pull/17) and his [Block-based device traits](https://github.com/Oakchris1955/simple-fatfs/pull/22).
 
 I'd also like to thank [@lukaslihotzki] for [migrating](https://github.com/Oakchris1955/simple-fatfs/pull/38) the library away from the now-abandonded bincode to [zerocopy] and [making](https://github.com/Oakchris1955/simple-fatfs/pull/39) simple-fatfs endian-agnostic.
 
-This project uses Frank Denis' ([@jedisct1]) bloom filter code to implement directory caching
+### Third-party code
+
+> [!NOTE]
+> For more info regarding third-party code & licensing, check the [notice](NOTICE.md) file
+
+This project uses Frank Denis' ([@jedisct1]) bloom filter code to implement directory caching, licensed under the ISC License.
+
+[oli_obk] & [Shepmaster]'s code is also used to handle non-null terminated long filenames.
+
+### Various
 
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) (since commit `21c7d6b`, that is excluding the first two commits which don't actually contain any code). It also uses [git-cliff](https://github.com/orhun/git-cliff) to parse commit messages into a `CHANGELOG`
 
@@ -64,3 +75,5 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 [@lukaslihotzki]: https://github.com/@lukaslihotzki
 [zerocopy]: https://crates.io/crates/zerocopy
 [@jedisct1]: https://github.com/jedisct1
+[oli_obk]: https://stackoverflow.com/users/1103681/oli-obk
+ [Shepmaster]: https://stackoverflow.com/users/155423/shepmaster
