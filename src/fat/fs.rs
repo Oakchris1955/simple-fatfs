@@ -24,7 +24,7 @@ use super::serde::attributes::RawAttributes;
 use super::serde::boot_sector::{
     BootRecord, BootRecordFAT, BpbFat, Ebr, FSInfoFAT32, BPBFAT_SIZE, EBRFAT32, VOLUME_LABEL_BYTES,
 };
-use super::serde::entry_composer::EntryComposer;
+use super::serde::entry_composer::write_entries;
 use super::serde::lfn::calc_lfn_entries_needed;
 use super::serde::location::{DirEntryChain, EntryLocation, EntryLocationUnit, EntryStatus};
 use super::serde::readir::{ReadDir, ReadDirRaw};
@@ -1069,19 +1069,11 @@ where
             MinProperties::new_parent_dir(datetime, parent),
         ];
 
-        // this composer will ALWAYS generate 2 entries
-        let entry_composer = EntryComposer::new(&entries);
-        let entry_loc_iter = EntryLocationIter::new(
+        write_entries(
+            &entries,
             EntryLocation::from(EntryLocationUnit::DataCluster(dir_cluster)),
             self,
-        );
-
-        entry_composer
-            .zip(entry_loc_iter)
-            .try_for_each(|(bytes, location_res)| {
-                let location = location_res?;
-                EntryLocation::set_bytes(&location, self, bytes)
-            })?;
+        )?;
 
         local_log::trace!("Successful created a new cluster chain with parent {parent:?}");
 
@@ -1115,15 +1107,7 @@ where
         let first_allocated_entry =
             self.allocate_nth_entries(num::NonZero::new(entries_needed).unwrap())?;
 
-        let entry_composer = EntryComposer::new(entries);
-        let entry_loc_iter = EntryLocationIter::new(first_allocated_entry, self);
-
-        entry_composer
-            .zip(entry_loc_iter)
-            .try_for_each(|(bytes, location_res)| {
-                let location = location_res?;
-                EntryLocation::set_bytes(&location, self, bytes)
-            })?;
+        write_entries(entries, first_allocated_entry, self)?;
 
         local_log::trace!(
             "Successful inserted the following {} entries at the entry chain:\n{entries:?}",

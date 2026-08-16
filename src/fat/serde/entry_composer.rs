@@ -1,6 +1,11 @@
 use core::iter::FusedIterator;
 
+use crate::block_io::BlockWrite;
+use crate::time::Clock;
+use crate::{FSResult, FileSystem};
+
 use super::lfn::LFNEntryGenerator;
+use super::location::{EntryLocation, EntryLocationIter};
 use super::{FATDirEntry, MinProperties, DIRENTRY_SIZE};
 
 /// A special case where due to 0xE5 being a valid
@@ -12,7 +17,7 @@ pub(crate) const LAST_AND_UNUSED_ENTRY: u8 = 0x00;
 
 /// Serialize [`MinProperties`] into bytes
 #[derive(Debug)]
-pub(crate) struct EntryComposer<'a> {
+struct EntryComposer<'a> {
     entries: &'a [MinProperties],
     entry_index: usize,
 
@@ -80,3 +85,31 @@ impl Iterator for EntryComposer<'_> {
 }
 
 impl FusedIterator for EntryComposer<'_> {}
+
+/// Convenience function to convert the provided `entries` to bytes and write them
+/// at the provided `fs`, starting at `first_loc`
+///
+/// # Errors
+///
+/// Returns an [`FSError`](crate::FSError) if any IO-related error occurs
+pub(crate) fn write_entries<S, C>(
+    entries: &[MinProperties],
+    first_loc: EntryLocation,
+    fs: &FileSystem<S, C>,
+) -> FSResult<(), S::Error>
+where
+    S: BlockWrite,
+    C: Clock,
+{
+    let entry_composer = EntryComposer::new(entries);
+    let entry_loc_iter = EntryLocationIter::new(first_loc, fs);
+
+    entry_composer
+        .zip(entry_loc_iter)
+        .try_for_each(|(bytes, location_res)| {
+            let location = location_res?;
+            EntryLocation::set_bytes(&location, fs, bytes)
+        })?;
+
+    Ok(())
+}
