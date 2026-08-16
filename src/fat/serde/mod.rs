@@ -8,7 +8,7 @@ pub(crate) mod entry_composer;
 pub(crate) mod lfn;
 pub(crate) mod location;
 pub(crate) mod props;
-pub(crate) mod readir;
+pub(crate) mod readdir;
 pub(crate) mod sfn;
 pub(crate) mod time;
 

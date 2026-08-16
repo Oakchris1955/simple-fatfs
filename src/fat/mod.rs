@@ -13,5 +13,5 @@ pub use fs::{determine_fs_sector_size, FileSystem};
 pub use serde::attributes::Attributes;
 pub use serde::direntry::DirEntry;
 pub use serde::props::Properties;
-pub use serde::readir::ReadDir;
+pub use serde::readdir::ReadDir;
 pub(crate) use types::*;

@@ -2,7 +2,7 @@ use typed_path::Utf8Component;
 
 use super::serde::boot_sector::{BootRecord, Ebr};
 use super::serde::location::{EntryLocation, EntryLocationUnit};
-use super::serde::readir::{ReadDir, ReadDirRaw};
+use super::serde::readdir::{ReadDir, ReadDirRaw};
 use crate::block_io::prelude::*;
 use crate::error::{FSError, FSResult};
 use crate::log::local_log;

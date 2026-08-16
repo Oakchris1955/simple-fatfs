@@ -27,7 +27,7 @@ use super::serde::boot_sector::{
 use super::serde::entry_composer::write_entries;
 use super::serde::lfn::calc_lfn_entries_needed;
 use super::serde::location::{DirEntryChain, EntryLocation, EntryLocationUnit, EntryStatus};
-use super::serde::readir::{ReadDir, ReadDirRaw};
+use super::serde::readdir::{ReadDir, ReadDirRaw};
 use super::serde::{FATDirEntry, MinProperties, RawProperties, DIRENTRY_LIMIT, DIRENTRY_SIZE};
 use crate::options::FSOptions;
 use crate::path::Path;

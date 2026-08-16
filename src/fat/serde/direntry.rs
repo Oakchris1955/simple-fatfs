@@ -8,7 +8,7 @@ use zerocopy::{
 use super::super::file::FileProps;
 use super::attributes::RawAttributes;
 use super::location::EntryLocationUnit;
-use super::readir::ReadDir;
+use super::readdir::ReadDir;
 use super::time::{EntryCreationTime, EntryLastAccessedTime, EntryModificationTime};
 use super::{MinProperties, Properties, Sfn};
 use crate::block_io::prelude::*;
