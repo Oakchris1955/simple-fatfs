@@ -2077,7 +2077,12 @@ where
     {
         let mut label_bytes = [b' '; VOLUME_LABEL_BYTES];
 
-        utils::string::copy_cp_chars(&mut label_bytes, label.as_ref(), self.options.codepage)?;
+        utils::string::copy_cp_chars(
+            &mut label_bytes,
+            label.as_ref(),
+            self.options.codepage,
+            true,
+        )?;
 
         if label_bytes == EMPTY_VOLUME_LABEL {
             return None;
@@ -2113,8 +2118,13 @@ where
     {
         let mut label_bytes = [b' '; VOLUME_LABEL_BYTES];
 
-        if utils::string::copy_cp_chars(&mut label_bytes, label.as_ref(), self.options.codepage)
-            .is_none()
+        if utils::string::copy_cp_chars(
+            &mut label_bytes,
+            label.as_ref(),
+            self.options.codepage,
+            true,
+        )
+        .is_none()
         {
             return Ok(None);
         };
