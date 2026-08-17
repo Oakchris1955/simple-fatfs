@@ -371,6 +371,21 @@ mod remove_dir {
     #[test_log]
     #[apply(fs)]
 
+    fn try_remove_nonempty_dir(fs: FileSystem<MemoryDevice, DefaultClock>) {
+        let dir_path = "/rootdir/";
+
+        // the directory shouldn't be gone
+        assert_eq!(
+            fs.remove_empty_dir(dir_path),
+            Err(FSError::DirectoryNotEmpty)
+        );
+
+        assert!(fs.read_dir(dir_path).is_ok());
+    }
+
+    #[test_log]
+    #[apply(fs)]
+
     fn try_remove_dir_with_hidden_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
         let dir_path = "/hidden/";
 
