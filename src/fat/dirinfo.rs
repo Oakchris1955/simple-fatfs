@@ -3,14 +3,14 @@ use typed_path::Utf8Component;
 use super::serde::boot_sector::{BootRecord, Ebr};
 use super::serde::location::{EntryLocation, EntryLocationUnit};
 use super::serde::readdir::{ReadDir, ReadDirRaw};
+use crate::FileSystem;
 use crate::block_io::prelude::*;
 use crate::error::{FSError, FSResult};
 use crate::log::local_log;
-use crate::path::{find_common_path_prefix, keep_path_normals, path_consts, Path, PathBuf};
+use crate::path::{Path, PathBuf, find_common_path_prefix, keep_path_normals, path_consts};
 use crate::time::Clock;
 #[cfg(feature = "bloom")]
 use crate::utils;
-use crate::FileSystem;
 
 /*
  * I have opted for using associated functions instead of methods for

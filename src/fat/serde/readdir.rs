@@ -5,14 +5,14 @@ use alloc::boxed::Box;
 
 use super::attributes::RawAttributes;
 use super::entry_composer::{LAST_AND_UNUSED_ENTRY, UNUSED_ENTRY, USED_KANJI};
-use super::lfn::{LFNEntry, CHARS_PER_LFN_ENTRY, LFN_MAX_ENTRIES};
+use super::lfn::{CHARS_PER_LFN_ENTRY, LFN_MAX_ENTRIES, LFNEntry};
 use super::location::{DirEntryChain, EntryLocation, EntryLocationIter, EntryLocationUnit};
 use super::{
-    DirEntry, FATDirEntry, MinProperties, RawProperties, CURRENT_DIR_ENTRY_INDEX, CURRENT_DIR_SFN,
-    PARENT_DIR_ENTRY_INDEX, PARENT_DIR_SFN,
+    CURRENT_DIR_ENTRY_INDEX, CURRENT_DIR_SFN, DirEntry, FATDirEntry, MinProperties,
+    PARENT_DIR_ENTRY_INDEX, PARENT_DIR_SFN, RawProperties,
 };
 use crate::block_io::prelude::*;
-use crate::path::{path_consts, Path};
+use crate::path::{Path, path_consts};
 use crate::time::Clock;
 use crate::utils;
 use crate::{ClusterIndex, FSError, FSResult, FileSystem, InternalFSError};

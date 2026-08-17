@@ -1,8 +1,8 @@
 use core::ops;
 
 use zerocopy::{
-    little_endian::{U16, U32},
     FromBytes, Immutable, IntoBytes,
+    little_endian::{U16, U32},
 };
 
 use super::super::file::FileProps;

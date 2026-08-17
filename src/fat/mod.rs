@@ -9,7 +9,7 @@ pub(crate) mod types;
 
 pub use fatentry::FATType;
 pub use file::{ROFile, RWFile};
-pub use fs::{determine_fs_sector_size, FileSystem};
+pub use fs::{FileSystem, determine_fs_sector_size};
 pub use serde::attributes::Attributes;
 pub use serde::direntry::DirEntry;
 pub use serde::props::Properties;

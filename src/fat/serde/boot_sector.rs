@@ -1,7 +1,7 @@
 use bitfield_struct::bitfield;
 use zerocopy::{
-    little_endian::{U16, U32},
     FromBytes, Immutable, IntoBytes, KnownLayout,
+    little_endian::{U16, U32},
 };
 
 use super::direntry::DIRENTRY_SIZE;

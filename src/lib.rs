@@ -194,7 +194,7 @@
 #![warn(missing_copy_implementations)]
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
-#![warn(non_ascii_idents)]
+// #![warn(non_ascii_idents)] TODO: bring this back when issue with zerocopy is fixed
 #![warn(trivial_numeric_casts)]
 #![warn(single_use_lifetimes)]
 #![warn(unused_import_braces)]
@@ -211,13 +211,11 @@
 #![warn(clippy::wildcard_imports)]
 
 #[cfg(target_pointer_width = "16")]
-compile_error!(
-    concat!(
-        "For various reasons, this project has been designed ",
-        "around architectures with at least 32-bit pointer widths\n",
-        "If you believe this isn't right, file an issue at https://github.com/Oakchris1955/simple-fatfs"
-    )
-);
+compile_error!(concat!(
+    "For various reasons, this project has been designed ",
+    "around architectures with at least 32-bit pointer widths\n",
+    "If you believe this isn't right, file an issue at https://github.com/Oakchris1955/simple-fatfs"
+));
 
 #[cfg(all(feature = "log", feature = "defmt"))]
 compile_error!("The log and defmt logging frameworks can't both be used at the same time");
@@ -241,7 +239,7 @@ mod test_commons;
 pub use codepage::Codepage;
 pub use embedded_io as io;
 pub use error::{FSError, FSResult, InternalFSError, RWFileError};
-pub use fat::options;
 pub use fat::FileSystem;
+pub use fat::options;
 pub use fat::*;
 pub use path::{Path, PathBuf};

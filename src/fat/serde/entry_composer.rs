@@ -6,7 +6,7 @@ use crate::{FSResult, FileSystem};
 
 use super::lfn::LFNEntryGenerator;
 use super::location::{EntryLocation, EntryLocationIter};
-use super::{FATDirEntry, MinProperties, DIRENTRY_SIZE};
+use super::{DIRENTRY_SIZE, FATDirEntry, MinProperties};
 
 /// A special case where due to 0xE5 being a valid
 /// byte sequence in the Japanese codepage, 0x05

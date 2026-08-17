@@ -5,7 +5,7 @@ use alloc::string::FromUtf16Error;
 
 use crate::block_io::prelude::*;
 use crate::path::Path;
-use crate::serde::sfn::{Sfn, SFN_EXT_LEN, SFN_NAME_LEN};
+use crate::serde::sfn::{SFN_EXT_LEN, SFN_NAME_LEN, Sfn};
 use crate::time::Clock;
 use crate::{Codepage, FSResult, FileSystem};
 
@@ -217,10 +217,10 @@ where
     'outer: {
         if let Some(sfn) = as_sfn(name, fs.options.codepage) {
             #[cfg(feature = "bloom")]
-            if let Some(filter) = &fs.dir_info.borrow().filter {
-                if !filter.check(&sfn.decode(fs.options.codepage)) {
-                    return Ok(sfn);
-                }
+            if let Some(filter) = &fs.dir_info.borrow().filter
+                && !filter.check(&sfn.decode(fs.options.codepage))
+            {
+                return Ok(sfn);
             }
 
             // don't forget to check if that SFN already exists
@@ -241,10 +241,10 @@ where
     // FIXME: this is bad, has best-case O(n) time complexity
     'outer: for sfn in generator {
         #[cfg(feature = "bloom")]
-        if let Some(filter) = &fs.dir_info.borrow().filter {
-            if !filter.check(&sfn.decode(fs.options.codepage)) {
-                return Ok(sfn);
-            }
+        if let Some(filter) = &fs.dir_info.borrow().filter
+            && !filter.check(&sfn.decode(fs.options.codepage))
+        {
+            return Ok(sfn);
         }
 
         for entry in fs.read_dir(&target_dir)? {

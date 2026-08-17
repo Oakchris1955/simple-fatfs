@@ -1,7 +1,7 @@
 use core::iter;
 
-use super::entry_composer::{LAST_AND_UNUSED_ENTRY, UNUSED_ENTRY};
 use super::DIRENTRY_SIZE;
+use super::entry_composer::{LAST_AND_UNUSED_ENTRY, UNUSED_ENTRY};
 use crate::block_io::prelude::*;
 use crate::time::Clock;
 use crate::{ClusterIndex, EntryCount, EntryIndex, FileSystem, SectorCount, SectorIndex};
@@ -288,8 +288,10 @@ impl EntryLocationUnit {
         match this {
             EntryLocationUnit::RootDirSector(sector) => {
                 if fs.props.root_dir_sectors() == 0 {
-                    unreachable!(concat!("This should be zero iff the FAT type if FAT32, ",
-                    "in which case we won't even be reading root directory sectors, since it doesn't exist"))
+                    unreachable!(concat!(
+                        "This should be zero iff the FAT type if FAT32, ",
+                        "in which case we won't even be reading root directory sectors, since it doesn't exist"
+                    ))
                 }
 
                 Ok((SectorIndex::from(*sector)

@@ -1,8 +1,8 @@
 #[cfg(feature = "bloom")]
 use core::num;
 
-use crate::time::{Clock, DefaultClock};
 use crate::Codepage;
+use crate::time::{Clock, DefaultClock};
 
 #[derive(Debug)]
 /// FileSystem mount options

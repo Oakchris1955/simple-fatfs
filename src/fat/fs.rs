@@ -22,24 +22,24 @@ use super::fatentry::{FATEntry, FATEntryProps, FATType, RESERVED_FAT_ENTRIES};
 use super::file::FileProps;
 use super::serde::attributes::RawAttributes;
 use super::serde::boot_sector::{
-    BootRecord, BootRecordFAT, BpbFat, Ebr, FSInfoFAT32, BPBFAT_SIZE, EBRFAT32, VOLUME_LABEL_BYTES,
+    BPBFAT_SIZE, BootRecord, BootRecordFAT, BpbFat, EBRFAT32, Ebr, FSInfoFAT32, VOLUME_LABEL_BYTES,
 };
 use super::serde::entry_composer::write_entries;
 use super::serde::lfn::calc_lfn_entries_needed;
 use super::serde::location::{DirEntryChain, EntryLocation, EntryLocationUnit, EntryStatus};
 use super::serde::readdir::{ReadDir, ReadDirRaw};
-use super::serde::{FATDirEntry, MinProperties, RawProperties, DIRENTRY_LIMIT, DIRENTRY_SIZE};
+use super::serde::{DIRENTRY_LIMIT, DIRENTRY_SIZE, FATDirEntry, MinProperties, RawProperties};
 use crate::options::FSOptions;
 use crate::path::Path;
 use crate::storage::SectorBuffer;
 use crate::time::Clock;
 use crate::utils;
-use crate::{block_io::prelude::*, serde::boot_sector::EBRFAT12_16};
 use crate::{
-    error::{FSError, FSResult, InternalFSError},
     BlockSize, ClusterCount, ClusterIndex, EntryCount, FATEntryIndex, FATEntryValue, Properties,
     ROFile, RWFile, SectorCount, SectorIndex,
+    error::{FSError, FSResult, InternalFSError},
 };
+use crate::{block_io::prelude::*, serde::boot_sector::EBRFAT12_16};
 use crate::{
     log::{global_log, local_log},
     serde::location::EntryLocationIter,
@@ -102,7 +102,7 @@ impl FATSectorProps {
 
 mod fsprops {
     use super::{
-        BootRecord, ClusterCount, ClusterIndex, SectorCount, SectorIndex, RESERVED_FAT_ENTRIES,
+        BootRecord, ClusterCount, ClusterIndex, RESERVED_FAT_ENTRIES, SectorCount, SectorIndex,
     };
 
     /// Some generic properties common across all FAT versions, like a sector's size, are cached here
@@ -884,19 +884,19 @@ where
         }
 
         // lastly, update the FSInfoFAT32 structure if it is available
-        if let BootRecord::Fat(boot_record_fat) = &mut *self.boot_record.borrow_mut() {
-            if let Ebr::FAT32(_, fsinfo) = &mut boot_record_fat.ebr {
-                match entry {
-                    FATEntry::Free => {
-                        fsinfo.free_cluster_count += 1;
-                        if n < fsinfo.first_free_cluster.get() {
-                            fsinfo.first_free_cluster = n.into();
-                        }
+        if let BootRecord::Fat(boot_record_fat) = &mut *self.boot_record.borrow_mut()
+            && let Ebr::FAT32(_, fsinfo) = &mut boot_record_fat.ebr
+        {
+            match entry {
+                FATEntry::Free => {
+                    fsinfo.free_cluster_count += 1;
+                    if n < fsinfo.first_free_cluster.get() {
+                        fsinfo.first_free_cluster = n.into();
                     }
-                    _ => fsinfo.free_cluster_count -= 1,
-                };
-                self.fsinfo_modified.replace(true);
-            }
+                }
+                _ => fsinfo.free_cluster_count -= 1,
+            };
+            self.fsinfo_modified.replace(true);
         }
 
         Ok(())
@@ -1010,7 +1010,9 @@ where
                     global_log::error!("Root directory is full, can't allocate any more entries");
                     Err(FSError::RootDirectoryFull)
                 } else {
-                    local_log::trace!("Successful allocated {n} contiguous FAT directory entries on the root directory");
+                    local_log::trace!(
+                        "Successful allocated {n} contiguous FAT directory entries on the root directory"
+                    );
                     Ok(first_chain_entry)
                 }
             }
@@ -1378,14 +1380,14 @@ where
         if *self.fsinfo_modified.borrow() {
             local_log::trace!("Syncing FSInfo struct");
 
-            if let BootRecord::Fat(boot_record_fat) = &*self.boot_record.borrow() {
-                if let Ebr::FAT32(ebr_fat32, fsinfo) = &boot_record_fat.ebr {
-                    self.load_nth_sector(ebr_fat32.fat_info.into())?;
+            if let BootRecord::Fat(boot_record_fat) = &*self.boot_record.borrow()
+                && let Ebr::FAT32(ebr_fat32, fsinfo) = &boot_record_fat.ebr
+            {
+                self.load_nth_sector(ebr_fat32.fat_info.into())?;
 
-                    fsinfo
-                        .write_to_prefix(&mut self.sector_buffer.borrow_mut())
-                        .unwrap();
-                }
+                fsinfo
+                    .write_to_prefix(&mut self.sector_buffer.borrow_mut())
+                    .unwrap();
             }
 
             self.fsinfo_modified.replace(false);
@@ -1526,11 +1528,11 @@ where
         if let Some(file_name) = path.file_name() {
             // IO operations are expensive, check the bloom filter
             #[cfg(feature = "bloom")]
-            if let Some(filter) = &self.dir_info.borrow().filter {
-                if !filter.check(file_name) {
-                    global_log::error!("File not found when checking the bloom filter");
-                    return Err(FSError::NotFound);
-                }
+            if let Some(filter) = &self.dir_info.borrow().filter
+                && !filter.check(file_name)
+            {
+                global_log::error!("File not found when checking the bloom filter");
+                return Err(FSError::NotFound);
             }
 
             let parent_dir = self.read_dir(
@@ -1666,10 +1668,10 @@ where
         #[cfg_attr(not(feature = "bloom"), expect(unused_labels))]
         'check: {
             #[cfg(feature = "bloom")]
-            if let Some(filter) = &self.dir_info.borrow().filter {
-                if !filter.check(file_name) {
-                    break 'check;
-                }
+            if let Some(filter) = &self.dir_info.borrow().filter
+                && !filter.check(file_name)
+            {
+                break 'check;
             }
 
             for entry in self.process_current_dir() {
@@ -2080,8 +2082,8 @@ where
                 self.boot_record.borrow_mut(),
                 |boot_record| match boot_record {
                     BootRecord::Fat(boot_record_fat) => match &mut boot_record_fat.ebr {
-                        Ebr::FAT12_16(ref mut ebr_fat12_16) => &mut ebr_fat12_16.volume_label,
-                        Ebr::FAT32(ref mut ebr_fat32, _fsinfo) => &mut ebr_fat32.volume_label,
+                        Ebr::FAT12_16(ebr_fat12_16) => &mut ebr_fat12_16.volume_label,
+                        Ebr::FAT32(ebr_fat32, _fsinfo) => &mut ebr_fat32.volume_label,
                     },
                     BootRecord::ExFAT(_boot_record_exfat) => todo!("ExFAT not yet implemented"),
                 },

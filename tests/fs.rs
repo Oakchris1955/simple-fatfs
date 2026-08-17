@@ -1,9 +1,9 @@
 mod common;
 use common::*;
 
+use simple_fatfs::options::FSOptions;
 #[cfg(feature = "bloom")]
 use simple_fatfs::options::bloom;
-use simple_fatfs::options::FSOptions;
 use simple_fatfs::time::{Clock, DefaultClock};
 
 use ::time;

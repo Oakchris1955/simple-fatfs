@@ -2,7 +2,7 @@ use core::num;
 
 use bitfield_struct::bitfield;
 use time::{Date, PrimitiveDateTime, Time};
-use zerocopy::{byteorder::little_endian::U16, FromBytes, Immutable, IntoBytes};
+use zerocopy::{FromBytes, Immutable, IntoBytes, byteorder::little_endian::U16};
 
 use crate::time::EPOCH;
 
