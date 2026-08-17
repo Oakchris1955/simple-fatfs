@@ -3,7 +3,7 @@ use embedded_io::{Error, ErrorKind, ReadExactError};
 /// An error type that denotes that there is something wrong
 /// with the filesystem's structure itself (perhaps the FS itself is malformed/corrupted)
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum InternalFSError {
     /// The storage medium isn't large enough to accompany a FAT filesystem
     StorageTooSmall,
@@ -31,7 +31,7 @@ pub enum InternalFSError {
 
 /// An error indicating that a filesystem-related operation has failed
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum FSError<I>
 where
     I: Error,
@@ -120,7 +120,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive] // TODO: see whether or not to keep this marked as non-exhaustive
 /// A [`RWFile`](crate::RWFile)-exclusive IO error struct
 pub enum RWFileError<I>

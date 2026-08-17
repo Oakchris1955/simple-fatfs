@@ -13,7 +13,7 @@ impl From<&[u8]> for MemoryDevice {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct WrapperError;
 
 impl embedded_io::Error for WrapperError {
