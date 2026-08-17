@@ -274,14 +274,14 @@ use fsprops::FSProperties;
 #[derive(Debug, Clone)]
 pub(crate) struct FileFilter {
     show_hidden: bool,
-    show_systen: bool,
+    show_system: bool,
 }
 
 impl FileFilter {
     pub(crate) fn filter(&self, item: &RawProperties) -> bool {
         let is_hidden = item.attributes.contains(RawAttributes::HIDDEN);
         let is_system = item.attributes.contains(RawAttributes::SYSTEM);
-        let should_filter = !self.show_hidden && is_hidden || !self.show_systen && is_system;
+        let should_filter = !self.show_hidden && is_hidden || !self.show_system && is_system;
 
         !should_filter
     }
@@ -293,7 +293,7 @@ impl Default for FileFilter {
         // The FAT spec says to filter everything by default
         FileFilter {
             show_hidden: false,
-            show_systen: false,
+            show_system: false,
         }
     }
 }
@@ -407,7 +407,7 @@ where
     /// Off by default
     #[inline]
     pub fn show_system(&self, show: bool) {
-        self.filter.borrow_mut().show_systen = show;
+        self.filter.borrow_mut().show_system = show;
     }
 }
 
@@ -698,7 +698,7 @@ where
         assert!(
             n < self.props.total_sectors(),
             concat!(
-                "seeked past end of device medium. ",
+                "sought past end of device medium. ",
                 "This is most likely an internal error, please report it: ",
                 "https://github.com/Oakchris1955/simple-fatfs/issues"
             )
@@ -1179,7 +1179,10 @@ where
     /// Mark the individual entries of a contiguous FAT entry chain as unused
     ///
     /// ## Warning
-    /// No validation is done to check whether or not the chain is valid
+    ///
+    /// No validation is done to check whether or not the chain is valid.
+    /// Furthermore, even if these are the last entries of the entire entry chain,
+    /// they will only be marked as unused, not last and unused
     pub(crate) fn remove_entry_chain(&self, chain: &DirEntryChain) -> Result<(), S::Error> {
         local_log::trace!("Removing entry chain starting at {chain:?}");
 
@@ -1234,7 +1237,7 @@ where
                 Some(next_free_cluster) => {
                     // FIXME: in FAT12 filesystems, this can cause a sector
                     // to be updated up to 4 times for seeminly no reason
-                    // Similar behavour is observed in FAT16/32, with 2 sync operations
+                    // Similar behaviour is observed in FAT16/32, with 2 sync operations
                     // THis number should be halved for both cases
 
                     if i == 0 {
@@ -1819,7 +1822,7 @@ where
         // 2. we first create the new entry and then remove the old one
         // the first method is easier to implement, but has a higher risk of data loss
         // the second method is a bit more difficult and in a worst-case scenario
-        // the file won't be lost, althought we will be left with 2 hard links
+        // the file won't be lost, although we will be left with 2 hard links
         // pointing to the same file. Here we use the second method
         self.go_to_dir(parent_to)?;
 

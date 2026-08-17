@@ -27,7 +27,7 @@ pub enum FATType {
     /// Min volume size: 256 MB,
     /// Max volume size: 16 TB
     FAT32,
-    /// An ex-proprietory filesystem that allows for even larger storage sizes
+    /// An ex-proprietary filesystem that allows for even larger storage sizes
     /// and its use is currently on the rise
     ///
     /// Not currently supported
@@ -166,7 +166,7 @@ impl From<&FATEntry> for FATEntryValue {
 
 /// Properties about the position of a [`FATEntry`] inside the FAT region
 pub(crate) struct FATEntryProps {
-    /// Each `n`th element of the vector points at the corrensponding sector at the (first) active FAT table
+    /// Each `n`th element of the vector points at the corresponding sector at the (first) active FAT table
     pub(crate) fat_sector: SectorIndex,
     pub(crate) sector_offset: usize,
 }

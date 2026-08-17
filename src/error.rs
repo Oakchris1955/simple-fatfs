@@ -36,7 +36,7 @@ pub enum FSError<I>
 where
     I: Error,
 {
-    /// An internal FS error occured
+    /// An internal FS error occurred
     InternalFSError(InternalFSError),
     /**
      The [Path](`crate::Path`) provided is malformed.
@@ -81,7 +81,7 @@ where
     UnsupportedFS,
     /// Unexpected EOF
     UnexpectedEof,
-    /// An IO error occured
+    /// An IO error occurred
     IOError(I),
 }
 
@@ -129,7 +129,7 @@ where
 {
     /// The underlying storage is full.
     StorageFull,
-    /// An IO error occured
+    /// An IO error occurred
     IOError(I),
 }
 

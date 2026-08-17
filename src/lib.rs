@@ -185,7 +185,7 @@
 //! [`Write`]: io::Write
 
 #![cfg_attr(not(feature = "std"), no_std)]
-// Even inside unsafe functions/methods, we must acknowlegde the usage of unsafe code
+// Even inside unsafe functions/methods, we must acknowledge the usage of unsafe code
 #![deny(deprecated)]
 #![deny(macro_use_extern_crate)]
 #![deny(private_bounds)]

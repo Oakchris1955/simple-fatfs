@@ -33,7 +33,7 @@ pub type BlockCount = BlockIndex;
 /// The size type of a block
 /// [`u32`] was chosen instead of [`u16`], since some flash memories are known
 /// to have block of 64 KBs (which is 1 more byte than what [`u16`] can handle),
-/// and in some (rare) cases, even more. Furthemore, since [`u32`] can express
+/// and in some (rare) cases, even more. Furthermore, since [`u32`] can express
 /// block sizes up to 4 GBs, it is more than enough for every flash memory out there.
 pub type BlockSize = u32;
 

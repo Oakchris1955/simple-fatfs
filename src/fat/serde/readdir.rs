@@ -60,7 +60,7 @@ where
     /// an [`InternalFSError::MalformedEntryChain`] if the `.` entry cannot be found.
     ///
     /// This may occur if this [`ReadDirRaw`] corresponds to the root directory,
-    /// the directory's entrie are malformed, or if the `.` wasn't found in the
+    /// the directory's entries are malformed, or if the `.` wasn't found in the
     /// expected position (according to the FAT specification, it must be first
     /// within the entry chain, so if it isn't found there, it is fair on our side to error)
     #[expect(dead_code, reason = "might come in handy later")]
@@ -81,7 +81,7 @@ where
     /// an [`InternalFSError::MalformedEntryChain`] if the `..` entry cannot be found.
     ///
     /// This may occur if this [`ReadDirRaw`] corresponds to the root directory,
-    /// the directory's entrie are malformed, or if the `..` wasn't found in the
+    /// the directory's entries are malformed, or if the `..` wasn't found in the
     /// expected position (according to the FAT specification, it must be second
     /// within the entry chain, so if it isn't found there, it is fair on our side to error)
     pub(crate) fn get_parent_dir_entry(mut self) -> FSResult<RawProperties, S::Error> {

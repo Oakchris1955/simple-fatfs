@@ -148,7 +148,7 @@ impl SfnGenerator {
 impl Iterator for SfnGenerator {
     type Item = Sfn;
 
-    // TODO: check beforehands how many similar SFNs exist so that we can increment the index past that number
+    // TODO: check beforehand how many similar SFNs exist so that we can increment the index past that number
     fn next(&mut self) -> Option<Self::Item> {
         // increment by one
         let mut pos = self.position;
