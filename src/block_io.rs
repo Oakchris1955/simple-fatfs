@@ -223,12 +223,14 @@ pub use from_std::*;
 
 #[cfg(feature = "embedded_storage_translator")]
 pub(crate) mod embedded_storage_translators {
-    use super::*;
+    use super::{BlockBase, BlockCount, BlockIndex, BlockRead, BlockSize, BlockWrite};
+
     use core::ops::{Deref, DerefMut};
 
-    use embedded_io::Error as IOError;
+    use embedded_io::{Error as IOError, ErrorType as IOErrorType};
     use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
 
+    #[cfg_attr(not(feature = "lba64"), expect(clippy::useless_conversion))]
     #[inline]
     fn calc_offset(block: BlockIndex, block_size: u32) -> u32 {
         u32::try_from(block).unwrap() * block_size
