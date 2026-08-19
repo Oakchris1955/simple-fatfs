@@ -24,6 +24,7 @@ body = """
     ### {{ group | upper_first }}
     {% for commit in commits %}
         - {{ commit.message | upper_first }} \
+          {% if commit.breaking and group == 'chore' %}(**breaking**) {% endif %}\
         ([{{ commit.id | truncate(length=7, end="") }}]({{ commit.id }}))\
     {% endfor %}
 {% endfor %}\n
@@ -60,17 +61,32 @@ trim = true
 [git]
 # parse the commits based on https://www.conventionalcommits.org
 conventional_commits = true
-# filter out the commits that are not conventional
-filter_unconventional = true
+# whether to filter out the commits that are not conventional
+filter_unconventional = false
 # process each line of a commit as an individual commit
 split_commits = false
+# regex for preprocessing commits
+commit_preprocessors = [
+  # handle merge commits not prefixed with "merge:" (thanks Github!)
+  { pattern = "(Merge .*)", replace = "merge: ($1)" },
+]
 # regex for parsing and grouping commits
 commit_parsers = [
+  # skip initial commits ("Initial commit", "Create LICENSE")
+  { sha = "ecc42e3d8606da0f609821e35e1c60aabb4b9971", skip = true },
+  { sha = "415760c384a47abcf799517fca9ef70199066005", skip = true },
+  # Use `embedded-io` for IO operations
+  { sha = "4799387b2beca680fb0c63a010ea217c540fb749", group = "Added" },
+  # Truncate now truncates to the current cursor position
+  { sha = "28824451e27238798ed896a8e4fc05dfacdecab3", group = "Fixed" },
   { message = "^chore", skip = true },
+  { message = "^revert", skip = true },
+  { message = "^merge", skip = true },
   { message = "^ci", skip = true },
   { message = "^test", skip = true },
   { message = "^refactor", skip = true },
   { message = "^docs", skip = true },
+  { message = "^feat", group = "Added" },
   { message = "^.*: add", group = "Added" },
   { message = "^.*: create", group = "Added" },
   { message = "^.*support", group = "Added" },
@@ -83,7 +99,7 @@ commit_parsers = [
   { message = "^.*", group = "Changed" },
 ]
 # protect breaking changes from being skipped due to matching a skipping commit_parser
-protect_breaking_commits = false
+protect_breaking_commits = true
 # filter out the commits that are not matched by commit parsers
 filter_commits = true
 # regex for matching git tags
@@ -95,4 +111,4 @@ ignore_tags = ""
 # sort the tags topologically
 topo_order = false
 # sort the commits inside sections by oldest/newest order
-sort_commits = "oldest"
+sort_commits = "newest"
