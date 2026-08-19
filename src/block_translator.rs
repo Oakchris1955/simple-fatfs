@@ -1,11 +1,12 @@
 use core::array;
-use core::fmt::{Debug, Display, Formatter};
+use core::error::Error;
+use core::fmt::{self, Debug, Display, Formatter};
 use core::iter;
 use core::ops::{Deref, DerefMut};
 
 use alloc::boxed::Box;
 
-use embedded_io::{ErrorKind, ErrorType};
+use embedded_io::{Error as IOError, ErrorKind as IOErrorKind, ErrorType as IOErrorType};
 
 use crate::block_io::{BlockBase, BlockRead, BlockWrite};
 pub use crate::fat::types::BlockIndex;
@@ -128,7 +129,7 @@ pub enum BlockTranslatorError {
 }
 
 impl Display for BlockTranslatorError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             BlockTranslatorError::BufferSizeTooSmall => {
                 "buffer size must be greater or equal than the hardware block size"
@@ -144,18 +145,18 @@ impl Display for BlockTranslatorError {
 }
 
 impl Debug for BlockTranslatorError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        use core::fmt::Display;
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use fmt::Display;
 
         Display::fmt(self, f)
     }
 }
 
-impl core::error::Error for BlockTranslatorError {}
+impl Error for BlockTranslatorError {}
 
-impl embedded_io::Error for BlockTranslatorError {
-    fn kind(&self) -> ErrorKind {
-        ErrorKind::InvalidData
+impl IOError for BlockTranslatorError {
+    fn kind(&self) -> IOErrorKind {
+        IOErrorKind::InvalidData
     }
 }
 
@@ -353,7 +354,7 @@ where
     }
 }
 
-impl<const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S> ErrorType
+impl<const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S> IOErrorType
     for BlockTranslator<'_, VBS, BUF_SIZE, BUFS, S>
 where
     S: BlockWrite,

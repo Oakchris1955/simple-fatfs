@@ -1,6 +1,6 @@
 use core::{cmp, num, ops};
 
-use embedded_io::{ErrorType, Read, ReadExactError, Seek, SeekFrom, Write};
+use embedded_io::{ErrorType as IOErrorType, Read, ReadExactError, Seek, SeekFrom, Write};
 use time::{Date, PrimitiveDateTime};
 
 use super::fatentry::FATEntry;
@@ -103,7 +103,7 @@ where
 {
     #[inline]
     /// Panics if the current cluster doesn't point to another cluster
-    fn next_cluster(&mut self) -> Result<(), <Self as ErrorType>::Error> {
+    fn next_cluster(&mut self) -> Result<(), <Self as IOErrorType>::Error> {
         // when a `ROFile` is created, `cluster_chain_is_healthy` is called, if it fails, that ROFile is dropped
         self.props.current_cluster = self.get_next_cluster()?.unwrap();
 
@@ -112,12 +112,12 @@ where
 
     #[inline]
     /// Non-[`panic`]king version of [`next_cluster()`](ROFile::next_cluster)
-    fn get_next_cluster(&mut self) -> Result<Option<ClusterIndex>, <Self as ErrorType>::Error> {
+    fn get_next_cluster(&mut self) -> Result<Option<ClusterIndex>, <Self as IOErrorType>::Error> {
         self.fs.get_next_cluster(self.props.current_cluster)
     }
 
     /// Returns that last cluster in the file's cluster chain
-    fn last_cluster_in_chain(&mut self) -> Result<ClusterIndex, <Self as ErrorType>::Error> {
+    fn last_cluster_in_chain(&mut self) -> Result<ClusterIndex, <Self as IOErrorType>::Error> {
         // we begin from the current cluster to save some time
         let mut current_cluster = self.props.current_cluster;
 
@@ -168,7 +168,7 @@ where
     }
 }
 
-impl<S, C> ErrorType for ROFile<'_, S, C>
+impl<S, C> IOErrorType for ROFile<'_, S, C>
 where
     S: BlockRead,
     C: Clock,
@@ -385,7 +385,7 @@ where
     }
 
     /// Truncates the file to the cursor position
-    pub fn truncate(&mut self) -> Result<(), <Self as ErrorType>::Error> {
+    pub fn truncate(&mut self) -> Result<(), <Self as IOErrorType>::Error> {
         let size = self.props.offset;
 
         // looks like the new truncated size would be smaller than the current one, so we just return
@@ -438,7 +438,7 @@ where
     }
 
     /// Remove the current file from the [`FileSystem`]
-    pub fn remove(mut self) -> Result<(), <Self as ErrorType>::Error> {
+    pub fn remove(mut self) -> Result<(), <Self as IOErrorType>::Error> {
         // we begin by removing the corresponding entries...
         self.ro_file
             .fs
@@ -524,7 +524,7 @@ where
     }
 }
 
-impl<S, C> ErrorType for RWFile<'_, S, C>
+impl<S, C> IOErrorType for RWFile<'_, S, C>
 where
     S: BlockWrite,
     C: Clock,

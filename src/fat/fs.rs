@@ -11,7 +11,7 @@ use alloc::{
     vec::Vec,
 };
 
-use embedded_io::ErrorType;
+use embedded_io::ErrorType as IOErrorType;
 use time::PrimitiveDateTime;
 use typed_path::Utf8Component;
 use zerocopy::{FromBytes, IntoBytes};
@@ -298,8 +298,8 @@ impl Default for FileFilter {
     }
 }
 
-type SyncSectorBufferFn<S, C> = fn(&FileSystem<S, C>) -> Result<(), <S as ErrorType>::Error>;
-type UnmountFn<S, C> = fn(&FileSystem<S, C>) -> FSResult<(), <S as ErrorType>::Error>;
+type SyncSectorBufferFn<S, C> = fn(&FileSystem<S, C>) -> Result<(), <S as IOErrorType>::Error>;
+type UnmountFn<S, C> = fn(&FileSystem<S, C>) -> FSResult<(), <S as IOErrorType>::Error>;
 
 /// Determine the sector size of a FAT filesystem without fully constructing it.
 pub fn determine_fs_sector_size<S>(storage: S) -> FSResult<u16, S::Error>

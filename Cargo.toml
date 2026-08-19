@@ -11,7 +11,8 @@ exclude = ["/.github", ".vscode", "/imgs", "**/*cliff*", "/tests"]
 [dependencies]
 bitfield-struct = "0.13.0"
 bitflags = "2.13.1"
-embedded-io = { version = "0.6.1" }
+displaydoc = { version = "0.2.7", default-features = false }
+embedded-io = { version = "0.7.1" }
 embedded-storage = { version = "0.3.1", optional = true }
 log = { version = "0.4.33", optional = true }
 oem_cp = "2.1.2"

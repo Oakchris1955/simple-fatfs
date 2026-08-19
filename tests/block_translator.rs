@@ -1,4 +1,4 @@
-use embedded_io::ErrorType;
+use embedded_io::{ErrorType as IOErrorType, SliceWriteError};
 use simple_fatfs::block_io::*;
 
 #[derive(Debug)]
@@ -24,8 +24,8 @@ impl<const BS: BlockSize> BlockRead for Storage<'_, BS> {
     }
 }
 
-impl<const BS: BlockSize> ErrorType for Storage<'_, BS> {
-    type Error = embedded_io::SliceWriteError;
+impl<const BS: BlockSize> IOErrorType for Storage<'_, BS> {
+    type Error = SliceWriteError;
 }
 
 impl<const BS: BlockSize> BlockWrite for Storage<'_, BS> {

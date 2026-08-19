@@ -1,6 +1,8 @@
+use core::error::Error;
 use core::ops::{Deref, DerefMut};
 
-use embedded_io::ErrorType;
+use displaydoc::Display;
+use embedded_io::{Error as IOError, ErrorKind as IOErrorKind, ErrorType as IOErrorType};
 
 use crate::block_io::prelude::*;
 
@@ -13,16 +15,19 @@ impl From<&[u8]> for MemoryDevice {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+/// Device wrapper error
+#[derive(Display, Debug, PartialEq, Eq)]
 pub struct WrapperError;
 
-impl embedded_io::Error for WrapperError {
-    fn kind(&self) -> embedded_io::ErrorKind {
+impl Error for WrapperError {}
+
+impl IOError for WrapperError {
+    fn kind(&self) -> IOErrorKind {
         unreachable!()
     }
 }
 
-impl ErrorType for MemoryDevice {
+impl IOErrorType for MemoryDevice {
     type Error = WrapperError;
 }
 
