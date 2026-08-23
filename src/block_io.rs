@@ -69,6 +69,7 @@ impl<T: BlockWrite> BlockWrite for &mut T {
     }
 }
 
+/// The block I/O prelude
 pub mod prelude {
     pub use super::{BlockBase, BlockRead, BlockWrite};
 }

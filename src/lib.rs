@@ -230,6 +230,7 @@ pub(crate) mod fat;
 pub(crate) mod log;
 mod path;
 pub(crate) mod storage;
+/// Time-related traits, constants and structs
 pub mod time;
 pub(crate) mod utils;
 

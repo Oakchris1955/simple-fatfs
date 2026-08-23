@@ -3,6 +3,7 @@ pub(crate) mod dirinfo;
 pub(crate) mod fatentry;
 pub(crate) mod file;
 pub(crate) mod fs;
+/// FileSystem mount options-related structs & methods
 pub mod options;
 pub(crate) mod serde;
 pub(crate) mod types;
