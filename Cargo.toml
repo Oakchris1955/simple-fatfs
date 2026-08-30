@@ -2,25 +2,29 @@
 name = "simple-fatfs"
 version = "0.1.0-alpha.2"
 rust-version = "1.88.0"
-edition = "2021"
+edition = "2024"
 description = "A simple-to-use FAT filesystem library for Rust (mainly targeted at embedded systems)"
 license = "MIT"
 repository = "https://github.com/Oakchris1955/simple-fatfs"
 exclude = ["/.github", ".vscode", "/imgs", "**/*cliff*", "/tests"]
 
 [dependencies]
-bitfield-struct = "0.8.0"
-bitflags = "2.11.0"
-embedded-io = { version = "0.6.1" }
+bitfield-struct = "0.13.0"
+bitflags = "2.13.1"
+displaydoc = { version = "0.2.7", default-features = false }
+embedded-io = { version = "0.7.1" }
 embedded-storage = { version = "0.3.1", optional = true }
-log = { version = "0.4.22", optional = true }
+log = { version = "0.4.33", optional = true }
 oem_cp = "2.1.2"
-time = { version = "0.3.47", default-features = false, features = [ "parsing", "macros" ]}
-typed-path = { version = "0.12.0", default-features = false }
-siphasher = { version = "1.0.1", default-features = false , optional = true }
-zerocopy = { version = "0.8.27", features = ["derive"] }
+time = { version = "0.3.55", default-features = false, features = [
+    "parsing",
+    "macros",
+] }
+typed-path = { version = "0.12.3", default-features = false }
+siphasher = { version = "1.0.3", default-features = false, optional = true }
+zerocopy = { version = "0.8.56", features = ["derive"] }
 defmt = { version = "1.1.1", optional = true }
-libm = { version="0.2.16", optional = true }
+libm = { version = "0.2.16", optional = true }
 
 [features]
 default = ["std"]
@@ -32,6 +36,8 @@ log = ["dep:log"]
 bloom = ["dep:siphasher", "dep:libm"]
 # 64-bit logical block addressing
 lba64 = []
+# read-write file/directory collision control
+collision_control = []
 # embedded-storage block IO translators
 embedded_storage_translator = ["dep:embedded-storage"]
 codepage = []
@@ -54,26 +60,24 @@ cp869 = []
 cp874 = []
 
 [dev-dependencies]
-embedded-io-adapters = { version = "0.6.2", features = ["std"] }
+embedded-io-adapters = { version = "0.7.0", features = ["std"] }
 log = "0.4.22"
-rand = { version = "0.9.3", default-features = false, features = ["thread_rng"] }
+rand = { version = "0.10.2", default-features = false, features = [
+    "thread_rng",
+] }
 regex = "1.11.2"
 rstest = "0.26.1"
 rstest_reuse = "0.7.0"
 test-log = "0.2.16"
 
 [package.metadata.cargo-fc]
-exclude_feature_sets = [
-    ["log", "defmt"],
-]
+exclude_feature_sets = [["log", "defmt"]]
 
-only_features = [
-    "std",
-    "defmt",
-    "log",
-    "bloom",
-    "lba64"
-]
+include_features = ["collision_control"]
+
+only_features = ["std", "defmt", "log", "bloom", "lba64"]
+
+include_feature_sets = [[]]
 
 [package.metadata.cargo-fc.target.'cfg(target_os = "none")']
 exclude_features = { add = ["std"] }

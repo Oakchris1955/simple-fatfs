@@ -3,11 +3,26 @@ use alloc::string::String;
 
 use alloc::string::FromUtf16Error;
 
-use crate::{path::*, Clock, Codepage, FSResult, FileSystem, Sfn, SFN_EXT_LEN, SFN_NAME_LEN};
+use crate::block_io::prelude::*;
+use crate::path::Path;
+use crate::serde::sfn::{SFN_EXT_LEN, SFN_NAME_LEN, Sfn};
+use crate::time::Clock;
+use crate::{Codepage, FSResult, FileSystem};
 
-use crate::fat::BlockWrite;
-
-/// variation of <https://stackoverflow.com/a/42067321/19247098> for processing LFNs
+/// Decode a native endian UTF-16–encoded vector `utf16_src` into a [`String`],
+/// returning a [`FromUtf16Error`] [`Err`] if `utf16_src` contains any invalid data.
+///
+/// The main difference of this function from [`String::from_utf16`] is that this
+/// will also handle any vectors that may not be null-terminated, since that is
+/// the case with long names with a length which is a multiple of 13.
+///
+/// # Note
+///
+/// Code for finding the index of the first zero byte obtained from <https://stackoverflow.com/a/42067321/19247098>
+/// Original from [oli_obk](https://stackoverflow.com/users/1103681/oli-obk),
+/// checked (safe) version from [Shepmaster](https://stackoverflow.com/users/155423/shepmaster),
+/// licensed under [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)
+/// (can also be found at the crate's root, in `NOTICE.md`).
 pub(crate) fn string_from_lfn(utf16_src: &[u16]) -> Result<String, FromUtf16Error> {
     let nul_range_end = utf16_src
         .iter()
@@ -17,6 +32,11 @@ pub(crate) fn string_from_lfn(utf16_src: &[u16]) -> Result<String, FromUtf16Erro
     String::from_utf16(&utf16_src[..nul_range_end])
 }
 
+/// Attempt to decode a provided `string` into a [`Sfn`], using the provided `codepage`.
+///
+/// # Errors
+///
+/// Returns [`None`] if decoding fails.
 pub(crate) fn as_sfn(string: &str, codepage: Codepage) -> Option<Sfn> {
     // a file can still not have an extension
     let (name, ext) = string.split_once('.').unwrap_or((string, ""));
@@ -24,23 +44,36 @@ pub(crate) fn as_sfn(string: &str, codepage: Codepage) -> Option<Sfn> {
     // create a sfn with padding
     let mut result = Sfn::default();
 
-    copy_cp_chars(result.name_mut(), name, codepage)?;
+    copy_cp_chars(result.name_mut(), name, codepage, true)?;
 
-    copy_cp_chars(result.ext_mut(), ext, codepage)?;
+    copy_cp_chars(result.ext_mut(), ext, codepage, true)?;
 
     Some(result)
 }
 
 /// Decodes as many characters as possible using `codepage` from `string` and puts them to `destination`
 ///
+/// # Errors
+///
 /// Returns [`None`] if not all characters could be decoded
 pub(crate) fn copy_cp_chars(
     mut destination: &mut [u8],
     string: &str,
     codepage: Codepage,
+    fail_fast: bool,
 ) -> Option<()> {
     for c in string.chars() {
-        let c = encode_valid_char_checked(c, codepage)?;
+        let c = match encode_valid_char_checked(c, codepage) {
+            Some(c) => c,
+            None => {
+                if fail_fast {
+                    return None;
+                } else {
+                    continue;
+                }
+            }
+        };
+
         if destination.is_empty() {
             // no space left
             return None;
@@ -52,19 +85,32 @@ pub(crate) fn copy_cp_chars(
     Some(())
 }
 
-const OTHER_PERMITTED_CHARS: &[u8] = b"$%-_@~`!(){}^#&";
+/// Other non-letter or numerical ASCII characters that are permitted to reside
+/// in a short filename
+const OTHER_PERMITTED_CHARS: &[u8] = b"$%'-_@~`!(){}^#&";
 
+/// Decode the given character using `codepage`
+///
+/// # Note
+///
+/// The FAT specification says that "the characters comprising a short file name may be any combination
+/// of letters, digits, or characters with code point values greater than 127".
+/// It is also specified that lowercase characters should be converted to uppercase.
+///
+/// # Errors
+///
+/// [`None`] will be returned if the decoded character is not permitted
+/// in a short name
 fn encode_valid_char_checked(c: char, codepage: Codepage) -> Option<u8> {
     let c = codepage.encode_char_checked(c)?;
 
-    (c.is_ascii_digit()
-        || c.is_ascii_uppercase()
-        || OTHER_PERMITTED_CHARS.contains(&c)
-        || !c.is_ascii())
-    .then_some(c)
+    (c.is_ascii_alphanumeric() || OTHER_PERMITTED_CHARS.contains(&c) || !c.is_ascii())
+        .then_some(c)
+        .map(|c| c.to_ascii_uppercase())
 }
 
 #[derive(Debug)]
+/// Generate matching [`Sfn`]s for a string
 struct SfnGenerator {
     name: [u8; SFN_NAME_LEN],
     ext: [u8; SFN_EXT_LEN],
@@ -72,6 +118,7 @@ struct SfnGenerator {
 }
 
 impl SfnGenerator {
+    /// Create a new [`SfnGenerator`] for the provided `string` & `codepage`
     fn new(string: &str, codepage: Codepage) -> Self {
         let (name, ext) = string.rsplit_once('.').unwrap_or((string, ""));
 
@@ -81,8 +128,8 @@ impl SfnGenerator {
             position: 0,
         };
 
-        Self::_as_sfn_part(&mut result.name, name, codepage);
-        Self::_as_sfn_part(&mut result.ext, ext, codepage);
+        copy_cp_chars(&mut result.name, name, codepage, false);
+        copy_cp_chars(&mut result.ext, ext, codepage, false);
 
         let len = result
             .name
@@ -96,24 +143,12 @@ impl SfnGenerator {
 
         result
     }
-
-    fn _as_sfn_part(mut destination: &mut [u8], input: &str, codepage: Codepage) {
-        for ch in input.chars() {
-            if let Some(c) = encode_valid_char_checked(ch.to_ascii_uppercase(), codepage) {
-                destination[0] = c;
-                destination = &mut destination[1..];
-                if destination.is_empty() {
-                    break;
-                }
-            }
-        }
-    }
 }
 
 impl Iterator for SfnGenerator {
     type Item = Sfn;
 
-    // TODO: check beforehands how many similar SFNs exist so that we can increment the index past that number
+    // TODO: check beforehand how many similar SFNs exist so that we can increment the index past that number
     fn next(&mut self) -> Option<Self::Item> {
         // increment by one
         let mut pos = self.position;
@@ -161,8 +196,15 @@ impl Iterator for SfnGenerator {
     }
 }
 
+/// Generate a [`Sfn`] for an entry with the provided `name` that will reside in
+/// the `target_dir` of the provided `fs`.
+///
+/// # Errors
+///
+/// Returns an [`FSError`](crate::FSError) if any IO-related error occurs
+///
 pub(crate) fn gen_sfn<S, C, P>(
-    string: &str,
+    name: &str,
     fs: &FileSystem<S, C>,
     target_dir: P,
 ) -> FSResult<Sfn, S::Error>
@@ -173,16 +215,16 @@ where
 {
     // we first check if this string is a valid short filename
     'outer: {
-        if let Some(sfn) = as_sfn(string, fs.options.codepage) {
+        if let Some(sfn) = as_sfn(name, fs.options.codepage) {
             #[cfg(feature = "bloom")]
-            if let Some(filter) = &fs.dir_info.borrow().filter {
-                if !filter.check(&sfn.decode(fs.options.codepage)) {
-                    return Ok(sfn);
-                }
+            if let Some(filter) = &fs.dir_info.borrow().filter
+                && !filter.check(&sfn.decode(fs.options.codepage))
+            {
+                return Ok(sfn);
             }
 
             // don't forget to check if that SFN already exists
-            for entry in fs.process_current_dir() {
+            for entry in fs.process_current_dir()? {
                 let entry = entry?;
 
                 if entry.sfn == sfn {
@@ -194,21 +236,21 @@ where
         }
     }
 
-    let generator = SfnGenerator::new(string, fs.options.codepage);
+    let generator = SfnGenerator::new(name, fs.options.codepage);
 
     // FIXME: this is bad, has best-case O(n) time complexity
     'outer: for sfn in generator {
         #[cfg(feature = "bloom")]
-        if let Some(filter) = &fs.dir_info.borrow().filter {
-            if !filter.check(&sfn.decode(fs.options.codepage)) {
-                return Ok(sfn);
-            }
+        if let Some(filter) = &fs.dir_info.borrow().filter
+            && !filter.check(&sfn.decode(fs.options.codepage))
+        {
+            return Ok(sfn);
         }
 
         for entry in fs.read_dir(&target_dir)? {
             let entry = entry?;
 
-            if entry.sfn.0 == sfn {
+            if entry.sfn == sfn {
                 continue 'outer;
             }
         }
@@ -232,6 +274,7 @@ mod tests {
     use test_log::test;
 
     use crate::test_commons::*;
+    use crate::time::DefaultClock;
 
     #[test]
     fn test_sfn_generator_long() {
@@ -267,6 +310,13 @@ mod tests {
         assert_eq!(generator.next(), Some(Sfn::new(*b"~1      ", *b"   ")));
     }
 
+    #[test]
+    fn test_sfn_generator_unknown_chars_failfast() {
+        let mut generator = SfnGenerator::new("1😇2.T😈XT", Codepage::default());
+
+        assert_eq!(generator.next(), Some(Sfn::new(*b"12~1    ", *b"TXT")));
+    }
+
     fn run_gen_sfn_root<S, C>(string: &str, fs: &FileSystem<S, C>) -> Option<Sfn>
     where
         S: BlockWrite,
@@ -277,7 +327,7 @@ mod tests {
 
     #[test]
     #[apply(fs)]
-    fn test_gen_sfn_match(fs: FileSystem<MemoryDevice, crate::DefaultClock>) {
+    fn test_gen_sfn_match_uppercase(fs: FileSystem<MemoryDevice, DefaultClock>) {
         assert_eq!(
             run_gen_sfn_root("TEST.TXT", &fs),
             Some(Sfn::new(*b"TEST    ", *b"TXT"))
@@ -286,10 +336,19 @@ mod tests {
 
     #[test]
     #[apply(fs)]
-    fn test_gen_sfn_mismatch(fs: FileSystem<MemoryDevice, crate::DefaultClock>) {
+    fn test_gen_sfn_match_lowercase(fs: FileSystem<MemoryDevice, DefaultClock>) {
         assert_eq!(
             run_gen_sfn_root("test.txt", &fs),
-            Some(Sfn::new(*b"TEST~1  ", *b"TXT"))
+            Some(Sfn::new(*b"TEST    ", *b"TXT"))
+        )
+    }
+
+    #[test]
+    #[apply(fs)]
+    fn test_gen_sfn_match_mixedcase(fs: FileSystem<MemoryDevice, DefaultClock>) {
+        assert_eq!(
+            run_gen_sfn_root("TesT.tXt", &fs),
+            Some(Sfn::new(*b"TEST    ", *b"TXT"))
         )
     }
 }

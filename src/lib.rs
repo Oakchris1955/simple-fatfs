@@ -85,6 +85,18 @@
 //!
 //!   Switch from 32-bit to 64-bit logical block addressing for the [`block_io`] traits
 //!
+//! - `collision_control`
+//!
+//!   Bare-bones inumber table to prevent data corruption due to duplicated file open.
+//!
+//!   ### Note
+//!
+//!   If you are developing something more complicated, like e.g. an operating system
+//!   and you want to be able to open the same file/directory twice without having
+//!   to worry about data corruption, then you probably need something more advanced,
+//!   like a file descriptor table. Nevertheless, this should be adequate for more
+//!   applications out there.
+//!
 //! - `embedded_storage_translator`
 //!
 //!   Translator for implementing block-based IO for `embedded-storage`'s
@@ -170,16 +182,22 @@
 //!   locations: in the boot sector and as a special volume label entry
 //!   in the root directory. Windows read the FAT label only from the root
 //!   directory (and only update that). Keep that in mind when using the
-//!   various volume label functions
+//!   various volume label methods
 //!
 //!   For more info, please check <https://man7.org/linux/man-pages/man8/fatlabel.8.html>
+//!
+//!   Furthermore, the volume label field of the boot record has a size of 11 bytes.
+//!   That being said, how many bytes each character will occupy depends on
+//!   the currently-used codepage. To ensure a 1:1 char-to-byte conversions,
+//!   use ASCII characters, since there are guaranteed to be 1-byte long
+//!   no matter the codepage.
 //!
 //! [`Read`]: io::Read
 //! [`Seek`]: io::Seek
 //! [`Write`]: io::Write
 
 #![cfg_attr(not(feature = "std"), no_std)]
-// Even inside unsafe functions, we must acknowlegde the usage of unsafe code
+// Even inside unsafe functions/methods, we must acknowledge the usage of unsafe code
 #![deny(deprecated)]
 #![deny(macro_use_extern_crate)]
 #![deny(private_bounds)]
@@ -188,7 +206,7 @@
 #![warn(missing_copy_implementations)]
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
-#![warn(non_ascii_idents)]
+// #![warn(non_ascii_idents)] TODO: bring this back when issue with zerocopy is fixed
 #![warn(trivial_numeric_casts)]
 #![warn(single_use_lifetimes)]
 #![warn(unused_import_braces)]
@@ -202,36 +220,41 @@
 #![warn(clippy::cast_precision_loss)]
 #![warn(clippy::cast_sign_loss)]
 #![warn(clippy::redundant_clone)]
+#![warn(clippy::wildcard_imports)]
 
 #[cfg(target_pointer_width = "16")]
-compile_error!(
-    concat!(
-        "For various reasons, this project has been designed ",
-        "around architectures with at least 32-bit pointer widths\n",
-        "If you believe this isn't right, file an issue at https://github.com/Oakchris1955/simple-fatfs"
-    )
-);
+compile_error!(concat!(
+    "For various reasons, this project has been designed ",
+    "around architectures with at least 32-bit pointer widths\n",
+    "If you believe this isn't right, file an issue at https://github.com/Oakchris1955/simple-fatfs"
+));
 
 #[cfg(all(feature = "log", feature = "defmt"))]
 compile_error!("The log and defmt logging frameworks can't both be used at the same time");
 
 extern crate alloc;
 
-mod codepage;
-mod error;
-mod fat;
-mod log;
+pub mod block_io;
+pub(crate) mod block_translator;
+pub(crate) mod codepage;
+pub(crate) mod error;
+pub(crate) mod fat;
+pub(crate) mod log;
 mod path;
-mod time;
-mod utils;
+pub(crate) mod storage;
+/// Time-related traits, constants and structs
+pub mod time;
+pub(crate) mod utils;
 
 #[cfg(test)]
 mod test_commons;
 
-pub use codepage::*;
+pub use codepage::Codepage;
 pub use embedded_io as io;
-pub use error::*;
+#[cfg(feature = "collision_control")]
+pub use error::InumberRegisterError;
+pub use error::{FSError, FSResult, InternalFSError, RWFileError};
+pub use fat::FileSystem;
+pub use fat::options;
 pub use fat::*;
-pub(crate) use log::*;
-pub use path::*;
-pub use time::*;
+pub use path::{Path, PathBuf};

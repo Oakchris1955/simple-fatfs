@@ -1,11 +1,15 @@
-use embedded_io::*;
+use core::error::Error;
 
-use crate::*;
+use displaydoc::Display;
+use embedded_io::{Error as IOError, ErrorKind as IOErrorKind, ReadExactError};
+
+#[cfg(feature = "collision_control")]
+pub use crate::collision_control::InumberRegisterError;
 
 /// An error type that denotes that there is something wrong
 /// with the filesystem's structure itself (perhaps the FS itself is malformed/corrupted)
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Display, Debug, PartialEq, Eq)]
 pub enum InternalFSError {
     /// The storage medium isn't large enough to accompany a FAT filesystem
     StorageTooSmall,
@@ -31,14 +35,16 @@ pub enum InternalFSError {
     BlockSizeError,
 }
 
+impl Error for InternalFSError {}
+
 /// An error indicating that a filesystem-related operation has failed
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Display, Debug, PartialEq, Eq)]
 pub enum FSError<I>
 where
-    I: Error,
+    I: IOError,
 {
-    /// An internal FS error occured
+    /// An internal FS error occurred
     InternalFSError(InternalFSError),
     /**
      The [Path](`crate::Path`) provided is malformed.
@@ -83,13 +89,18 @@ where
     UnsupportedFS,
     /// Unexpected EOF
     UnexpectedEof,
-    /// An IO error occured
+    #[cfg(feature = "collision_control")]
+    /// An error occured while attempting to update the collision store:\n{0}
+    CollisionStoreError(InumberRegisterError),
+    /// An IO error occurred:\n{0}
     IOError(I),
 }
 
+impl<I> Error for FSError<I> where I: IOError {}
+
 impl<I> From<I> for FSError<I>
 where
-    I: Error,
+    I: IOError,
 {
     #[inline]
     fn from(value: I) -> Self {
@@ -99,7 +110,7 @@ where
 
 impl<I> From<ReadExactError<I>> for FSError<I>
 where
-    I: Error,
+    I: IOError,
 {
     #[inline]
     fn from(value: ReadExactError<I>) -> Self {
@@ -112,13 +123,62 @@ where
 
 impl<I> From<RWFileError<I>> for FSError<I>
 where
-    I: Error,
+    I: IOError,
 {
     fn from(value: RWFileError<I>) -> Self {
         match value {
             RWFileError::StorageFull => FSError::StorageFull,
             RWFileError::IOError(e) => FSError::IOError(e),
         }
+    }
+}
+
+#[cfg(feature = "collision_control")]
+impl<I> From<InumberRegisterError> for FSError<I>
+where
+    I: IOError,
+{
+    fn from(value: InumberRegisterError) -> Self {
+        Self::CollisionStoreError(value)
+    }
+}
+
+#[derive(Display, Debug, PartialEq, Eq)]
+#[non_exhaustive] // TODO: see whether or not to keep this marked as non-exhaustive
+/// A [`RWFile`](crate::RWFile)-exclusive IO error struct
+pub enum RWFileError<I>
+where
+    I: IOError,
+{
+    /// The underlying storage is full.
+    StorageFull,
+    /// An IO error occurred:\n{0}
+    IOError(I),
+}
+
+impl<I> Error for RWFileError<I> where I: IOError {}
+
+impl<I> IOError for RWFileError<I>
+where
+    I: IOError,
+{
+    #[inline]
+    fn kind(&self) -> IOErrorKind {
+        match self {
+            // TODO: when embedded-io adds a StorageFull variant, use that instead
+            Self::StorageFull => IOErrorKind::OutOfMemory,
+            Self::IOError(err) => err.kind(),
+        }
+    }
+}
+
+impl<I> From<I> for RWFileError<I>
+where
+    I: IOError,
+{
+    #[inline]
+    fn from(value: I) -> Self {
+        Self::IOError(value)
     }
 }
 

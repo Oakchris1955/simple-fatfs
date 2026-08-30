@@ -1,13 +1,21 @@
-use super::*;
-
 use core::{cmp, num, ops};
 
+use embedded_io::{ErrorType as IOErrorType, Read, ReadExactError, Seek, SeekFrom, Write};
 use time::{Date, PrimitiveDateTime};
 
-use crate::{global_log, local_log};
-use crate::{Clock, FSError, FSResult, InternalFSError};
-
-use embedded_io::*;
+use super::fatentry::FATEntry;
+use super::serde::lfn::calc_lfn_entries_needed;
+use super::serde::location::EntryLocation;
+use super::serde::{FATDirEntry, MinProperties};
+use crate::block_io::prelude::*;
+use crate::error::RWFileError;
+use crate::log::{global_log, local_log};
+use crate::serde::location::EntryLocationIter;
+use crate::time::Clock;
+use crate::{
+    ClusterIndex, EntryCount, FSError, FSResult, FileSize, FileSystem, InternalFSError, Properties,
+    SectorCount,
+};
 
 #[derive(Debug)]
 pub(crate) struct FileProps {
@@ -50,8 +58,8 @@ where
     S: BlockRead,
     C: Clock,
 {
-    pub(crate) fs: &'a FileSystem<S, C>,
-    pub(crate) props: FileProps,
+    fs: &'a FileSystem<S, C>,
+    props: FileProps,
 }
 
 impl<S, C> ops::Deref for ROFile<'_, S, C>
@@ -76,18 +84,48 @@ where
     }
 }
 
+impl<S, C> Drop for ROFile<'_, S, C>
+where
+    S: BlockRead,
+    C: Clock,
+{
+    fn drop(&mut self) {
+        #[cfg(feature = "collision_control")]
+        // nothing to do if this errors out while dropping
+        let _ = self
+            .fs
+            .collision_store
+            .borrow_mut()
+            .unregister(self.data_cluster)
+            .inspect_err(|_| {
+                global_log::error!(
+                    "Errored while attempting to remove (already registered) inumber {}",
+                    self.data_cluster
+                );
+            });
+    }
+}
+
 // Constructors
 impl<'a, S, C> ROFile<'a, S, C>
 where
     S: BlockRead,
     C: Clock,
 {
-    pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S, C>) -> Self {
-        Self { fs, props }
+    pub(crate) fn from_props(
+        props: FileProps,
+        fs: &'a FileSystem<S, C>,
+    ) -> FSResult<Self, S::Error> {
+        #[cfg(feature = "collision_control")]
+        fs.collision_store
+            .borrow_mut()
+            .register(props.entry.data_cluster)?;
+
+        Ok(Self { fs, props })
     }
 }
 
-// Internal functions
+// Internal methods
 impl<S, C> ROFile<'_, S, C>
 where
     S: BlockRead,
@@ -95,7 +133,7 @@ where
 {
     #[inline]
     /// Panics if the current cluster doesn't point to another cluster
-    fn next_cluster(&mut self) -> Result<(), <Self as ErrorType>::Error> {
+    fn next_cluster(&mut self) -> Result<(), <Self as IOErrorType>::Error> {
         // when a `ROFile` is created, `cluster_chain_is_healthy` is called, if it fails, that ROFile is dropped
         self.props.current_cluster = self.get_next_cluster()?.unwrap();
 
@@ -104,17 +142,17 @@ where
 
     #[inline]
     /// Non-[`panic`]king version of [`next_cluster()`](ROFile::next_cluster)
-    fn get_next_cluster(&mut self) -> Result<Option<ClusterIndex>, <Self as ErrorType>::Error> {
+    fn get_next_cluster(&mut self) -> Result<Option<ClusterIndex>, <Self as IOErrorType>::Error> {
         self.fs.get_next_cluster(self.props.current_cluster)
     }
 
     /// Returns that last cluster in the file's cluster chain
-    fn last_cluster_in_chain(&mut self) -> Result<ClusterIndex, <Self as ErrorType>::Error> {
+    fn last_cluster_in_chain(&mut self) -> Result<ClusterIndex, <Self as IOErrorType>::Error> {
         // we begin from the current cluster to save some time
         let mut current_cluster = self.props.current_cluster;
 
         loop {
-            match self.fs.read_nth_FAT_entry(current_cluster)? {
+            match self.fs.read_nth_fat_entry(current_cluster)? {
                 FATEntry::Allocated(next_cluster) => current_cluster = next_cluster,
                 FATEntry::Eof => break,
                 _ => unreachable!(),
@@ -132,11 +170,11 @@ where
         loop {
             cluster_count += 1;
 
-            if cluster_count * self.fs.cluster_size() >= self.file_size {
+            if cluster_count * self.fs.props.cluster_size() >= self.file_size {
                 break;
             }
 
-            match self.fs.read_nth_FAT_entry(current_cluster)? {
+            match self.fs.read_nth_fat_entry(current_cluster)? {
                 FATEntry::Allocated(next_cluster) => current_cluster = next_cluster,
                 _ => return Ok(false),
             };
@@ -160,7 +198,7 @@ where
     }
 }
 
-impl<S, C> ErrorType for ROFile<'_, S, C>
+impl<S, C> IOErrorType for ROFile<'_, S, C>
 where
     S: BlockRead,
     C: Clock,
@@ -183,25 +221,26 @@ where
         );
 
         'outer: loop {
-            let sector_init_offset =
-                self.props.offset % self.fs.cluster_size() / u32::from(self.fs.sector_size());
+            let sector_init_offset = self.props.offset % self.fs.props.cluster_size()
+                / u32::from(self.fs.props.sector_size());
             let first_sector_of_cluster = self
                 .fs
+                .props
                 .data_cluster_to_partition_sector(self.props.current_cluster)
                 + sector_init_offset;
             let last_sector_of_cluster = first_sector_of_cluster
-                + SectorCount::from(self.fs.sectors_per_cluster())
+                + SectorCount::from(self.fs.props.sectors_per_cluster())
                 - sector_init_offset
                 - 1;
 
             for sector in first_sector_of_cluster..=last_sector_of_cluster {
                 self.fs.load_nth_sector(sector)?;
 
-                let start_index = usize::try_from(self.props.offset % u32::from(self.fs.sector_size()))
+                let start_index = usize::try_from(self.props.offset % u32::from(self.fs.props.sector_size()))
                     .expect("sector_size's upper limit is 2^16, within Rust's usize (Rust support 16, 32 and 64-bit archs)");
                 let bytes_to_read = cmp::min(
                     read_cap - bytes_read,
-                    usize::from(self.fs.sector_size()) - start_index,
+                    usize::from(self.fs.props.sector_size()) - start_index,
                 );
                 local_log::trace!(
                     "Gonna read {bytes_to_read} bytes from sector {sector} (cluster {}) starting at byte {start_index}",
@@ -219,7 +258,10 @@ where
                 if bytes_read >= read_cap {
                     // ...but we must process get the next cluster for future uses,
                     // we do that before breaking
-                    if self.props.offset.is_multiple_of(self.fs.cluster_size())
+                    if self
+                        .props
+                        .offset
+                        .is_multiple_of(self.fs.props.cluster_size())
                         && self.props.offset < self.file_size
                     {
                         self.next_cluster()?;
@@ -269,7 +311,8 @@ where
             }
             Ordering::Equal => (),
             Ordering::Greater => {
-                for _ in self.props.offset / self.fs.cluster_size()..offset / self.fs.cluster_size()
+                for _ in self.props.offset / self.fs.props.cluster_size()
+                    ..offset / self.fs.props.cluster_size()
                 {
                     self.next_cluster()?;
                 }
@@ -293,9 +336,9 @@ where
     S: BlockWrite,
     C: Clock,
 {
-    pub(crate) ro_file: ROFile<'a, S, C>,
+    ro_file: ROFile<'a, S, C>,
     /// Represents whether or not the file has been written to
-    pub(crate) entry_modified: bool,
+    entry_modified: bool,
 }
 
 impl<'a, S, C> From<ROFile<'a, S, C>> for RWFile<'a, S, C>
@@ -339,12 +382,15 @@ where
     S: BlockWrite,
     C: Clock,
 {
-    pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S, C>) -> Self {
-        ROFile::from_props(props, fs).into()
+    pub(crate) fn from_props(
+        props: FileProps,
+        fs: &'a FileSystem<S, C>,
+    ) -> FSResult<Self, S::Error> {
+        ROFile::from_props(props, fs).map(|ro_file| ro_file.into())
     }
 }
 
-// Public functions
+// Public methods
 impl<S, C> RWFile<'_, S, C>
 where
     S: BlockWrite,
@@ -372,11 +418,11 @@ where
     }
 
     /// Truncates the file to the cursor position
-    pub fn truncate(&mut self) -> Result<(), <Self as ErrorType>::Error> {
+    pub fn truncate(&mut self) -> Result<(), <Self as IOErrorType>::Error> {
         let size = self.props.offset;
 
         // looks like the new truncated size would be smaller than the current one, so we just return
-        if size.next_multiple_of(self.fs.props.cluster_size) >= self.file_size {
+        if size.next_multiple_of(self.fs.props.cluster_size()) >= self.file_size {
             if size < self.file_size {
                 self.file_size = size;
             }
@@ -400,13 +446,13 @@ where
         // we set the new last cluster in the chain to be EOF
         self.ro_file
             .fs
-            .write_nth_FAT_entry(self.ro_file.props.current_cluster, FATEntry::Eof)?;
+            .write_nth_fat_entry(self.ro_file.props.current_cluster, FATEntry::Eof)?;
 
         // then, we set each cluster after the current one to EOF
         while let Some(next_cluster) = next_cluster_option {
             next_cluster_option = self.fs.get_next_cluster(next_cluster)?;
 
-            self.fs.write_nth_FAT_entry(next_cluster, FATEntry::Free)?;
+            self.fs.write_nth_fat_entry(next_cluster, FATEntry::Free)?;
         }
 
         // don't forget to seek back to where we started
@@ -425,7 +471,7 @@ where
     }
 
     /// Remove the current file from the [`FileSystem`]
-    pub fn remove(mut self) -> Result<(), <Self as ErrorType>::Error> {
+    pub fn remove(mut self) -> Result<(), <Self as IOErrorType>::Error> {
         // we begin by removing the corresponding entries...
         self.ro_file
             .fs
@@ -448,7 +494,7 @@ where
     }
 }
 
-// Private functions
+// Private methods
 impl<S, C> RWFile<'_, S, C>
 where
     S: BlockWrite,
@@ -467,17 +513,15 @@ where
             // the first entry of the dirchain could belong to a LFNEntry, so we must handle that
             let direntry_location =
                 match num::NonZero::new(EntryCount::from(calc_lfn_entries_needed(file_name))) {
-                    Some(nonzero) => {
-                        chain_start
-                            .nth_entry(self.fs, nonzero)?
-                            .ok_or(FSError::InternalFSError(
-                                InternalFSError::MalformedEntryChain,
-                            ))?
-                    }
+                    Some(nonzero) => EntryLocationIter::new(chain_start, self.fs)
+                        .nth(nonzero.get().into())
+                        .ok_or(FSError::InternalFSError(
+                            InternalFSError::MalformedEntryChain,
+                        ))??,
                     None => chain_start,
                 };
 
-            direntry_location.set_bytes(self.fs, bytes)?;
+            EntryLocation::set_bytes(&direntry_location, self.fs, bytes)?;
 
             self.entry_modified = false;
         }
@@ -513,44 +557,7 @@ where
     }
 }
 
-#[derive(Debug)]
-#[non_exhaustive] // TODO: see whether or not to keep this marked as non-exhaustive
-/// A [`RWFile`]-exclusive IO error struct
-pub enum RWFileError<I>
-where
-    I: Error,
-{
-    /// The underlying storage is full.
-    StorageFull,
-    /// An IO error occured
-    IOError(I),
-}
-
-impl<I> Error for RWFileError<I>
-where
-    I: Error,
-{
-    #[inline]
-    fn kind(&self) -> ErrorKind {
-        match self {
-            // TODO: when embedded-io adds a StorageFull variant, use that instead
-            Self::StorageFull => ErrorKind::OutOfMemory,
-            Self::IOError(err) => err.kind(),
-        }
-    }
-}
-
-impl<I> From<I> for RWFileError<I>
-where
-    I: Error,
-{
-    #[inline]
-    fn from(value: I) -> Self {
-        Self::IOError(value)
-    }
-}
-
-impl<S, C> ErrorType for RWFile<'_, S, C>
+impl<S, C> IOErrorType for RWFile<'_, S, C>
 where
     S: BlockWrite,
     C: Clock,
@@ -615,25 +622,26 @@ where
         let mut bytes_written = 0;
 
         'outer: loop {
-            let sector_init_offset =
-                self.props.offset % self.fs.cluster_size() / u32::from(self.fs.sector_size());
+            let sector_init_offset = self.props.offset % self.fs.props.cluster_size()
+                / u32::from(self.fs.props.sector_size());
             let first_sector_of_cluster = self
                 .fs
+                .props
                 .data_cluster_to_partition_sector(self.props.current_cluster)
                 + sector_init_offset;
             let last_sector_of_cluster = first_sector_of_cluster
-                + SectorCount::from(self.fs.sectors_per_cluster())
+                + SectorCount::from(self.fs.props.sectors_per_cluster())
                 - sector_init_offset
                 - 1;
             for sector in first_sector_of_cluster..=last_sector_of_cluster {
                 self.fs.load_nth_sector(sector)?;
 
-                let start_index = usize::try_from(self.props.offset % u32::from(self.fs.sector_size()))
+                let start_index = usize::try_from(self.props.offset % u32::from(self.fs.props.sector_size()))
                     .expect("sector_size's upper limit is 2^16, within Rust's usize (Rust support 16, 32 and 64-bit archs)");
 
                 let bytes_to_write = cmp::min(
                     buf.len() - bytes_written,
-                    usize::from(self.fs.sector_size()) - start_index,
+                    usize::from(self.fs.props.sector_size()) - start_index,
                 );
 
                 local_log::trace!(
@@ -652,7 +660,11 @@ where
                 if bytes_written >= buf.len() {
                     // ...but we must process get the next cluster for future uses,
                     // we do that before breaking
-                    if self.props.offset.is_multiple_of(self.fs.cluster_size()) {
+                    if self
+                        .props
+                        .offset
+                        .is_multiple_of(self.fs.props.cluster_size())
+                    {
                         self.next_cluster()?;
                     }
 
@@ -696,14 +708,16 @@ where
 
         let bytes_allocated = if self.file_size == 0 {
             // even if the file size is zero, a file has a cluster already allocated
-            self.fs.props.cluster_size
+            self.fs.props.cluster_size()
         } else {
-            self.file_size.next_multiple_of(self.fs.cluster_size())
+            self.file_size
+                .next_multiple_of(self.fs.props.cluster_size())
         };
 
         // in case the cursor goes beyond the EOF, allocate more clusters
         if offset > bytes_allocated {
-            let clusters_to_allocate = (offset - bytes_allocated).div_ceil(self.fs.cluster_size());
+            let clusters_to_allocate =
+                (offset - bytes_allocated).div_ceil(self.fs.props.cluster_size());
             local_log::trace!(
                 "Seeking beyond EOF, allocating {clusters_to_allocate} more clusters"
             );

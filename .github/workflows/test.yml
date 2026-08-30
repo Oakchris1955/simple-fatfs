@@ -26,7 +26,7 @@ jobs:
       - run: rustup override set ${{ matrix.toolchain }}
       - uses: romnn/cargo-feature-combinations@main
       - name: Build target combinations
-        timeout-minutes: 1
+        timeout-minutes: 2
         run: cargo fc build
       - name: Test target combinations
         timeout-minutes: 5

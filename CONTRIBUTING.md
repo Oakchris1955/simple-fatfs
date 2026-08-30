@@ -11,11 +11,11 @@ triggered that bug and its stack backtrace if the bug caused your program to pan
 ## Suggesting a feature
 
 If the feature you want to suggest is simple, open an issue. If you believe
-that is may need to be discussed beforehands, open a discussion.
+that is may need to be discussed beforehand, open a discussion.
 
 ## Submitting changes
 
-- Try to follow [Conventional Commits](https://www.conventionalcommits.org) when commiting
+- Try to follow [Conventional Commits](https://www.conventionalcommits.org) when committing
 - Please open only 1 PR per suggested change/feature. If there are multiple features
   you wanna add, open 1 PR for each one of them.
 - Don't duplicate code: if there is a function that already does what you want, use it

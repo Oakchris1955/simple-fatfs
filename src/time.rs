@@ -1,6 +1,6 @@
 use core::fmt;
 
-use time::{macros::date, PrimitiveDateTime};
+use time::{PrimitiveDateTime, macros::date};
 
 /// The earliest [`datetime`](PrimitiveDateTime) that FAT can use
 /// as a creation, access or modification time

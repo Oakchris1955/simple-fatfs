@@ -4,14 +4,14 @@
 //! which will hereby after be referred as blocks. This library assumes that
 //! both for read and write operations the block size will be the same.
 
-pub use crate::fat::block_translator::{BlockTranslator, BlockTranslatorError};
-pub use crate::fat::types::{BlockCount, BlockIndex, BlockSize};
+use embedded_io::ErrorType as IOErrorType;
 
-use embedded_io::ErrorType;
+pub use crate::block_translator::{BlockTranslator, BlockTranslatorError};
+pub use crate::fat::types::{BlockCount, BlockIndex, BlockSize};
 
 /// The base trait for all block devices. Used to query information like
 /// block size and block count
-pub trait BlockBase: ErrorType {
+pub trait BlockBase: IOErrorType {
     /// Size of a block, must be a power of two. A panic may occur if this isn't
     /// a power of two other than zero.
     fn block_size(&self) -> BlockSize;
@@ -69,12 +69,18 @@ impl<T: BlockWrite> BlockWrite for &mut T {
     }
 }
 
+/// The block I/O prelude
+pub mod prelude {
+    pub use super::{BlockBase, BlockRead, BlockWrite};
+}
+
 #[cfg(feature = "std")]
 pub(crate) mod from_std {
-    use crate::{
-        BlockBase, BlockCount, BlockIndex, BlockRead, BlockSize, BlockWrite, MIN_SECTOR_SIZE,
-    };
+    use super::super::consts::MIN_SECTOR_SIZE;
+    use super::{BlockBase, BlockCount, BlockIndex, BlockRead, BlockSize, BlockWrite};
     use std::io::{Error, Read, Seek, SeekFrom, Write};
+
+    use embedded_io::ErrorType as IOErrorType;
 
     /// Determine the block count of a storage medium
     ///
@@ -150,7 +156,7 @@ pub(crate) mod from_std {
         }
     }
 
-    impl<T: ?Sized> embedded_io::ErrorType for FromStd<T> {
+    impl<T: ?Sized> IOErrorType for FromStd<T> {
         type Error = Error;
     }
 
@@ -218,11 +224,14 @@ pub use from_std::*;
 
 #[cfg(feature = "embedded_storage_translator")]
 pub(crate) mod embedded_storage_translators {
-    use super::*;
+    use super::{BlockBase, BlockCount, BlockIndex, BlockRead, BlockSize, BlockWrite};
+
     use core::ops::{Deref, DerefMut};
 
+    use embedded_io::{Error as IOError, ErrorType as IOErrorType};
     use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
 
+    #[cfg_attr(not(feature = "lba64"), expect(clippy::useless_conversion))]
     #[inline]
     fn calc_offset(block: BlockIndex, block_size: u32) -> u32 {
         u32::try_from(block).unwrap() * block_size
@@ -233,7 +242,7 @@ pub(crate) mod embedded_storage_translators {
     pub struct ReadNorFlashTranslator<S>
     where
         S: ReadNorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         storage: S,
     }
@@ -241,7 +250,7 @@ pub(crate) mod embedded_storage_translators {
     impl<S> ReadNorFlashTranslator<S>
     where
         S: ReadNorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         /// Create a new [`ReadNorFlashTranslator`] from a flash storage that
         /// implements [`ReadNorFlash`] and [`embedded_io::Error`]
@@ -253,7 +262,7 @@ pub(crate) mod embedded_storage_translators {
     impl<S> Deref for ReadNorFlashTranslator<S>
     where
         S: ReadNorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         type Target = S;
 
@@ -266,7 +275,7 @@ pub(crate) mod embedded_storage_translators {
     impl<S> DerefMut for ReadNorFlashTranslator<S>
     where
         S: ReadNorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         #[inline]
         fn deref_mut(&mut self) -> &mut Self::Target {
@@ -274,10 +283,10 @@ pub(crate) mod embedded_storage_translators {
         }
     }
 
-    impl<S> ErrorType for ReadNorFlashTranslator<S>
+    impl<S> IOErrorType for ReadNorFlashTranslator<S>
     where
         S: ReadNorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         type Error = S::Error;
     }
@@ -285,7 +294,7 @@ pub(crate) mod embedded_storage_translators {
     impl<S> BlockBase for ReadNorFlashTranslator<S>
     where
         S: ReadNorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         #[inline]
         fn block_size(&self) -> BlockSize {
@@ -300,7 +309,7 @@ pub(crate) mod embedded_storage_translators {
     impl<S> BlockRead for ReadNorFlashTranslator<S>
     where
         S: ReadNorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
             self.storage
@@ -323,7 +332,7 @@ pub(crate) mod embedded_storage_translators {
     pub struct MultiWriteNorFlashTranslator<S>
     where
         S: NorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         read_translator: ReadNorFlashTranslator<S>,
     }
@@ -331,7 +340,7 @@ pub(crate) mod embedded_storage_translators {
     impl<S> MultiWriteNorFlashTranslator<S>
     where
         S: NorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         /// Create a new [`MultiWriteNorFlashTranslator`] from a flash storage that
         /// implements [`NorFlash`] and [`embedded_io::Error`]
@@ -345,7 +354,7 @@ pub(crate) mod embedded_storage_translators {
     impl<S> Deref for MultiWriteNorFlashTranslator<S>
     where
         S: NorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         type Target = ReadNorFlashTranslator<S>;
 
@@ -358,7 +367,7 @@ pub(crate) mod embedded_storage_translators {
     impl<S> DerefMut for MultiWriteNorFlashTranslator<S>
     where
         S: NorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         #[inline]
         fn deref_mut(&mut self) -> &mut Self::Target {
@@ -366,10 +375,10 @@ pub(crate) mod embedded_storage_translators {
         }
     }
 
-    impl<S> ErrorType for MultiWriteNorFlashTranslator<S>
+    impl<S> IOErrorType for MultiWriteNorFlashTranslator<S>
     where
         S: NorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         type Error = S::Error;
     }
@@ -377,7 +386,7 @@ pub(crate) mod embedded_storage_translators {
     impl<S> BlockBase for MultiWriteNorFlashTranslator<S>
     where
         S: NorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         #[inline]
         fn block_size(&self) -> BlockSize {
@@ -394,7 +403,7 @@ pub(crate) mod embedded_storage_translators {
     impl<S> BlockRead for MultiWriteNorFlashTranslator<S>
     where
         S: NorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         #[inline]
         fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
@@ -405,7 +414,7 @@ pub(crate) mod embedded_storage_translators {
     impl<S> BlockWrite for MultiWriteNorFlashTranslator<S>
     where
         S: NorFlash,
-        S::Error: embedded_io::Error,
+        S::Error: IOError,
     {
         fn write(&mut self, block: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
             let from = calc_offset(block, S::ERASE_SIZE.try_into().unwrap());

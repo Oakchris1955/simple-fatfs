@@ -1,20 +1,20 @@
-pub mod block_io;
-mod block_translator;
-mod bpb;
-mod consts;
-mod direntry;
-mod file;
-mod fs;
-mod options;
-mod storage;
-mod types;
+#[cfg(feature = "collision_control")]
+pub(crate) mod collision_control;
+pub(crate) mod consts;
+pub(crate) mod dirinfo;
+pub(crate) mod fatentry;
+pub(crate) mod file;
+pub(crate) mod fs;
+/// FileSystem mount options-related structs & methods
+pub mod options;
+pub(crate) mod serde;
+pub(crate) mod types;
 
-pub(crate) use block_io::*;
-pub(crate) use bpb::*;
-pub use consts::*;
-pub use direntry::*;
-pub use file::*;
-pub use fs::*;
-pub use options::*;
-pub(crate) use storage::*;
+pub use fatentry::FATType;
+pub use file::{ROFile, RWFile};
+pub use fs::{FileSystem, determine_fs_sector_size};
+pub use serde::attributes::Attributes;
+pub use serde::direntry::DirEntry;
+pub use serde::props::Properties;
+pub use serde::readdir::ReadDir;
 pub(crate) use types::*;

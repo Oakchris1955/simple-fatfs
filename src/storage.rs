@@ -1,10 +1,12 @@
-use super::*;
-
+use core::cell::RefCell;
 use core::ops::{Deref, DerefMut};
 
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec};
-use core::cell::RefCell;
+
+use crate::block_io::prelude::*;
+use crate::fat::consts::{MAX_SECTOR_SIZE, MIN_SECTOR_SIZE};
+use crate::{BlockCount, BlockIndex, BlockSize, SectorIndex};
 
 #[derive(Debug)]
 pub(crate) struct SectorBuffer<const INIT: bool> {

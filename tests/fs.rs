@@ -1,6 +1,12 @@
 mod common;
 use common::*;
 
+use simple_fatfs::options::FSOptions;
+#[cfg(feature = "bloom")]
+use simple_fatfs::options::bloom;
+use simple_fatfs::time::{Clock, DefaultClock};
+
+use ::time;
 use embedded_io::*;
 
 use test_log::test as test_log;
@@ -28,9 +34,7 @@ mod create_dir {
     #[apply(fs)]
     fn create_directory_in_subdir_and_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
         fs.create_dir("/subdir/another dir ig").unwrap();
-        let mut file = fs
-            .create_file(PathBuf::from("/subdir/i don't need a badge.txt"))
-            .unwrap();
+        let mut file = fs.create_file("/subdir/i don't need a badge.txt").unwrap();
 
         file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
         file.rewind().unwrap();
@@ -95,8 +99,8 @@ mod create_file {
         fs.cache_dir("/subdir").unwrap();
 
         for i in 1..=FILE_COUNT {
-            let name = PathBuf::from(&format!("/subdir/{i}.txt"));
-            let mut file = fs.create_file(&name).unwrap();
+            let name = format!("/subdir/{i}.txt");
+            let mut file = fs.create_file(name).unwrap();
 
             file.write_all(I_DONT_NEED_A_BADGE.as_bytes()).unwrap();
             file.rewind().unwrap();
@@ -115,7 +119,7 @@ mod create_file {
                     let id: usize = c_id[1].parse().unwrap();
                     if (1..=FILE_COUNT).contains(&id) {
                         found[id - 1] = true;
-                        let mut file = entry.to_ro_file().unwrap();
+                        let mut file = entry.to_ro_file().unwrap().unwrap();
                         assert_file_is_i_dont_need_a_badge(&mut file);
                     } else {
                         log::error!("Found unexpected file with name \"{id}\"")
@@ -261,7 +265,7 @@ mod read_dir {
             let entry = entry.unwrap();
 
             if entry.path() == "/subdir/" {
-                let mut secret_dir = entry.to_dir().unwrap();
+                let mut secret_dir = entry.to_dir().unwrap().unwrap();
 
                 let bee_movie_script_found = secret_dir.any(|res| {
                     if let Ok(entry) = res {
@@ -361,6 +365,41 @@ mod remove_dir {
                 _ => panic!("unexpected IOError: {err:?}"),
             },
             _ => panic!("the directory should have been deleted by now"),
+        }
+    }
+
+    #[test_log]
+    #[apply(fs)]
+
+    fn try_remove_nonempty_dir(fs: FileSystem<MemoryDevice, DefaultClock>) {
+        let dir_path = "/rootdir/";
+
+        // the directory shouldn't be gone
+        assert_eq!(
+            fs.remove_empty_dir(dir_path),
+            Err(FSError::DirectoryNotEmpty)
+        );
+
+        assert!(fs.read_dir(dir_path).is_ok());
+    }
+
+    #[test_log]
+    #[apply(fs)]
+
+    fn try_remove_dir_with_hidden_file(fs: FileSystem<MemoryDevice, DefaultClock>) {
+        let dir_path = "/hidden/";
+
+        // manually remove the only public file in the directory
+        fs.remove_file("/hidden/public.txt").unwrap();
+
+        let rm_result = fs.remove_empty_dir(dir_path);
+
+        match rm_result {
+            Err(err) => match err {
+                FSError::DirectoryNotEmpty => (),
+                _ => panic!("unexpected IOError: {err:?}"),
+            },
+            Ok(()) => panic!("the directory isn't completely empty (has \"hidden.txt\""),
         }
     }
 
@@ -564,7 +603,7 @@ mod timestamps {
     #[test_log]
     #[apply(device)]
     fn check_last_modified(#[case] mut storage: MemoryDevice) {
-        use ::time::Duration;
+        use time::Duration;
 
         let fs =
             FileSystem::new(&mut storage, FSOptions::new().with_update_file_fields(true)).unwrap();
@@ -583,7 +622,7 @@ mod timestamps {
         assert!(DefaultClock.now() - *file.modification_time() < Duration::seconds(15));
     }
 
-    use time::macros::*;
+    use time::macros::{date, datetime};
 
     #[test_log]
     #[rstest]
@@ -606,7 +645,7 @@ mod timestamps {
     #[test_log]
     #[apply(fs)]
     fn modify_file_timestamps(fs: FileSystem<MemoryDevice, DefaultClock>) {
-        use ::time::macros::*;
+        use time::macros::date;
 
         let mut file = fs.get_rw_file("/I don't need a badge.txt").unwrap();
 
@@ -678,5 +717,74 @@ mod volume_label {
             fs.volume_label_root_dir().unwrap(),
             Some(String::from("DEADBEEF"))
         );
+    }
+}
+
+#[cfg(feature = "collision_control")]
+mod collision_control {
+    use super::*;
+
+    #[test_log]
+    #[rstest]
+    #[case(device(FAT12))]
+    #[case(device(FAT16))]
+    #[case(device(FAT32))]
+    fn check_store_full_files(#[case] mut storage: MemoryDevice) {
+        let fs = FileSystem::new(
+            &mut storage,
+            FSOptions::new().with_open_inumber_table_size(2),
+        )
+        .unwrap();
+
+        let _copypasta = fs.get_ro_file("/copypasta.txt").unwrap();
+        let _empty = fs.get_ro_file("/empty").unwrap();
+
+        assert_eq!(
+            fs.get_ro_file("/root.txt").unwrap_err(),
+            FSError::CollisionStoreError(InumberRegisterError::TableFull)
+        )
+    }
+
+    #[test_log]
+    #[rstest]
+    #[case(device(FAT12))]
+    #[case(device(FAT16))]
+    #[case(device(FAT32))]
+    fn check_store_full_dirs(#[case] mut storage: MemoryDevice) {
+        let fs = FileSystem::new(
+            &mut storage,
+            FSOptions::new().with_open_inumber_table_size(2),
+        )
+        .unwrap();
+
+        let _subdir = fs.read_dir("/subdir").unwrap();
+        let _hidden = fs.read_dir("/hidden").unwrap();
+
+        assert_eq!(
+            fs.read_dir("/rootdir").unwrap_err(),
+            FSError::CollisionStoreError(InumberRegisterError::TableFull)
+        )
+    }
+
+    #[test_log]
+    #[apply(fs)]
+    fn check_store_duplicate_files(fs: FileSystem<MemoryDevice, DefaultClock>) {
+        let _empty = fs.get_ro_file("/empty").unwrap();
+
+        assert_eq!(
+            fs.get_ro_file("/empty").unwrap_err(),
+            FSError::CollisionStoreError(InumberRegisterError::InumberAlreadyRegistered)
+        )
+    }
+
+    #[test_log]
+    #[apply(fs)]
+    fn check_store_duplicate_dir(fs: FileSystem<MemoryDevice, DefaultClock>) {
+        let _rootdir = fs.read_dir("/rootdir").unwrap();
+
+        assert_eq!(
+            fs.read_dir("/rootdir").unwrap_err(),
+            FSError::CollisionStoreError(InumberRegisterError::InumberAlreadyRegistered)
+        )
     }
 }
