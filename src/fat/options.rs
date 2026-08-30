@@ -13,6 +13,8 @@ pub struct FSOptions<C: Clock> {
     pub(crate) check_boot_signature: bool,
     #[cfg(feature = "bloom")]
     pub(crate) filter_size: num::NonZeroUsize,
+    #[cfg(feature = "collision_control")]
+    pub(crate) open_inumber_table_size: usize,
 }
 
 impl FSOptions<DefaultClock> {
@@ -40,6 +42,8 @@ where
             check_boot_signature: true,
             #[cfg(feature = "bloom")]
             filter_size: bloom::compute_bitmap_size(num::NonZero::new(1_000).unwrap(), 0.01),
+            #[cfg(feature = "collision_control")]
+            open_inumber_table_size: 16,
         }
     }
 }
@@ -105,6 +109,20 @@ impl<C: Clock> FSOptions<C> {
     /// Query the directory cache / Bloom filter's size in bytes
     pub fn query_filter_size(&self) -> num::NonZeroUsize {
         self.filter_size
+    }
+
+    #[cfg(feature = "collision_control")]
+    /// Set the size of the open inumber collision table
+    pub fn set_open_inumber_table_size(&mut self, table_size: usize) {
+        self.open_inumber_table_size = table_size
+    }
+
+    #[cfg(feature = "collision_control")]
+    /// Set the size of the open inumber collision table (chainable)
+    pub fn with_open_inumber_table_size(mut self, table_size: usize) -> Self {
+        self.open_inumber_table_size = table_size;
+
+        self
     }
 }
 

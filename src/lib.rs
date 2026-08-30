@@ -85,6 +85,18 @@
 //!
 //!   Switch from 32-bit to 64-bit logical block addressing for the [`block_io`] traits
 //!
+//! - `collision_control`
+//!
+//!   Bare-bones inumber table to prevent data corruption due to duplicated file open.
+//!
+//!   ### Note
+//!
+//!   If you are developing something more complicated, like e.g. an operating system
+//!   and you want to be able to open the same file/directory twice without having
+//!   to worry about data corruption, then you probably need something more advanced,
+//!   like a file descriptor table. Nevertheless, this should be adequate for more
+//!   applications out there.
+//!
 //! - `embedded_storage_translator`
 //!
 //!   Translator for implementing block-based IO for `embedded-storage`'s
@@ -239,6 +251,8 @@ mod test_commons;
 
 pub use codepage::Codepage;
 pub use embedded_io as io;
+#[cfg(feature = "collision_control")]
+pub use error::InumberRegisterError;
 pub use error::{FSError, FSResult, InternalFSError, RWFileError};
 pub use fat::FileSystem;
 pub use fat::options;

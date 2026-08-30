@@ -29,6 +29,8 @@ use super::serde::lfn::calc_lfn_entries_needed;
 use super::serde::location::{DirEntryChain, EntryLocation, EntryLocationUnit, EntryStatus};
 use super::serde::readdir::{ReadDir, ReadDirRaw};
 use super::serde::{DIRENTRY_LIMIT, DIRENTRY_SIZE, FATDirEntry, MinProperties, RawProperties};
+#[cfg(feature = "collision_control")]
+use crate::collision_control::OpenInumberTable;
 use crate::options::FSOptions;
 use crate::path::Path;
 use crate::storage::SectorBuffer;
@@ -374,6 +376,9 @@ where
     first_free_cluster: RefCell<ClusterIndex>,
 
     pub(crate) filter: RefCell<FileFilter>,
+
+    #[cfg(feature = "collision_control")]
+    pub(crate) collision_store: RefCell<OpenInumberTable>,
 }
 
 /// Getter methods
@@ -497,6 +502,8 @@ where
             sector_buffer: buffer.into(),
             fsinfo_modified: false.into(),
             boot_sector_modified: false.into(),
+            #[cfg(feature = "collision_control")]
+            collision_store: OpenInumberTable::new(options.open_inumber_table_size).into(),
             options,
             dir_info: DirInfo::at_root_dir(&boot_record).into(),
             sync_f: None.into(),
@@ -527,7 +534,7 @@ where
     S: BlockRead,
     C: Clock,
 {
-    pub(crate) fn process_current_dir<'a>(&'a self) -> ReadDirRaw<'a, S, C> {
+    pub(crate) fn process_current_dir<'a>(&'a self) -> FSResult<ReadDirRaw<'a, S, C>, S::Error> {
         DirInfo::process_current_dir(&self.dir_info.borrow(), self)
     }
 
@@ -1490,7 +1497,10 @@ where
         let volume_label = 'search: {
             self.go_to_root_directory();
 
-            for entry in self.process_current_dir() {
+            for entry in self.process_current_dir().expect(concat!(
+                "a CollisionStoreError shouldn't be raised for the root directory, ",
+                "since it will never be registered to it, as it can't be removed"
+            )) {
                 let entry = entry?;
 
                 if entry.attributes == RawAttributes::VOLUME_ID {
@@ -1567,7 +1577,7 @@ where
                             entry,
                         },
                         self,
-                    );
+                    )?;
 
                     if file.cluster_chain_is_healthy()? {
                         Ok(file)
@@ -1613,7 +1623,7 @@ where
             num::NonZeroUsize::new(DIRENTRY_LIMIT.into()).unwrap(),
         );
 
-        for entry in self.process_current_dir() {
+        for entry in self.process_current_dir()? {
             let entry = entry?;
 
             let long_name = &entry.name;
@@ -1674,7 +1684,7 @@ where
                 break 'check;
             }
 
-            for entry in self.process_current_dir() {
+            for entry in self.process_current_dir()? {
                 let entry = entry?;
 
                 if entry.name() == file_name {
@@ -1705,7 +1715,7 @@ where
             local_log::trace!("Added newly-created file {} to the bloom filter", path);
         }
 
-        Ok(RWFile::from_props(
+        RWFile::from_props(
             FileProps {
                 current_cluster: raw_properties.data_cluster,
                 entry: Properties::from_raw(
@@ -1715,7 +1725,7 @@ where
                 offset: 0,
             },
             self,
-        ))
+        )
     }
 
     /// Create a new directory
@@ -1740,7 +1750,7 @@ where
             .expect("the path is normalized and it isn't the root directory either");
 
         // check if there is already a file or directory with the same name
-        for entry in self.process_current_dir() {
+        for entry in self.process_current_dir()? {
             let entry = entry?;
 
             if entry.name() == dir_name {
@@ -2121,7 +2131,7 @@ where
         // remove already-existing label if such one is found
         self.go_to_root_directory();
 
-        for entry in self.process_current_dir() {
+        for entry in self.process_current_dir()? {
             let entry = entry?;
 
             if entry.attributes == RawAttributes::VOLUME_ID {
@@ -2241,10 +2251,10 @@ mod tests {
         let mut file = fs.get_rw_file("root.txt").unwrap();
 
         file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
-        assert!(file.fs.fat_tables_are_identical().unwrap());
+        assert!(fs.fat_tables_are_identical().unwrap());
 
         file.seek(SeekFrom::Start(10_000)).unwrap();
-        assert!(file.fs.fat_tables_are_identical().unwrap());
+        assert!(fs.fat_tables_are_identical().unwrap());
     }
 
     // separate case due to FAT32's extended flags
@@ -2280,11 +2290,11 @@ mod tests {
         let mut file = fs.get_rw_file("hello 🗺️.txt").unwrap();
 
         file.write_all(BEE_MOVIE_SCRIPT.as_bytes()).unwrap();
-        assert!(file.fs.fat_tables_are_identical().unwrap());
+        assert!(fs.fat_tables_are_identical().unwrap());
 
         file.seek(SeekFrom::Start(10_000)).unwrap();
         file.truncate().unwrap();
-        assert!(file.fs.fat_tables_are_identical().unwrap());
+        assert!(fs.fat_tables_are_identical().unwrap());
     }
 
     #[test]

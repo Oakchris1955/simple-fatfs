@@ -224,7 +224,7 @@ where
             }
 
             // don't forget to check if that SFN already exists
-            for entry in fs.process_current_dir() {
+            for entry in fs.process_current_dir()? {
                 let entry = entry?;
 
                 if entry.sfn == sfn {

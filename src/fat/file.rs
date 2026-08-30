@@ -58,8 +58,8 @@ where
     S: BlockRead,
     C: Clock,
 {
-    pub(crate) fs: &'a FileSystem<S, C>,
-    pub(crate) props: FileProps,
+    fs: &'a FileSystem<S, C>,
+    props: FileProps,
 }
 
 impl<S, C> ops::Deref for ROFile<'_, S, C>
@@ -84,14 +84,44 @@ where
     }
 }
 
+impl<S, C> Drop for ROFile<'_, S, C>
+where
+    S: BlockRead,
+    C: Clock,
+{
+    fn drop(&mut self) {
+        #[cfg(feature = "collision_control")]
+        // nothing to do if this errors out while dropping
+        let _ = self
+            .fs
+            .collision_store
+            .borrow_mut()
+            .unregister(self.data_cluster)
+            .inspect_err(|_| {
+                global_log::error!(
+                    "Errored while attempting to remove (already registered) inumber {}",
+                    self.data_cluster
+                );
+            });
+    }
+}
+
 // Constructors
 impl<'a, S, C> ROFile<'a, S, C>
 where
     S: BlockRead,
     C: Clock,
 {
-    pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S, C>) -> Self {
-        Self { fs, props }
+    pub(crate) fn from_props(
+        props: FileProps,
+        fs: &'a FileSystem<S, C>,
+    ) -> FSResult<Self, S::Error> {
+        #[cfg(feature = "collision_control")]
+        fs.collision_store
+            .borrow_mut()
+            .register(props.entry.data_cluster)?;
+
+        Ok(Self { fs, props })
     }
 }
 
@@ -306,9 +336,9 @@ where
     S: BlockWrite,
     C: Clock,
 {
-    pub(crate) ro_file: ROFile<'a, S, C>,
+    ro_file: ROFile<'a, S, C>,
     /// Represents whether or not the file has been written to
-    pub(crate) entry_modified: bool,
+    entry_modified: bool,
 }
 
 impl<'a, S, C> From<ROFile<'a, S, C>> for RWFile<'a, S, C>
@@ -352,8 +382,11 @@ where
     S: BlockWrite,
     C: Clock,
 {
-    pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S, C>) -> Self {
-        ROFile::from_props(props, fs).into()
+    pub(crate) fn from_props(
+        props: FileProps,
+        fs: &'a FileSystem<S, C>,
+    ) -> FSResult<Self, S::Error> {
+        ROFile::from_props(props, fs).map(|ro_file| ro_file.into())
     }
 }
 

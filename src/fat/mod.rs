@@ -1,3 +1,5 @@
+#[cfg(feature = "collision_control")]
+pub(crate) mod collision_control;
 pub(crate) mod consts;
 pub(crate) mod dirinfo;
 pub(crate) mod fatentry;

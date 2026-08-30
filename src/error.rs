@@ -3,6 +3,9 @@ use core::error::Error;
 use displaydoc::Display;
 use embedded_io::{Error as IOError, ErrorKind as IOErrorKind, ReadExactError};
 
+#[cfg(feature = "collision_control")]
+pub use crate::collision_control::InumberRegisterError;
+
 /// An error type that denotes that there is something wrong
 /// with the filesystem's structure itself (perhaps the FS itself is malformed/corrupted)
 #[non_exhaustive]
@@ -86,6 +89,9 @@ where
     UnsupportedFS,
     /// Unexpected EOF
     UnexpectedEof,
+    #[cfg(feature = "collision_control")]
+    /// An error occured while attempting to update the collision store:\n{0}
+    CollisionStoreError(InumberRegisterError),
     /// An IO error occurred:\n{0}
     IOError(I),
 }
@@ -124,6 +130,16 @@ where
             RWFileError::StorageFull => FSError::StorageFull,
             RWFileError::IOError(e) => FSError::IOError(e),
         }
+    }
+}
+
+#[cfg(feature = "collision_control")]
+impl<I> From<InumberRegisterError> for FSError<I>
+where
+    I: IOError,
+{
+    fn from(value: InumberRegisterError) -> Self {
+        Self::CollisionStoreError(value)
     }
 }
 

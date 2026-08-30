@@ -64,7 +64,7 @@ impl DirInfo {
         if let Some(parent_path) = this.path.parent() {
             let parent_pathbuf = parent_path.to_path_buf();
 
-            let entries = Self::process_current_dir(this, fs);
+            let entries = Self::process_current_dir(this, fs)?;
 
             let parent_entry = entries.get_parent_dir_entry()?;
 
@@ -88,7 +88,7 @@ impl DirInfo {
         S: BlockRead,
         C: Clock,
     {
-        let mut entries = Self::process_current_dir(this, fs);
+        let mut entries = Self::process_current_dir(this, fs)?;
 
         let child_entry = loop {
             let entry = entries.next().ok_or(FSError::NotFound)??;
@@ -242,7 +242,7 @@ impl DirInfo {
     pub(crate) fn process_current_dir<'a, S, C>(
         this: &Self,
         fs: &'a FileSystem<S, C>,
-    ) -> ReadDirRaw<'a, S, C>
+    ) -> FSResult<ReadDirRaw<'a, S, C>, S::Error>
     where
         S: BlockRead,
         C: Clock,
@@ -278,7 +278,7 @@ impl DirInfo {
 
         Self::go_to_dir(this, &path, fs)?;
 
-        Ok(ReadDir::new(fs, &this.chain_start, &this.path, internal))
+        ReadDir::new(fs, &this.chain_start, &this.path, internal)
     }
 
     /// Like [`read_dir`](Self::read_dir), but doesn't filter files based on whether

@@ -13,7 +13,7 @@ use super::time::{EntryCreationTime, EntryLastAccessedTime, EntryModificationTim
 use super::{MinProperties, Properties, Sfn};
 use crate::block_io::prelude::*;
 use crate::time::Clock;
-use crate::{EntryCount, FileSystem, ROFile, RWFile};
+use crate::{EntryCount, FSResult, FileSystem, ROFile, RWFile};
 
 // a directory entry occupies 32 bytes
 pub(crate) const DIRENTRY_SIZE: usize = 32;
@@ -39,21 +39,25 @@ where
     /// Get the corresponding [`ROFile`] object for this [`DirEntry`]
     ///
     /// Will return [`None`] if the entry isn't a file
-    pub fn to_ro_file(&self) -> Option<ROFile<'a, S, C>> {
-        self.is_file().then(|| ROFile {
-            fs: self.fs,
-            props: FileProps {
-                entry: self.entry.clone(),
-                offset: 0,
-                current_cluster: self.data_cluster,
-            },
-        })
+    pub fn to_ro_file(&self) -> FSResult<Option<ROFile<'a, S, C>>, S::Error> {
+        self.is_file()
+            .then(|| {
+                ROFile::from_props(
+                    FileProps {
+                        entry: self.entry.clone(),
+                        offset: 0,
+                        current_cluster: self.data_cluster,
+                    },
+                    self.fs,
+                )
+            })
+            .transpose()
     }
 
     /// Get the corresponding [`ReadDir`] object for this [`DirEntry`]
     ///
     /// Will return [`None`] if the entry isn't a directory
-    pub fn to_dir(&self) -> Option<ReadDir<'a, S, C>> {
+    pub fn to_dir(&self) -> Option<FSResult<ReadDir<'a, S, C>, S::Error>> {
         self.is_dir().then(|| {
             ReadDir::new(
                 self.fs,
@@ -73,8 +77,8 @@ where
     /// Get the corresponding [`RWFile`] object of this [`DirEntry`]
     ///
     /// Will return `None` if the entry is a directory
-    pub fn into_rw_file(self) -> Option<RWFile<'a, S, C>> {
-        self.to_ro_file().map(|ro_file| ro_file.into())
+    pub fn into_rw_file(self) -> FSResult<Option<RWFile<'a, S, C>>, S::Error> {
+        Ok(self.to_ro_file()?.map(|ro_file| ro_file.into()))
     }
 }
 

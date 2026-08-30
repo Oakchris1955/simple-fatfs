@@ -119,7 +119,7 @@ mod create_file {
                     let id: usize = c_id[1].parse().unwrap();
                     if (1..=FILE_COUNT).contains(&id) {
                         found[id - 1] = true;
-                        let mut file = entry.to_ro_file().unwrap();
+                        let mut file = entry.to_ro_file().unwrap().unwrap();
                         assert_file_is_i_dont_need_a_badge(&mut file);
                     } else {
                         log::error!("Found unexpected file with name \"{id}\"")
@@ -265,7 +265,7 @@ mod read_dir {
             let entry = entry.unwrap();
 
             if entry.path() == "/subdir/" {
-                let mut secret_dir = entry.to_dir().unwrap();
+                let mut secret_dir = entry.to_dir().unwrap().unwrap();
 
                 let bee_movie_script_found = secret_dir.any(|res| {
                     if let Ok(entry) = res {
@@ -717,5 +717,74 @@ mod volume_label {
             fs.volume_label_root_dir().unwrap(),
             Some(String::from("DEADBEEF"))
         );
+    }
+}
+
+#[cfg(feature = "collision_control")]
+mod collision_control {
+    use super::*;
+
+    #[test_log]
+    #[rstest]
+    #[case(device(FAT12))]
+    #[case(device(FAT16))]
+    #[case(device(FAT32))]
+    fn check_store_full_files(#[case] mut storage: MemoryDevice) {
+        let fs = FileSystem::new(
+            &mut storage,
+            FSOptions::new().with_open_inumber_table_size(2),
+        )
+        .unwrap();
+
+        let _copypasta = fs.get_ro_file("/copypasta.txt").unwrap();
+        let _empty = fs.get_ro_file("/empty").unwrap();
+
+        assert_eq!(
+            fs.get_ro_file("/root.txt").unwrap_err(),
+            FSError::CollisionStoreError(InumberRegisterError::TableFull)
+        )
+    }
+
+    #[test_log]
+    #[rstest]
+    #[case(device(FAT12))]
+    #[case(device(FAT16))]
+    #[case(device(FAT32))]
+    fn check_store_full_dirs(#[case] mut storage: MemoryDevice) {
+        let fs = FileSystem::new(
+            &mut storage,
+            FSOptions::new().with_open_inumber_table_size(2),
+        )
+        .unwrap();
+
+        let _subdir = fs.read_dir("/subdir").unwrap();
+        let _hidden = fs.read_dir("/hidden").unwrap();
+
+        assert_eq!(
+            fs.read_dir("/rootdir").unwrap_err(),
+            FSError::CollisionStoreError(InumberRegisterError::TableFull)
+        )
+    }
+
+    #[test_log]
+    #[apply(fs)]
+    fn check_store_duplicate_files(fs: FileSystem<MemoryDevice, DefaultClock>) {
+        let _empty = fs.get_ro_file("/empty").unwrap();
+
+        assert_eq!(
+            fs.get_ro_file("/empty").unwrap_err(),
+            FSError::CollisionStoreError(InumberRegisterError::InumberAlreadyRegistered)
+        )
+    }
+
+    #[test_log]
+    #[apply(fs)]
+    fn check_store_duplicate_dir(fs: FileSystem<MemoryDevice, DefaultClock>) {
+        let _rootdir = fs.read_dir("/rootdir").unwrap();
+
+        assert_eq!(
+            fs.read_dir("/rootdir").unwrap_err(),
+            FSError::CollisionStoreError(InumberRegisterError::InumberAlreadyRegistered)
+        )
     }
 }

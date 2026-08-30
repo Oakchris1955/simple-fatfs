@@ -12,6 +12,8 @@ use super::{
     PARENT_DIR_ENTRY_INDEX, PARENT_DIR_SFN, RawProperties,
 };
 use crate::block_io::prelude::*;
+#[cfg(feature = "collision_control")]
+use crate::log::global_log;
 use crate::path::{Path, path_consts};
 use crate::time::Clock;
 use crate::utils;
@@ -31,6 +33,9 @@ where
     // if `None`, we have exhausted the iterator
     entry_location_iter: Option<EntryLocationIter<'a, S, C>>,
 
+    #[cfg(feature = "collision_control")]
+    chain_start: EntryLocationUnit,
+
     pub(crate) fs: &'a FileSystem<S, C>,
 }
 
@@ -39,8 +44,20 @@ where
     S: BlockRead,
     C: Clock,
 {
-    pub(crate) fn new(fs: &'a FileSystem<S, C>, chain_start: EntryLocationUnit) -> Self {
-        Self {
+    /// # Errors
+    ///
+    /// If the `collision_control` feature is enabled and a related error occurs,
+    /// it will be raised here. Other than that, this won't error.
+    pub(crate) fn new(
+        fs: &'a FileSystem<S, C>,
+        chain_start: EntryLocationUnit,
+    ) -> FSResult<Self, S::Error> {
+        #[cfg(feature = "collision_control")]
+        if let EntryLocationUnit::DataCluster(cluster_index) = chain_start {
+            fs.collision_store.borrow_mut().register(cluster_index)?;
+        }
+
+        Ok(Self {
             lfn_buf: [0; CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES],
             lfn_buf_pos: CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES,
             lfn_checksum: None,
@@ -48,8 +65,11 @@ where
 
             entry_location_iter: Some(EntryLocationIter::new(EntryLocation::from(chain_start), fs)),
 
+            #[cfg(feature = "collision_control")]
+            chain_start,
+
             fs,
-        }
+        })
     }
 
     /// Attempt to find the `.` entry of the directory this [`ReadDirRaw`] corresponds to
@@ -242,6 +262,30 @@ where
 {
 }
 
+impl<S, C> Drop for ReadDirRaw<'_, S, C>
+where
+    S: BlockRead,
+    C: Clock,
+{
+    fn drop(&mut self) {
+        #[cfg(feature = "collision_control")]
+        if let EntryLocationUnit::DataCluster(cluster_index) = self.chain_start {
+            // nothing to do if this errors out while dropping
+            let _ = self
+                .fs
+                .collision_store
+                .borrow_mut()
+                .unregister(cluster_index)
+                .inspect_err(|_| {
+                    global_log::error!(
+                        "Errored while attempting to remove (already registered) inumber {}",
+                        cluster_index
+                    );
+                });
+        }
+    }
+}
+
 /// Iterator over the entries in a directory.
 ///
 /// The order in which this iterator returns entries can vary
@@ -268,15 +312,15 @@ where
         chain_start: &EntryLocationUnit,
         parent: P,
         internal: bool,
-    ) -> Self
+    ) -> FSResult<Self, S::Error>
     where
         P: AsRef<Path>,
     {
-        Self {
-            inner: ReadDirRaw::new(fs, *chain_start),
+        Ok(Self {
+            inner: ReadDirRaw::new(fs, *chain_start)?,
             parent: parent.as_ref().into(),
             internal,
-        }
+        })
     }
 }
 

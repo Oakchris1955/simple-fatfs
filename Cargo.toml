@@ -36,6 +36,8 @@ log = ["dep:log"]
 bloom = ["dep:siphasher", "dep:libm"]
 # 64-bit logical block addressing
 lba64 = []
+# read-write file/directory collision control
+collision_control = []
 # embedded-storage block IO translators
 embedded_storage_translator = ["dep:embedded-storage"]
 codepage = []
@@ -71,7 +73,11 @@ test-log = "0.2.16"
 [package.metadata.cargo-fc]
 exclude_feature_sets = [["log", "defmt"]]
 
+include_features = ["collision_control"]
+
 only_features = ["std", "defmt", "log", "bloom", "lba64"]
+
+include_feature_sets = [[]]
 
 [package.metadata.cargo-fc.target.'cfg(target_os = "none")']
 exclude_features = { add = ["std"] }
